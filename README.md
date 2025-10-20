@@ -16,6 +16,24 @@ A high-performance terminal UI for monitoring NEAR Protocol blockchain transacti
 
 ### New in v0.3.0
 - **Function Call Args Decoding**: Three-tier decoding strategy (JSON → Text → Binary) with auto-parsing of nested JSON strings
+- **Smart Block Filtering**: Blocks panel automatically shows only blocks with matching transactions when filter is active
+  - Shows filtered count: "Blocks (12 / 100)" - 12 have matches out of 100 total
+  - Transactions panel shows: "Txs (0 / 5)" when filter hides some transactions
+  - Navigation (Up/Down arrows) follows filtered list for stable, predictable selection
+  - Clear visual feedback prevents confusion about missing transactions
+- **Auto-Lock to Matching Blocks**: First block with matching transactions automatically locks for stable viewing
+  - Block stays highlighted and stable - won't jump to newer arrivals while you're viewing
+  - Navigate with Up/Down arrows - immediate response, no lag
+  - Press `Home` in blocks pane to return to auto-follow mode (tracks newest matching block)
+- **Archival RPC Support**: Navigate unlimited blocks backward through blockchain history
+  - Configure `ARCHIVAL_RPC_URL` to enable on-demand historical block fetching
+  - Loading state shows "⏳ Loading block #..." during 1-2 second fetch
+  - Fetched blocks cached automatically for seamless navigation
+  - Works with FastNEAR archival endpoints
+- **Context-Aware Block Caching**: Navigate ±12 blocks around selection even after aging out of 100-block buffer
+  - Gray visual indicator for unavailable blocks
+  - "Blocks (cached)" title when viewing aged-out blocks
+  - Left arrow (←) returns to recent blocks
 - **Filter Bar**: Filter transactions by account, action type, method name, or free text
 - **SQLite History**: Non-blocking persistence of blocks and transactions to SQLite (off main thread)
 - **Owned Accounts Awareness**: Automatically detect your NEAR accounts from credentials files
@@ -67,9 +85,10 @@ SOURCE=rpc NEAR_NODE_URL=https://rpc.mainnet.near.org/ cargo run
 
 ### Navigation
 - `Tab` / `Shift+Tab` - Switch between panes
-- `↑ / ↓` - Navigate lists or scroll details
+- `↑ / ↓` - Navigate lists or scroll details (immediate response, no lag)
 - `PgUp / PgDn` - Page up/down in details pane
-- `Home / End` - Jump to top/bottom in details pane
+- `Home` - In blocks pane: return to auto-follow mode (track newest matching block); Other panes: jump to top
+- `End` - Jump to bottom in details pane
 - `Enter` - Select transaction and view details
 
 ### View Controls
@@ -123,6 +142,7 @@ This prevents mainnet/testnet mismatches when using WebSocket mode.
 ```bash
 NEAR_NODE_URL=https://rpc.testnet.fastnear.com/
 FASTNEAR_AUTH_TOKEN=xxx                     # Bearer token for authenticated fastnear API access (recommended)
+ARCHIVAL_RPC_URL=https://archival-rpc.mainnet.fastnear.com  # Archival endpoint for historical blocks (optional)
 POLL_INTERVAL_MS=1000                        # Poll frequency (default 1s)
 POLL_MAX_CATCHUP=5                          # Max blocks per poll (prevents cascade)
 POLL_CHUNK_CONCURRENCY=4                    # Parallel chunk fetches
@@ -131,6 +151,8 @@ RPC_RETRIES=2                               # Retry attempts
 ```
 
 **FastNEAR Authentication**: To avoid rate limiting (429 errors), get an API token from [fastnear.com](https://fastnear.com) and set `FASTNEAR_AUTH_TOKEN`. Authenticated requests have significantly higher rate limits.
+
+**Archival RPC**: Set `ARCHIVAL_RPC_URL` to enable unlimited backward navigation through blockchain history. When you navigate beyond the rolling 100-block buffer and ±12 block cache, Ratacat automatically fetches historical blocks from the archival endpoint. Requires `FASTNEAR_AUTH_TOKEN` for best performance.
 
 ### UI Configuration
 ```bash
@@ -157,6 +179,16 @@ Ratacat automatically watches your NEAR CLI credentials directory for account fi
 - Updates in real-time when you add/remove credentials
 
 **No setup required** - works automatically if you have NEAR CLI credentials at `~/.near-credentials/<network>/*.json`
+
+### Account Filtering Configuration
+```bash
+WATCH_ACCOUNTS=intents.near,alice.near      # Comma-separated list of accounts to watch (simple filtering)
+DEFAULT_FILTER=acct:alice.near method:swap  # Advanced filter syntax (only used if WATCH_ACCOUNTS not set)
+```
+
+**Simple filtering with WATCH_ACCOUNTS**: Just list account names separated by commas. Ratacat will automatically filter to show only transactions to/from these accounts. Takes precedence over `DEFAULT_FILTER`.
+
+**Advanced filtering with DEFAULT_FILTER**: Use full filter syntax for complex queries (e.g., `signer:alice.near receiver:bob.near action:FunctionCall`). See Filter Syntax section below for details.
 
 ## Architecture
 
@@ -192,10 +224,14 @@ Ratacat automatically watches your NEAR CLI credentials directory for account fi
 ### Key Components
 - **`source_ws.rs`**: WebSocket client for Node breakout server
 - **`source_rpc.rs`**: NEAR RPC poller with catch-up logic
+- **`archival_fetch.rs`**: Background archival RPC fetcher for historical blocks
 - **`app.rs`**: State management and event handling
 - **`ui.rs`**: Ratatui rendering with 3-pane layout
 - **`config.rs`**: Environment-based configuration
 - **`types.rs`**: Blockchain data models
+- **`filter.rs`**: Query parser and transaction matcher
+- **`history.rs`**: SQLite persistence and search
+- **`marks.rs`**: Jump marks system
 
 ## Design Principles
 
@@ -212,12 +248,21 @@ Ratacat automatically watches your NEAR CLI credentials directory for account fi
 3. **Press `v` to toggle views** - PRETTY for human reading, RAW for debugging
 4. **Adjust FPS with Ctrl+O** - lower FPS if CPU-constrained
 5. **Copy with `c`** - paste transaction details anywhere (shows toast confirmation)
-6. **Filter transactions** - Press `/` and use syntax like `acct:alice.near action:FunctionCall method:transfer`
-7. **Track your accounts** - Owned transactions show in **bold yellow** with star badges on blocks
-8. **Quick owned-only view** - Press `Ctrl+U` to see only your transactions
-9. **Bookmark important moments** - Use `m` to set marks, `Ctrl+P` to pin them permanently
-10. **Search history** - Press `Ctrl+F` to search all persisted transactions by account, method, or hash
-11. **Details pane gets 70% height** - Optimized layout gives more space to transaction details
+6. **Stable block selection** - First matching block automatically locks for stable viewing
+   - Block stays highlighted and won't jump to newer arrivals
+   - Tab to details pane, scroll around - block remains stable
+   - Press `Home` in blocks pane to return to auto-follow mode
+7. **Filter transactions** - Press `/` and use syntax like `acct:alice.near action:FunctionCall method:transfer`
+   - Blocks panel automatically shows only blocks with matching transactions
+   - Shows count like "Blocks (5 / 100)" - 5 blocks match your filter
+8. **Track your accounts** - Owned transactions show in **bold yellow** with star badges on blocks
+9. **Quick owned-only view** - Press `Ctrl+U` to see only your transactions
+10. **Bookmark important moments** - Use `m` to set marks, `Ctrl+P` to pin them permanently
+11. **Search history** - Press `Ctrl+F` to search all persisted transactions by account, method, or hash
+12. **Navigate through history** - Enable `ARCHIVAL_RPC_URL` to explore unlimited blocks backward
+    - Navigate beyond cache and Ratacat fetches historical blocks automatically
+    - Loading state shows progress during 1-2 second fetch
+13. **Details pane gets 70% height** - Optimized layout gives more space to transaction details
 
 ## Filter Syntax
 
@@ -290,6 +335,11 @@ cargo run
 - **v0.3.0** (Current)
   - Function call args decoding with three-tier fallback (JSON → Text → Binary)
   - Auto-parsing of nested JSON-serialized strings
+  - Smart block filtering: blocks panel shows only blocks with matching transactions when filter active
+  - Auto-lock to matching blocks: first matching block locks automatically for stable viewing
+  - Immediate navigation response: Up/Down arrows navigate instantly without lag
+  - Archival RPC support for unlimited backward navigation through blockchain history
+  - Context-aware block caching: ±12 blocks preserved around selection after aging out
   - Filter bar with powerful query syntax
   - SQLite history persistence and search
   - Jump marks system for bookmarking transactions
@@ -297,6 +347,7 @@ cargo run
   - 70/30 layout split for better details visibility
   - Smart scroll clamping and toast notifications
   - Dynamic UI chrome (collapsible filter bar and debug panel)
+  - Filtered count display: "Blocks (12 / 100)" and "Txs (0 / 5)" formats
 - **v0.2.0** - Blockchain viewer with WebSocket + RPC sources, view modes, scrolling
 - **v0.1.0** - Initial todo list prototype (pre-pivot)
 

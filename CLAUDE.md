@@ -7,38 +7,39 @@
 Ratacat follows a clean FPS-capped rendering architecture with async data sources and off-thread persistence:
 
 ```
-┌─────────────────────────────────────────────────┐
-│           NEAR Blockchain Data                  │
-│  ┌──────────────┐      ┌──────────────────┐    │
-│  │  WebSocket   │  OR  │   RPC Polling    │    │
-│  │  (Node side) │      │  (Direct NEAR)   │    │
-│  └──────┬───────┘      └────────┬─────────┘    │
-│         │                       │               │
-│         └───────────┬───────────┘               │
-│                     ▼                            │
-│            ┌─────────────────┐                  │
-│            │  Event Channel  │                  │
-│            └────────┬────────┘                  │
-│                     ▼                            │
-│            ┌─────────────────┐                  │
-│            │   App State     │                  │
-│            │  (filter/search)│                  │
-│            └────────┬────────┘                  │
-│                     ▼                            │
-│   ┌─────────────────────────────────────────┐  │
-│   │    3-Pane TUI + Filter + Search         │  │
-│   │  ┌──────┐  ┌──────┐  ┌────────────┐   │  │
-│   │  │Blocks│→ │Tx IDs│→ │  Details   │   │  │
-│   │  └──────┘  └──────┘  │(PRETTY/RAW)│   │  │
-│   │                       └────────────┘   │  │
-│   └─────────────────────────────────────────┘  │
-│                     ▲                            │
-│                     │                            │
-│            ┌─────────────────┐                  │
-│            │ SQLite History  │                  │
-│            │ (off-thread)    │                  │
-│            └─────────────────┘                  │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│              NEAR Blockchain Data                        │
+│  ┌──────────────┐  ┌──────────────────┐  ┌────────────┐│
+│  │  WebSocket   │OR│   RPC Polling    │  │ Archival   ││
+│  │  (Node side) │  │  (Direct NEAR)   │  │ RPC Fetch  ││
+│  └──────┬───────┘  └────────┬─────────┘  └─────┬──────┘│
+│         │                   │                    │       │
+│         └───────────┬───────┴────────────────────┘       │
+│                     ▼                                     │
+│            ┌─────────────────┐                           │
+│            │  Event Channel  │                           │
+│            └────────┬────────┘                           │
+│                     ▼                                     │
+│            ┌─────────────────┐                           │
+│            │   App State     │                           │
+│            │  (filter/search)│                           │
+│            │  (archival req) │                           │
+│            └────────┬────────┘                           │
+│                     ▼                                     │
+│   ┌─────────────────────────────────────────┐           │
+│   │    3-Pane TUI + Filter + Search         │           │
+│   │  ┌──────┐  ┌──────┐  ┌────────────┐   │           │
+│   │  │Blocks│→ │Tx IDs│→ │  Details   │   │           │
+│   │  └──────┘  └──────┘  │(PRETTY/RAW)│   │           │
+│   │                       └────────────┘   │           │
+│   └─────────────────────────────────────────┘           │
+│                     ▲                                     │
+│                     │                                     │
+│            ┌─────────────────┐                           │
+│            │ SQLite History  │                           │
+│            │ (off-thread)    │                           │
+│            └─────────────────┘                           │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ## Key Design Principles
@@ -64,6 +65,13 @@ Ratacat follows a clean FPS-capped rendering architecture with async data source
 - Concurrent chunk fetching (default 4 parallel requests)
 - Ideal for production monitoring
 
+**Archival Fetch** (`archival_fetch.rs`):
+- Background task for fetching historical blocks beyond the rolling buffer
+- On-demand fetching via channel communication
+- Reuses existing `fetch_block_with_txs()` RPC infrastructure
+- Enables unlimited backward navigation through blockchain history
+- Optional: only runs if `ARCHIVAL_RPC_URL` is configured
+
 ### Application State (`src/app.rs`)
 
 ```rust
@@ -78,6 +86,10 @@ pub struct App {
     // Block caching (preserves ±12 blocks around selection after aging out)
     cached_blocks: HashMap<u64, BlockRow>,
     cached_block_order: Vec<u64>,   // LRU tracking
+
+    // Archival fetch state (for fetching historical blocks beyond cache)
+    loading_block: Option<u64>,                                   // Block height currently being fetched
+    archival_fetch_tx: Option<UnboundedSender<u64>>,              // Channel to request archival fetches
 
     // Filter state
     filter_query: String,
@@ -236,6 +248,17 @@ RENDER_FPS=30
 - `RPC_RETRIES` / `--rpc-retries`: Retry attempts (0-10)
   - Default: `2`
 
+#### Archival RPC (for historical block fetching)
+- `ARCHIVAL_RPC_URL` / `--archival-rpc-url`: Archival RPC endpoint
+  - Optional: enables unlimited backward navigation through blockchain history
+  - Fetches historical blocks on-demand when navigating beyond cache
+  - Requires `FASTNEAR_AUTH_TOKEN` for best performance
+  - Examples:
+    - FastNEAR Mainnet: `https://archival-rpc.mainnet.fastnear.com`
+    - FastNEAR Testnet: `https://archival-rpc.testnet.fastnear.com`
+  - Loading state shows "⏳ Loading block #..." during 1-2 second fetch
+  - Fetched blocks are cached automatically for seamless navigation
+
 #### UI Performance
 - `RENDER_FPS` / `--render-fps`: Target FPS (1-120)
   - Default: `30`
@@ -388,6 +411,7 @@ ratacat/
 │   ├── types.rs         # Data models
 │   ├── source_ws.rs     # WebSocket client
 │   ├── source_rpc.rs    # NEAR RPC poller
+│   ├── archival_fetch.rs # Background archival RPC fetcher
 │   ├── filter.rs        # Query parser + matcher
 │   ├── history.rs       # SQLite persistence + search
 │   ├── json_pretty.rs   # ANSI-colored JSON
@@ -407,6 +431,38 @@ ratacat/
   - Auto-follow mode (`Home` key): Always shows newest block (index 0)
   - Manual mode (any navigation): Locks to specific block height, stable across new arrivals
   - Intelligent transaction selection: Resets on manual block change, preserves during auto-follow
+
+### Smart Block Filtering
+- **Problem**: When filtering by account (e.g., `WATCH_ACCOUNTS=intents.near`), blocks panel showed ALL blocks including those with no matching transactions, causing confusion
+- **Solution**: Blocks panel automatically shows only blocks with matching transactions when filter is active
+- **Key Features**:
+  - Filtered count display: "Blocks (12 / 100)" shows 12 blocks have matches out of 100 total
+  - Transactions panel shows: "Txs (0 / 5)" when filter hides some transactions
+  - **Navigation follows filtered list**: Up/Down arrows navigate only through blocks with matching transactions
+  - Clear visual feedback prevents confusion about missing blocks
+  - No filter active → show all blocks (default behavior)
+- **Implementation**:
+  - `count_matching_txs()`: Counts transactions matching filter in a block
+  - `filtered_blocks()`: Returns only blocks with ≥1 matching transaction
+  - `get_navigation_list()`: Returns appropriate block list based on filter state (critical for stable navigation)
+- **Critical bug fix**: Navigation used to navigate through full block list while UI showed filtered list, causing unpredictable selection jumps. Now navigation list matches display list.
+
+### Archival RPC Support
+- **Problem**: Users could only navigate through 100 recent blocks + ±12 cached blocks, couldn't explore deep blockchain history
+- **Solution**: On-demand fetching of historical blocks from archival RPC endpoint
+- **Key Features**:
+  - Unlimited backward navigation through entire blockchain history
+  - Loading state: "⏳ Loading block #... from archival..." during 1-2 second fetch
+  - Automatic caching of fetched blocks for seamless re-navigation
+  - Optional: only enabled if `ARCHIVAL_RPC_URL` is configured
+  - Works with FastNEAR archival endpoints (requires `FASTNEAR_AUTH_TOKEN` for best performance)
+- **Implementation**:
+  - `archival_fetch.rs`: Background async task listening on channel for block height requests
+  - Reuses existing `fetch_block_with_txs()` RPC infrastructure
+  - Channel-based communication: `UnboundedSender<u64>` for requests
+  - App tracks loading state in `loading_block: Option<u64>`
+  - Navigation triggers archival fetch when navigating to unavailable blocks
+  - Fetched blocks sent via existing `AppEvent::NewBlock` channel
 
 ### Function Call Arguments Decoding
 - **Three-tier decoding strategy**: JSON → Printable Text → Binary Hex Dump
