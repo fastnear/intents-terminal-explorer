@@ -1,0 +1,305 @@
+# Ratacat - NEAR Blockchain Transaction Viewer
+
+A high-performance terminal UI for monitoring NEAR Protocol blockchain transactions in real-time. Built with Ratatui and Rust.
+
+## Features
+
+### Core Capabilities
+- **3-Pane Dashboard**: Blocks → Transaction Hashes → Transaction Details
+- **Dual Data Sources**:
+  - WebSocket: Real-time updates from your Node breakout server
+  - RPC Polling: Direct NEAR RPC with smart catch-up limits
+- **View Modes**: Toggle between PRETTY (ANSI-colored) and RAW (JSON) views with `v`
+- **Smooth Scrolling**: Navigate large transaction details with arrow keys, PgUp/PgDn, Home/End
+- **FPS Control**: Runtime FPS adjustment with Ctrl+O (default 30 FPS)
+- **Clipboard Integration**: Copy transaction details with `c`
+
+### New in v0.3.0
+- **Function Call Args Decoding**: Three-tier decoding strategy (JSON → Text → Binary) with auto-parsing of nested JSON strings
+- **Filter Bar**: Filter transactions by account, action type, method name, or free text
+- **SQLite History**: Non-blocking persistence of blocks and transactions to SQLite (off main thread)
+- **Owned Accounts Awareness**: Automatically detect your NEAR accounts from credentials files
+  - Star badges on blocks showing owned transaction count
+  - Bold yellow highlighting of owned transactions
+  - `Ctrl+U` to filter for owned-only transactions
+  - Zero overhead when no credentials present
+- **Jump Marks**: Bookmark important blocks/transactions with `m`, pin with `Ctrl+P`, jump with `'`
+- **History Search**: Full-text search across all persisted transactions with `Ctrl+F`
+- **70/30 Layout Split**: Details pane gets 70% of vertical space (up from 50%) for better readability
+- **Smart Scroll Clamping**: Scrolling stops at actual content end instead of continuing indefinitely
+- **Toast Notifications**: 2-second visual feedback when copying content ("Copied block info", "Copied tx hash", "Copied details")
+
+### Performance
+- **Coalesced Rendering**: FPS-capped to prevent UI thrashing
+- **Non-blocking I/O**: Async data fetching keeps UI responsive
+- **Catch-up Limits**: Prevents cascade failures during network delays
+- **Soft-wrapped Tokens**: Long base58/base64 strings wrapped cleanly
+
+## Installation
+
+```bash
+cargo build --release
+./target/release/ratacat
+```
+
+## Quick Start
+
+### WebSocket Mode (Recommended for Dev)
+```bash
+# Terminal 1: Start your Node server with WebSocket breakout
+cd ../node
+npm run dev
+
+# Terminal 2: Run Ratacat
+SOURCE=ws cargo run
+```
+
+### RPC Mode (Direct NEAR Connection)
+```bash
+# Polls NEAR testnet directly
+SOURCE=rpc NEAR_NODE_URL=https://rpc.testnet.fastnear.com/ cargo run
+
+# Or mainnet
+SOURCE=rpc NEAR_NODE_URL=https://rpc.mainnet.near.org/ cargo run
+```
+
+## Keyboard Shortcuts
+
+### Navigation
+- `Tab` / `Shift+Tab` - Switch between panes
+- `↑ / ↓` - Navigate lists or scroll details
+- `PgUp / PgDn` - Page up/down in details pane
+- `Home / End` - Jump to top/bottom in details pane
+- `Enter` - Select transaction and view details
+
+### View Controls
+- `v` - Toggle between PRETTY (colored) and RAW (JSON) views
+- `Ctrl+O` - Cycle FPS (20 → 30 → 60)
+- `c` - Copy current details to clipboard (shows toast notification)
+- `q` or `Ctrl+C` - Quit
+
+### Filter Controls
+- `/` or `f` - Enter filter mode
+- Type to filter transactions
+- `Enter` - Apply filter
+- `Esc` - Clear filter and exit filter mode
+- `Ctrl+U` - Toggle owned-only filter (show only your transactions)
+
+### Jump Marks & Search
+- `m` - Set mark at current location (auto-labeled)
+- `Ctrl+P` - Pin/unpin mark at current location
+- `M` (Shift+M) - Open marks overlay
+- `'` (apostrophe) - Jump to mark (type label)
+- `[` / `]` - Jump to previous/next mark
+- `d` (in marks overlay) - Delete selected mark
+- `Ctrl+F` - Open history search overlay
+
+## Configuration
+
+All configuration is via environment variables. See `.env.example` for full options.
+
+### Data Source
+```bash
+SOURCE=ws                                    # Use WebSocket (default)
+SOURCE=rpc                                   # Use NEAR RPC polling
+WS_URL=ws://127.0.0.1:63736                 # WebSocket endpoint
+WS_FETCH_BLOCKS=true                        # Hybrid mode: fetch full block data via RPC (default: true)
+```
+
+**WebSocket Modes:**
+- `WS_FETCH_BLOCKS=true` (default): **Hybrid mode** - WS notifications trigger RPC fetches for complete block data with transactions
+- `WS_FETCH_BLOCKS=false`: **Legacy mode** - WS only updates details pane, blocks show "0 txs"
+
+Hybrid mode gives the best of both worlds: real-time push notifications + complete transaction data.
+
+**Network Auto-Detection:**
+If `NEAR_NODE_URL` is not explicitly set, Ratacat automatically detects the network (mainnet vs testnet) from block heights:
+- Block heights > 100M → mainnet (uses `https://rpc.mainnet.near.org`)
+- Block heights < 100M → testnet (uses `https://rpc.testnet.fastnear.com`)
+
+This prevents mainnet/testnet mismatches when using WebSocket mode.
+
+### RPC Configuration
+```bash
+NEAR_NODE_URL=https://rpc.testnet.fastnear.com/
+FASTNEAR_AUTH_TOKEN=xxx                     # Bearer token for authenticated fastnear API access (recommended)
+POLL_INTERVAL_MS=1000                        # Poll frequency (default 1s)
+POLL_MAX_CATCHUP=5                          # Max blocks per poll (prevents cascade)
+POLL_CHUNK_CONCURRENCY=4                    # Parallel chunk fetches
+RPC_TIMEOUT_MS=8000                         # Request timeout
+RPC_RETRIES=2                               # Retry attempts
+```
+
+**FastNEAR Authentication**: To avoid rate limiting (429 errors), get an API token from [fastnear.com](https://fastnear.com) and set `FASTNEAR_AUTH_TOKEN`. Authenticated requests have significantly higher rate limits.
+
+### UI Configuration
+```bash
+RENDER_FPS=30                               # Target FPS (1-120)
+RENDER_FPS_CHOICES=20,30,60                 # Ctrl+O cycle options
+KEEP_BLOCKS=100                             # In-memory block limit
+```
+
+### History Configuration
+```bash
+SQLITE_DB_PATH=./ratacat_history.db         # SQLite database path for persistence
+```
+
+### Owned Accounts Configuration
+```bash
+NEAR_CREDENTIALS_DIR=~/.near-credentials    # Path to NEAR CLI credentials directory (default: ~/.near-credentials)
+NEAR_NETWORK=mainnet                        # Network to watch: mainnet or testnet (default: mainnet)
+```
+
+Ratacat automatically watches your NEAR CLI credentials directory for account files. When detected, it:
+- Shows star badges on blocks with your transactions (e.g., "5 txs (3 owned)")
+- Highlights your transactions in **bold yellow**
+- Enables `Ctrl+U` to filter for owned-only view
+- Updates in real-time when you add/remove credentials
+
+**No setup required** - works automatically if you have NEAR CLI credentials at `~/.near-credentials/<network>/*.json`
+
+## Architecture
+
+### Data Flow
+```
+┌─────────────────────────────────────────────────┐
+│           NEAR Blockchain Data                  │
+│  ┌──────────────┐      ┌──────────────────┐    │
+│  │  WebSocket   │  OR  │   RPC Polling    │    │
+│  │  (Node side) │      │  (Direct NEAR)   │    │
+│  └──────┬───────┘      └────────┬─────────┘    │
+│         │                       │               │
+│         └───────────┬───────────┘               │
+│                     ▼                            │
+│            ┌─────────────────┐                  │
+│            │  Event Channel  │                  │
+│            └────────┬────────┘                  │
+│                     ▼                            │
+│            ┌─────────────────┐                  │
+│            │   App State     │                  │
+│            └────────┬────────┘                  │
+│                     ▼                            │
+│   ┌─────────────────────────────────────────┐  │
+│   │         3-Pane TUI Layout               │  │
+│   │  ┌──────┐  ┌──────┐  ┌────────────┐   │  │
+│   │  │Blocks│→ │Tx IDs│→ │  Details   │   │  │
+│   │  └──────┘  └──────┘  │(PRETTY/RAW)│   │  │
+│   │                       └────────────┘   │  │
+│   └─────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────┘
+```
+
+### Key Components
+- **`source_ws.rs`**: WebSocket client for Node breakout server
+- **`source_rpc.rs`**: NEAR RPC poller with catch-up logic
+- **`app.rs`**: State management and event handling
+- **`ui.rs`**: Ratatui rendering with 3-pane layout
+- **`config.rs`**: Environment-based configuration
+- **`types.rs`**: Blockchain data models
+
+## Design Principles
+
+1. **FPS-Capped Rendering**: Coalesced draws prevent UI thrashing
+2. **Non-Overlapping Polls**: RPC mode uses catch-up limits to prevent cascades
+3. **Soft-Wrapped Tokens**: ZWSP insertion for clean line breaking
+4. **Human-Readable First**: PRETTY mode with ANSI colors for quick scanning
+5. **Async Everything**: Tokio-based async I/O keeps UI responsive
+
+## Tips
+
+1. **Use WebSocket mode during development** - connects to your existing Node server
+2. **Use RPC mode for production monitoring** - direct NEAR connection, no middleman
+3. **Press `v` to toggle views** - PRETTY for human reading, RAW for debugging
+4. **Adjust FPS with Ctrl+O** - lower FPS if CPU-constrained
+5. **Copy with `c`** - paste transaction details anywhere (shows toast confirmation)
+6. **Filter transactions** - Press `/` and use syntax like `acct:alice.near action:FunctionCall method:transfer`
+7. **Track your accounts** - Owned transactions show in **bold yellow** with star badges on blocks
+8. **Quick owned-only view** - Press `Ctrl+U` to see only your transactions
+9. **Bookmark important moments** - Use `m` to set marks, `Ctrl+P` to pin them permanently
+10. **Search history** - Press `Ctrl+F` to search all persisted transactions by account, method, or hash
+11. **Details pane gets 70% height** - Optimized layout gives more space to transaction details
+
+## Filter Syntax
+
+The filter bar supports powerful query syntax:
+
+### Field Filters
+```
+acct:alice.near              # Match signer OR receiver
+signer:bob.near              # Match signer only
+receiver:contract.near       # Match receiver only
+action:FunctionCall          # Match action type
+method:ft_transfer           # Match FunctionCall method name
+raw:some_text                # Search in raw JSON
+```
+
+### Free Text
+```
+alice                        # Match anywhere in signer/receiver/hash/methods
+```
+
+### Combined Filters
+```
+acct:alice.near action:Transfer                    # Alice sending tokens
+signer:bob.near method:ft_transfer                 # Bob calling ft_transfer
+action:FunctionCall method:transfer alice          # Function calls with "transfer" and "alice"
+```
+
+Filters use AND logic (all conditions must match). Within each field type, OR logic applies (any value matches).
+
+## Known Limitations
+
+### Plugin System (Disabled)
+The plugin system is temporarily disabled due to lifetime compilation issues. Once fixed, it will enable:
+- Validator monitoring
+- Transaction pattern analysis
+- Custom alerts and filters
+- External tool integrations
+
+### Copy Functionality
+Current implementation copies pane content as-is. Future enhancement planned for csli-dashboard parity:
+- **Pane 0 (Blocks)**: Export all transactions in block with network/height/hash metadata
+- **Pane 1 (Tx Hashes)**: Dual format with raw chain data + human-readable decoded version
+- **Pane 2 (Details)**: Current implementation (human-readable only)
+- **Display vs Copy**: Show truncated data in UI, copy full data (complete hashes, full base64)
+
+## Building from Source
+
+```bash
+git clone <repo>
+cd ratacat
+cargo run
+```
+
+## Troubleshooting
+
+### "Connection refused" with SOURCE=ws
+- Ensure your Node WebSocket server is running on port 63736
+- Check WS_URL matches your Node configuration
+
+### High CPU usage
+- Lower FPS: `RENDER_FPS=20 cargo run`
+- Reduce block history: `KEEP_BLOCKS=50 cargo run`
+
+### RPC timeouts
+- Increase timeout: `RPC_TIMEOUT_MS=15000 cargo run`
+- Reduce concurrency: `POLL_CHUNK_CONCURRENCY=2 cargo run`
+
+## Version History
+
+- **v0.3.0** (Current)
+  - Function call args decoding with three-tier fallback (JSON → Text → Binary)
+  - Auto-parsing of nested JSON-serialized strings
+  - Filter bar with powerful query syntax
+  - SQLite history persistence and search
+  - Jump marks system for bookmarking transactions
+  - Owned accounts awareness with credential file watching
+  - 70/30 layout split for better details visibility
+  - Smart scroll clamping and toast notifications
+  - Dynamic UI chrome (collapsible filter bar and debug panel)
+- **v0.2.0** - Blockchain viewer with WebSocket + RPC sources, view modes, scrolling
+- **v0.1.0** - Initial todo list prototype (pre-pivot)
+
+---
+
+Built using Ratatui, Tokio, and Rust. Designed for NEAR Protocol monitoring.

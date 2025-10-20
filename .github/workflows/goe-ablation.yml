@@ -1,0 +1,145 @@
+name: GOE ablation check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Gate mode: warn or strict"
+        required: false
+        default: "warn"
+
+jobs:
+  ablation:
+    runs-on: ubuntu-latest
+    env:
+      GOECHECK_MODE: ${{ github.event.inputs.mode || 'warn' }}   # warn | strict
+      RESULTS_DIR: results/json
+      EVALS_DIR: results/evals
+      DENSITIES: "100,80,60,40,20,10,5"
+      BOOTSTRAP: "2000"
+      SEED: "42"
+      TRIM: "0.10"
+      S0: "0.1"
+
+      # Baseline GOE gates
+      BASELINE_R_MIN: "0.50"
+      BASELINE_SMALLS_MAX: "0.02"
+
+      # Component vs zero-mode sanity (set EDGES_FILE to enable)
+      COMP_MODE: ${{ github.event.inputs.mode || 'warn' }}       # warn | strict
+      EDGES_FILE: ""              # e.g., data/edges.csv (leave empty to skip)
+      NODES_FILE: ""              # optional
+      EDGES_SKIP_HEADER: "false"  # true|false
+      EDGES_DIRECTED: "false"     # true|false
+      EIG_BASELINE_FILE: results/evals/100.txt
+      EIG_ZERO_EPS: "1e-12"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build goecheck
+        run: cargo build --release --bin goecheck
+
+      - name: Build compcount
+        run: cargo build --release --bin compcount
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run ablation sweep
+        run: |
+          node scripts/run-ablation.js \
+            --eval-dir "$EVALS_DIR" \
+            --densities "$DENSITIES" \
+            --bootstrap "$BOOTSTRAP" \
+            --seed "$SEED" \
+            --trim "$TRIM" \
+            --s0 "$S0" \
+            --results "$RESULTS_DIR"
+
+      - name: Gate baseline and compute summary
+        run: |
+          node scripts/ci-check-goe.js \
+            --results "$RESULTS_DIR" \
+            --mode "$GOECHECK_MODE" \
+            --baseline-r-min "$BASELINE_R_MIN" \
+            --baseline-smalls-max "$BASELINE_SMALLS_MAX"
+
+      - name: Components vs zero-modes sanity
+        run: |
+          node scripts/check-components.js \
+            --edges "$EDGES_FILE" \
+            --nodes "$NODES_FILE" \
+            --evals "$EIG_BASELINE_FILE" \
+            --eps "$EIG_ZERO_EPS" \
+            --mode "$COMP_MODE"
+
+      - name: Build HTML report
+        run: node scripts/make-ablation-report.js --results "$RESULTS_DIR" --out results/ablation-report.html
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ablation-report
+          path: |
+            results/json/*.json
+            results/ablation-report.html
+            results/components.json
+
+      - name: Comment on PR
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const summaryPath = path.join('results','summary.json');
+            const compPath = path.join('results','components.json');
+            if (!fs.existsSync(summaryPath)) {
+              core.warning('No summary.json found; skipping PR comment.');
+              return;
+            }
+            const s = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
+            const rows = s.rows.map(r => `| ${r.density}% | ${r.n_spacings} | ${r.r_mean.toFixed(6)} | ${r.small_s_mass.toFixed(6)} | ${r.ks_goe.toFixed(4)} | ${r.ks_poisson.toFixed(4)} |`).join('\n');
+            let comp = null;
+            if (fs.existsSync(compPath)) comp = JSON.parse(fs.readFileSync(compPath, 'utf8'));
+            const compLine = comp && !comp.skipped
+              ? `\n- **Components vs zero-modes:** ${comp.n_components} vs ${comp.zero_modes} → ${comp.ok ? 'OK' : 'MISMATCH'} (ε=${comp.eps})`
+              : `\n- Components check: _skipped_`;
+            const md = `
+**GOE ablation summary**
+
+- **Baseline (100%) r̄:** ${s.baseline.r_mean.toFixed(6)}; **small-s:** ${s.baseline.small_s_mass.toFixed(6)}
+- **Effect fraction (r̄ range vs GOE↔Poisson gap):** ${(s.effect_fraction*100).toFixed(1)}%
+- **Mode:** ${s.mode.toUpperCase()} ${s.passed ? '✅' : '❌'}${compLine}
+
+| Density | N(spacings) | r̄ | small-s (s<${s.s0}) | KS(GOE) | KS(Poisson) |
+|---:|---:|---:|---:|---:|---:|
+${rows}
+
+_Artifact:_ ablation-report (HTML + JSON).`;
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: md
+            });

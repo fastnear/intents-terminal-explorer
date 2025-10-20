@@ -1,0 +1,32 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo
+Cargo.lock
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Application data
+ratacat_history.db
+ratacat_history.db-shm
+ratacat_history.db-wal
+
+# Results and artifacts
+/results/
+
+# Debug logs
+ratacat_debug.log
