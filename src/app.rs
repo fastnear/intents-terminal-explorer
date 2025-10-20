@@ -194,27 +194,37 @@ impl App {
         }
     }
 
-    /// Find the array index for a given block height (or newest if None)
+    /// Find the array index for a given block height
+    /// Returns None if height is None (auto-follow mode) or block not found
     fn find_block_index(&self, height: Option<u64>) -> Option<usize> {
         if self.blocks.is_empty() {
             return None;
         }
 
         match height {
-            None => Some(0),  // Auto-follow: always index 0 (newest)
+            None => None,  // Auto-follow mode: return None to trigger auto-follow logic in current_block()
             Some(h) => self.blocks.iter().position(|b| b.height == h),
         }
     }
 
     /// Get the currently selected block (fallback to cache if aged out of main buffer)
+    /// Filter-aware in auto-follow mode: returns first block with matching transactions
     fn current_block(&self) -> Option<&BlockRow> {
         if let Some(idx) = self.find_block_index(self.sel_block_height) {
+            // Manual mode: return block at specific height
             self.blocks.get(idx)
         } else if let Some(height) = self.sel_block_height {
             // Block not in main buffer, check cache
             self.cached_blocks.get(&height)
         } else {
-            None
+            // Auto-follow mode: respect filter
+            if filter::is_empty(&self.filter_compiled) && !self.owned_only_filter {
+                // No filter: return newest block
+                self.blocks.first()
+            } else {
+                // Filter active: return first block with matching transactions
+                self.blocks.iter().find(|b| self.count_matching_txs(b) > 0)
+            }
         }
     }
 
@@ -248,7 +258,8 @@ impl App {
 
         if filter::is_empty(&self.filter_compiled) && !self.owned_only_filter {
             // No filter active - return all blocks
-            let idx = self.find_block_index(self.sel_block_height);
+            let idx = self.find_block_index(self.sel_block_height)
+                .or_else(|| if !self.blocks.is_empty() { Some(0) } else { None });
             let refs: Vec<&BlockRow> = self.blocks.iter().collect();
             return (refs, idx, total);
         }
@@ -261,6 +272,7 @@ impl App {
         // Find selected block index in filtered list
         let sel_idx = if let Some(height) = self.sel_block_height {
             filtered.iter().position(|b| b.height == height)
+                .or_else(|| if !filtered.is_empty() { Some(0) } else { None })
         } else if !filtered.is_empty() {
             Some(0) // Auto-follow: select first filtered block (newest with matches)
         } else {
@@ -268,6 +280,21 @@ impl App {
         };
 
         (filtered, sel_idx, total)
+    }
+
+    /// Get the list of blocks to navigate through (respects current filter)
+    /// Returns Vec of heights in display order (newest first)
+    fn get_navigation_list(&self) -> Vec<u64> {
+        if filter::is_empty(&self.filter_compiled) && !self.owned_only_filter {
+            // No filter - navigate through all blocks
+            self.blocks.iter().map(|b| b.height).collect()
+        } else {
+            // Filter active - navigate only through blocks with matching transactions
+            self.blocks.iter()
+                .filter(|block| self.count_matching_txs(block) > 0)
+                .map(|b| b.height)
+                .collect()
+        }
     }
 
     /// Check if a specific block height is available (in buffer or cache)
@@ -482,12 +509,13 @@ impl App {
 
     /// Return to auto-follow mode (track newest block)
     pub fn return_to_auto_follow(&mut self) {
+        let old_height = self.sel_block_height;
         self.manual_block_nav = false;
         self.sel_block_height = None;  // None = auto-follow newest
         self.sel_tx = 0;  // Reset to first tx
         if !self.blocks.is_empty() {
             self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
-            self.log_debug("Returned to AUTO-FOLLOW mode (tracking newest)".into());
+            self.log_debug(format!("[USER_ACTION] Return to AUTO-FOLLOW mode (Home key pressed), was locked to height={:?}", old_height));
         }
     }
 
@@ -619,33 +647,57 @@ impl App {
     pub fn up(&mut self){
         match self.pane {
             0 => {  // Blocks pane: navigate to previous block (newer)
-                // Special case: if in auto-follow mode, first Up should lock to current block (not navigate yet)
-                if self.sel_block_height.is_none() && !self.blocks.is_empty() {
-                    // Lock to current block (index 0 = newest in auto-follow)
-                    let current_height = self.blocks[0].height;
-                    self.sel_block_height = Some(current_height);
-                    self.manual_block_nav = true;
-                    self.cache_block_with_context(current_height);  // Cache with ±12 context
-                    self.log_debug(format!("Blocks UP (first press) -> lock to current #{}, manual=true", current_height));
-                } else {
-                    // Already locked to a block, navigate to next newer block
-                    let current_idx = self.find_block_index(self.sel_block_height).unwrap_or(0);
+                self.log_debug(format!("[USER_NAV_UP] manual_nav={}, sel_height={:?}", self.manual_block_nav, self.sel_block_height));
+
+                // Get the navigation list (respects filter)
+                let nav_list = self.get_navigation_list();
+
+                if nav_list.is_empty() {
+                    return; // No blocks to navigate
+                }
+
+                // Ensure we have a locked selection (handle edge case of None)
+                let current_height = match self.sel_block_height {
+                    Some(h) => h,
+                    None => {
+                        // Edge case: not locked yet, lock to current and don't navigate
+                        // This shouldn't happen with auto-lock, but handle gracefully
+                        let h = nav_list[0];
+                        self.sel_block_height = Some(h);
+                        self.manual_block_nav = true;
+                        self.cache_block_with_context(h);
+                        self.log_debug(format!("[USER_NAV_UP] edge case lock to #{}", h));
+                        return;
+                    }
+                };
+
+                // Navigate to next newer block in navigation list
+                if let Some(current_idx) = nav_list.iter().position(|&h| h == current_height) {
                     if current_idx > 0 {
-                        let new_height = self.blocks[current_idx - 1].height;
+                        let new_height = nav_list[current_idx - 1];
                         // Only navigate if target block is available
                         if self.is_block_available(new_height) {
                             self.sel_block_height = Some(new_height);
                             self.manual_block_nav = true;
                             self.details_scroll = 0;
-                            self.cache_block_with_context(new_height);  // Cache with ±12 context
-                            self.validate_and_refresh_tx(BlockChangeReason::ManualNav);  // Reset tx to first
-                            self.log_debug(format!("Blocks UP -> locked to #{}, manual=true", new_height));
+                            self.cache_block_with_context(new_height);
+                            self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
+                            self.log_debug(format!("Blocks UP -> #{}", new_height));
                         } else {
                             // Block not available - try archival fetch
-                            self.log_debug(format!("Blocks UP -> #{} not available (not in buffer/cache)", new_height));
+                            self.log_debug(format!("Blocks UP -> #{} not available", new_height));
                             self.request_archival_block(new_height);
                         }
                     }
+                } else {
+                    // Current selection not in navigation list (filtered out), jump to newest
+                    let new_height = nav_list[0];
+                    self.sel_block_height = Some(new_height);
+                    self.manual_block_nav = true;
+                    self.details_scroll = 0;
+                    self.cache_block_with_context(new_height);
+                    self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
+                    self.log_debug(format!("Blocks UP -> not in list, jump to newest #{}", new_height));
                 }
             }
             1 => {  // Tx pane: navigate to previous transaction
@@ -666,33 +718,69 @@ impl App {
     pub fn down(&mut self){
         match self.pane {
             0 => {  // Blocks pane: navigate to next block (older)
-                // Special case: if in auto-follow mode, first Down should lock to current block (not navigate yet)
-                if self.sel_block_height.is_none() && !self.blocks.is_empty() {
-                    // Lock to current block (index 0 = newest in auto-follow)
-                    let current_height = self.blocks[0].height;
-                    self.sel_block_height = Some(current_height);
-                    self.manual_block_nav = true;
-                    self.cache_block_with_context(current_height);  // Cache with ±12 context
-                    self.log_debug(format!("Blocks DOWN (first press) -> lock to current #{}, manual=true", current_height));
-                } else {
-                    // Already locked to a block, navigate to next older block
-                    let current_idx = self.find_block_index(self.sel_block_height).unwrap_or(0);
-                    if current_idx + 1 < self.blocks.len() {
-                        let new_height = self.blocks[current_idx + 1].height;
+                self.log_debug(format!("[USER_NAV_DOWN] manual_nav={}, sel_height={:?}", self.manual_block_nav, self.sel_block_height));
+
+                // Get the navigation list (respects filter)
+                let nav_list = self.get_navigation_list();
+
+                if nav_list.is_empty() {
+                    return; // No blocks to navigate
+                }
+
+                // Ensure we have a locked selection (handle edge case of None)
+                let current_height = match self.sel_block_height {
+                    Some(h) => h,
+                    None => {
+                        // Edge case: not locked yet, lock to current and navigate down
+                        // With auto-lock, this means we want to move to NEXT block
+                        let h = nav_list[0];
+                        if nav_list.len() > 1 {
+                            // Move to next older block
+                            let next_h = nav_list[1];
+                            self.sel_block_height = Some(next_h);
+                            self.manual_block_nav = true;
+                            self.details_scroll = 0;
+                            self.cache_block_with_context(next_h);
+                            self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
+                            self.log_debug(format!("[USER_NAV_DOWN] first press, move to #{}", next_h));
+                        } else {
+                            // Only one block, just lock to it
+                            self.sel_block_height = Some(h);
+                            self.manual_block_nav = true;
+                            self.cache_block_with_context(h);
+                            self.log_debug(format!("Blocks DOWN -> only one block, lock to #{}", h));
+                        }
+                        return;
+                    }
+                };
+
+                // Navigate to next older block in navigation list
+                if let Some(current_idx) = nav_list.iter().position(|&h| h == current_height) {
+                    if current_idx + 1 < nav_list.len() {
+                        let new_height = nav_list[current_idx + 1];
                         // Only navigate if target block is available
                         if self.is_block_available(new_height) {
                             self.sel_block_height = Some(new_height);
                             self.manual_block_nav = true;
                             self.details_scroll = 0;
-                            self.cache_block_with_context(new_height);  // Cache with ±12 context
-                            self.validate_and_refresh_tx(BlockChangeReason::ManualNav);  // Reset tx to first
-                            self.log_debug(format!("Blocks DOWN -> locked to #{}, manual=true", new_height));
+                            self.cache_block_with_context(new_height);
+                            self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
+                            self.log_debug(format!("Blocks DOWN -> #{}", new_height));
                         } else {
                             // Block not available - try archival fetch
-                            self.log_debug(format!("Blocks DOWN -> #{} not available (not in buffer/cache)", new_height));
+                            self.log_debug(format!("Blocks DOWN -> #{} not available", new_height));
                             self.request_archival_block(new_height);
                         }
                     }
+                } else {
+                    // Current selection not in navigation list (filtered out), jump to newest
+                    let new_height = nav_list[0];
+                    self.sel_block_height = Some(new_height);
+                    self.manual_block_nav = true;
+                    self.details_scroll = 0;
+                    self.cache_block_with_context(new_height);
+                    self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
+                    self.log_debug(format!("Blocks DOWN -> not in list, jump to newest #{}", new_height));
                 }
             }
             1 => {  // Tx pane: navigate to next transaction
@@ -898,6 +986,10 @@ impl App {
         let owned_count = self.count_owned_txs(&b.transactions);
         let height = b.height;
 
+        // Log state BEFORE push
+        self.log_debug(format!("[PUSH_START] Block #{}, manual_nav={}, sel_height={:?}, blocks_count={}",
+            height, self.manual_block_nav, self.sel_block_height, self.blocks.len()));
+
         self.blocks.insert(0, b);
         if self.blocks.len()>self.keep_blocks {
             // Remove oldest block and its count
@@ -919,12 +1011,40 @@ impl App {
                 self.sel_block_height = None;  // None = auto-follow newest
                 self.sel_tx = 0;
                 self.select_tx();
-                self.log_debug(format!("Block #{} arr, FIRST block, auto-follow ON", height));
+
+                // Auto-lock if this block has matching transactions (provides stability)
+                if self.count_matching_txs(&self.blocks[0]) > 0 {
+                    self.sel_block_height = Some(height);
+                    self.manual_block_nav = true;
+                    self.log_debug(format!("[AUTO_LOCK] Block #{} arr, FIRST MATCH, auto-locked -> manual_nav=true, sel_height={:?}", height, self.sel_block_height));
+                } else {
+                    self.log_debug(format!("[AUTO_FOLLOW] Block #{} arr, FIRST block, auto-follow ON (no matches) -> manual_nav=false, sel_height=None", height));
+                }
             } else {
-                // Subsequent blocks: stay on newest (index 0), keep tx index
-                self.sel_block_height = None;  // Maintain auto-follow
-                self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
-                self.log_debug(format!("Block #{} arr, AUTO-FOLLOW newest, tx index preserved", height));
+                // Subsequent blocks: check if we should auto-lock to first matching block
+                let current_matches = self.current_block()
+                    .map(|b| self.count_matching_txs(b))
+                    .unwrap_or(0);
+                let new_matches = self.count_matching_txs(&self.blocks[0]);
+
+                self.log_debug(format!("[AUTO_FOLLOW_CHECK] Block #{}, cur_matches={}, new_matches={}, sel_height={:?}",
+                    height, current_matches, new_matches, self.sel_block_height));
+
+                if current_matches == 0 && new_matches > 0 {
+                    // Switching from no matches to has matches - auto-lock for stability
+                    self.sel_block_height = Some(height);
+                    self.manual_block_nav = true;
+                    self.sel_tx = 0;
+                    self.select_tx();
+                    self.log_debug(format!("[AUTO_LOCK] Block #{} arr, FIRST MATCH, auto-locked -> manual_nav=true, sel_height={:?}", height, self.sel_block_height));
+                } else {
+                    // Continue auto-follow
+                    let old_sel_height = self.sel_block_height;
+                    self.sel_block_height = None;
+                    self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
+                    self.log_debug(format!("[AUTO_FOLLOW] Block #{} arr, continuing auto-follow, cur_matches={}, new_matches={}, sel_height: {:?} -> None",
+                        height, current_matches, new_matches, old_sel_height));
+                }
             }
         } else {
             // Manual mode: maintain locked block height (block may be in cache if aged out)
@@ -934,10 +1054,10 @@ impl App {
                     self.log_debug(format!("Block #{} arr, MANUAL mode locked to #{}", height, locked_height));
                 } else if self.cached_blocks.contains_key(&locked_height) {
                     // Block aged out but available in cache
-                    self.log_debug(format!("Block #{} arr, MANUAL mode viewing cached block #{}", height, locked_height));
+                    self.log_debug(format!("[MANUAL_CACHED] Block #{} arr, MANUAL mode viewing cached block #{}", height, locked_height));
                 } else {
                     // Block not in buffer or cache - shouldn't happen, but handle gracefully
-                    self.log_debug(format!("Block #{} arr, WARNING: locked block #{} not found (returning to auto-follow)", height, locked_height));
+                    self.log_debug(format!("[FALLBACK] Block #{} arr, WARNING: locked block #{} not found, FORCING auto-follow -> manual_nav=false, sel_height=None", height, locked_height));
                     self.manual_block_nav = false;
                     self.sel_block_height = None;
                     self.sel_tx = 0;
