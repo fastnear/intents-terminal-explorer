@@ -1,6 +1,6 @@
 # Ratacat - NEAR Blockchain Transaction Viewer
 
-A high-performance terminal UI for monitoring NEAR Protocol blockchain transactions in real-time. Built with Ratatui and Rust.
+A high-performance terminal UI for monitoring NEAR Protocol blockchain transactions in real-time. Built in Rust with [Ratatui](https://ratatui.rs).
 
 ## Screenshots
 
@@ -21,7 +21,7 @@ Press `Spacebar` to toggle fullscreen mode for the details pane, giving maximum 
 - **Dual Data Sources**:
   - WebSocket: Real-time updates from your Node breakout server
   - RPC Polling: Direct NEAR RPC with smart catch-up limits
-- **View Modes**: Toggle between PRETTY (ANSI-colored) and RAW (JSON) views with `v`
+- **Fullscreen Details**: Toggle fullscreen view with `Spacebar` for maximum transaction inspection space
 - **Smooth Scrolling**: Navigate large transaction details with arrow keys, PgUp/PgDn, Home/End
 - **FPS Control**: Runtime FPS adjustment with Ctrl+O (default 30 FPS)
 - **Clipboard Integration**: Copy transaction details with `c`
@@ -98,15 +98,17 @@ SOURCE=rpc NEAR_NODE_URL=https://rpc.mainnet.near.org/ cargo run
 ### Navigation
 - `Tab` / `Shift+Tab` - Switch between panes
 - `↑ / ↓` - Navigate lists or scroll details (immediate response, no lag)
+- `← / →` - Left: jump to top of current list; Right: paginate down 12 items
 - `PgUp / PgDn` - Page up/down in details pane
 - `Home` - In blocks pane: return to auto-follow mode (track newest matching block); Other panes: jump to top
 - `End` - Jump to bottom in details pane
 - `Enter` - Select transaction and view details
 
 ### View Controls
-- `v` - Toggle between PRETTY (colored) and RAW (JSON) views
+- `Spacebar` - Toggle fullscreen details view (maximizes transaction inspection area)
 - `Ctrl+O` - Cycle FPS (20 → 30 → 60)
 - `c` - Copy current details to clipboard (shows toast notification)
+- `Ctrl+D` - Toggle debug panel visibility
 - `q` or `Ctrl+C` - Quit
 
 ### Filter Controls
@@ -227,7 +229,7 @@ DEFAULT_FILTER=acct:alice.near method:swap  # Advanced filter syntax (only used 
 │   │         3-Pane TUI Layout               │  │
 │   │  ┌──────┐  ┌──────┐  ┌────────────┐   │  │
 │   │  │Blocks│→ │Tx IDs│→ │  Details   │   │  │
-│   │  └──────┘  └──────┘  │(PRETTY/RAW)│   │  │
+│   │  └──────┘  └──────┘  │ (JSON view)│   │  │
 │   │                       └────────────┘   │  │
 │   └─────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────┘
@@ -250,14 +252,14 @@ DEFAULT_FILTER=acct:alice.near method:swap  # Advanced filter syntax (only used 
 1. **FPS-Capped Rendering**: Coalesced draws prevent UI thrashing
 2. **Non-Overlapping Polls**: RPC mode uses catch-up limits to prevent cascades
 3. **Soft-Wrapped Tokens**: ZWSP insertion for clean line breaking
-4. **Human-Readable First**: PRETTY mode with ANSI colors for quick scanning
+4. **Human-Readable JSON**: Formatted transaction details with ANSI colors for quick scanning
 5. **Async Everything**: Tokio-based async I/O keeps UI responsive
 
 ## Tips
 
 1. **Use WebSocket mode during development** - connects to your existing Node server
 2. **Use RPC mode for production monitoring** - direct NEAR connection, no middleman
-3. **Press `v` to toggle views** - PRETTY for human reading, RAW for debugging
+3. **Press `Spacebar` for fullscreen** - maximize vertical space for inspecting complex transactions
 4. **Adjust FPS with Ctrl+O** - lower FPS if CPU-constrained
 5. **Copy with `c`** - paste transaction details anywhere (shows toast confirmation)
 6. **Stable block selection** - First matching block automatically locks for stable viewing
