@@ -2,7 +2,7 @@
 
 A high-performance terminal UI for monitoring NEAR Protocol blockchain transactions in real-time. Built in Rust with [Ratatui](https://ratatui.rs).
 
-## Screenshots
+## Features
 
 ### 3-Pane Dashboard
 ![Ratacat showing the full 3-pane layout - blocks list, transaction hashes, and detailed transaction view while monitoring intents.near on NEAR mainnet](static/selection.png)
@@ -13,8 +13,6 @@ The main interface shows blocks on the left (with transaction counts and filteri
 ![Ratacat in fullscreen mode showing detailed JSON transaction data for intents.near on NEAR mainnet](static/full-screen.png)
 
 Press `Spacebar` to toggle fullscreen mode for the details pane, giving maximum vertical space to inspect complex transaction payloads. The filter remains visible at the top for context.
-
-## Features
 
 ### Core Capabilities
 - **3-Pane Dashboard**: Blocks → Transaction Hashes → Transaction Details
