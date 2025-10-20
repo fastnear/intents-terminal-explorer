@@ -2,6 +2,18 @@
 
 A high-performance terminal UI for monitoring NEAR Protocol blockchain transactions in real-time. Built with Ratatui and Rust.
 
+## Screenshots
+
+### 3-Pane Dashboard
+![Ratacat showing the full 3-pane layout - blocks list, transaction hashes, and detailed transaction view while monitoring intents.near on NEAR mainnet](static/selection.png)
+
+The main interface shows blocks on the left (with transaction counts and filtering), transaction hashes in the middle, and full transaction details on the right. The filter bar at the top shows `acct:intents.near` actively filtering the transaction stream.
+
+### Fullscreen Details View
+![Ratacat in fullscreen mode showing detailed JSON transaction data for intents.near on NEAR mainnet](static/full-screen.png)
+
+Press `Spacebar` to toggle fullscreen mode for the details pane, giving maximum vertical space to inspect complex transaction payloads. The filter remains visible at the top for context.
+
 ## Features
 
 ### Core Capabilities
@@ -307,6 +319,26 @@ Current implementation copies pane content as-is. Future enhancement planned for
 - **Pane 1 (Tx Hashes)**: Dual format with raw chain data + human-readable decoded version
 - **Pane 2 (Details)**: Current implementation (human-readable only)
 - **Display vs Copy**: Show truncated data in UI, copy full data (complete hashes, full base64)
+
+## Built on Official NEAR Infrastructure
+
+Ratacat uses official NEAR Protocol crates from the nearcore repository, ensuring compatibility and future-proofing:
+
+- **`near-primitives`** (0.27.0) - Core blockchain data structures (Block, Transaction, Receipt, etc.)
+- **`near-jsonrpc-client`** (0.15.0) - Official RPC client with built-in retry logic and proper error handling
+- **`near-jsonrpc-primitives`** (0.27.0) - RPC request/response types that match the NEAR RPC specification
+- **`near-crypto`** (0.27.0) - Cryptographic primitives for signature verification and key handling
+- **`near-account-id`** (1.0.0) - Validated account ID types with proper parsing rules
+- **`near-gas`** (0.2) - Gas amount formatting and display utilities
+- **`near-token`** (0.2) - NEAR token amount formatting with proper decimal handling
+
+By leveraging these official crates, Ratacat:
+- **Stays synchronized** with NEAR protocol changes and upgrades
+- **Avoids reimplementation** of complex blockchain logic
+- **Maintains compatibility** with NEAR RPC endpoints across networks (mainnet, testnet)
+- **Benefits from upstream improvements** in performance, security, and correctness
+
+This approach ensures that transaction parsing, block structure handling, and RPC communication remain accurate as the NEAR Protocol evolves.
 
 ## Building from Source
 
