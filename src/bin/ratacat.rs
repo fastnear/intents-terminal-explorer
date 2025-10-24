@@ -1,20 +1,4 @@
-mod config;
-mod types;
-mod util_text;
-mod json_pretty;
-mod json_auto_parse;
-mod source_ws;
-mod source_rpc;
-mod rpc_utils;
-mod archival_fetch;
-mod app;
-mod ui;
-mod clipboard;
-mod near_args;
-mod filter;
-mod history;
-mod marks;
-mod credentials;
+// Native binary for Ratacat - Terminal UI mode
 
 use anyhow::{Context, Result};
 use crossterm::{
@@ -27,10 +11,14 @@ use std::{io, time::{Duration, Instant}, path::PathBuf, collections::HashSet};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::task::JoinHandle;
 
-use crate::{config::{load, Source}, types::AppEvent};
-use crate::app::InputMode;
-use crate::history::{History, BlockPersist, TxPersist};
-use crate::marks::JumpMarks;
+use ratacat::{
+    config::{load, Source},
+    types::AppEvent,
+    app::{App, InputMode},
+    source_ws, source_rpc, archival_fetch, credentials,
+    ui, marks::JumpMarks,
+    platform::{History, BlockPersist, TxPersist},
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -84,7 +72,7 @@ async fn main() -> Result<()> {
         None
     };
 
-    let mut app = app::App::new(
+    let mut app = App::new(
         cfg.render_fps,
         cfg.render_fps_choices.clone(),
         cfg.keep_blocks,
@@ -118,7 +106,7 @@ async fn main() -> Result<()> {
 }
 
 async fn run_loop(
-    app:&mut app::App,
+    app:&mut App,
     terminal:&mut Terminal<CrosstermBackend<io::Stdout>>,
     mut rx:UnboundedReceiver<AppEvent>,
     history: History,
@@ -176,7 +164,7 @@ async fn run_loop(
     Ok(())
 }
 
-async fn handle_key(app:&mut app::App, k:KeyEvent, history:&History, jump_marks:&mut JumpMarks) {
+async fn handle_key(app:&mut App, k:KeyEvent, history:&History, jump_marks:&mut JumpMarks) {
     // Handle filter input mode separately
     if app.input_mode() == InputMode::Filter {
         match k.code {
@@ -302,7 +290,7 @@ async fn handle_key(app:&mut app::App, k:KeyEvent, history:&History, jump_marks:
         (KeyCode::Char('c'), _) => {
             // copy content based on active pane
             let content = app.get_copy_content();
-            if crate::clipboard::copy_to_clipboard(&content) {
+            if ratacat::platform::copy_to_clipboard(&content) {
                 let msg = match app.pane() {
                     0 => "Copied block info".to_string(),
                     1 => "Copied tx hash".to_string(),

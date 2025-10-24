@@ -1,6 +1,12 @@
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
+
+#[cfg(target_arch = "wasm32")]
+use web_time::{Duration, Instant};
+
 use crate::types::{AppEvent, BlockRow, TxLite, WsPayload, ActionSummary};
 use crate::util_text::{format_gas, format_near};
 use crate::json_pretty::pretty;
@@ -44,7 +50,7 @@ pub struct App {
     search_selection: usize,
 
     // Marks state
-    marks_list: Vec<crate::marks::Mark>,
+    marks_list: Vec<crate::types::Mark>,
     marks_selection: usize,
 
     // Owned accounts state
@@ -125,7 +131,7 @@ fn format_action(action: &ActionSummary) -> serde_json::Value {
         ActionSummary::Delegate { sender_id, receiver_id, actions } => {
             // Recursively format nested actions
             let nested_formatted: Vec<serde_json::Value> = actions.iter()
-                .map(|nested_action| format_action(nested_action))
+                .map(format_action)
                 .collect();
             json!({
                 "type": "Delegate",
@@ -259,7 +265,7 @@ impl App {
         if filter::is_empty(&self.filter_compiled) && !self.owned_only_filter {
             // No filter active - return all blocks
             let idx = self.find_block_index(self.sel_block_height)
-                .or_else(|| if !self.blocks.is_empty() { Some(0) } else { None });
+                .or(if !self.blocks.is_empty() { Some(0) } else { None });
             let refs: Vec<&BlockRow> = self.blocks.iter().collect();
             return (refs, idx, total);
         }
@@ -272,7 +278,7 @@ impl App {
         // Find selected block index in filtered list
         let sel_idx = if let Some(height) = self.sel_block_height {
             filtered.iter().position(|b| b.height == height)
-                .or_else(|| if !filtered.is_empty() { Some(0) } else { None })
+                .or(if !filtered.is_empty() { Some(0) } else { None })
         } else if !filtered.is_empty() {
             Some(0) // Auto-follow: select first filtered block (newest with matches)
         } else {
@@ -384,16 +390,19 @@ impl App {
     pub fn log_debug(&mut self, msg: String) {
         const MAX_LOG_ENTRIES: usize = 50;
 
-        // Write to file for debugging
-        use std::fs::OpenOptions;
-        use std::io::Write;
-        let timestamp = chrono::Local::now().format("%H:%M:%S%.3f");
-        if let Ok(mut file) = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("ratacat_debug.log")
+        // Write to file for debugging (native only - WASM doesn't have filesystem)
+        #[cfg(not(target_arch = "wasm32"))]
         {
-            let _ = writeln!(file, "[{}] {}", timestamp, msg);
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            let timestamp = chrono::Utc::now().format("%H:%M:%S%.3f");
+            if let Ok(mut file) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("ratacat_debug.log")
+            {
+                let _ = writeln!(file, "[{timestamp}] {msg}");
+            }
         }
 
         // Also keep in memory for debug panel
@@ -429,8 +438,8 @@ impl App {
                 self.cached_block_order.push(height);
 
                 // Add to cache
-                if !self.cached_blocks.contains_key(&height) {
-                    self.cached_blocks.insert(height, block.clone());
+                if let std::collections::hash_map::Entry::Vacant(e) = self.cached_blocks.entry(height) {
+                    e.insert(block.clone());
                     cached_count += 1;
                 }
             }
@@ -503,7 +512,7 @@ impl App {
         if self.pane == 2 {  // Only toggle when details pane is focused
             self.details_fullscreen = !self.details_fullscreen;
             let mode = if self.details_fullscreen { "fullscreen" } else { "normal" };
-            self.log_debug(format!("Details view: {}", mode));
+            self.log_debug(format!("Details view: {mode}"));
         }
     }
 
@@ -515,7 +524,7 @@ impl App {
         self.sel_tx = 0;  // Reset to first tx
         if !self.blocks.is_empty() {
             self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
-            self.log_debug(format!("[USER_ACTION] Return to AUTO-FOLLOW mode (Home key pressed), was locked to height={:?}", old_height));
+            self.log_debug(format!("[USER_ACTION] Return to AUTO-FOLLOW mode (Home key pressed), was locked to height={old_height:?}"));
         }
     }
 
@@ -666,7 +675,7 @@ impl App {
                         self.sel_block_height = Some(h);
                         self.manual_block_nav = true;
                         self.cache_block_with_context(h);
-                        self.log_debug(format!("[USER_NAV_UP] edge case lock to #{}", h));
+                        self.log_debug(format!("[USER_NAV_UP] edge case lock to #{h}"));
                         return;
                     }
                 };
@@ -682,10 +691,10 @@ impl App {
                             self.details_scroll = 0;
                             self.cache_block_with_context(new_height);
                             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
-                            self.log_debug(format!("Blocks UP -> #{}", new_height));
+                            self.log_debug(format!("Blocks UP -> #{new_height}"));
                         } else {
                             // Block not available - try archival fetch
-                            self.log_debug(format!("Blocks UP -> #{} not available", new_height));
+                            self.log_debug(format!("Blocks UP -> #{new_height} not available"));
                             self.request_archival_block(new_height);
                         }
                     }
@@ -697,7 +706,7 @@ impl App {
                     self.details_scroll = 0;
                     self.cache_block_with_context(new_height);
                     self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
-                    self.log_debug(format!("Blocks UP -> not in list, jump to newest #{}", new_height));
+                    self.log_debug(format!("Blocks UP -> not in list, jump to newest #{new_height}"));
                 }
             }
             1 => {  // Tx pane: navigate to previous transaction
@@ -742,13 +751,13 @@ impl App {
                             self.details_scroll = 0;
                             self.cache_block_with_context(next_h);
                             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
-                            self.log_debug(format!("[USER_NAV_DOWN] first press, move to #{}", next_h));
+                            self.log_debug(format!("[USER_NAV_DOWN] first press, move to #{next_h}"));
                         } else {
                             // Only one block, just lock to it
                             self.sel_block_height = Some(h);
                             self.manual_block_nav = true;
                             self.cache_block_with_context(h);
-                            self.log_debug(format!("Blocks DOWN -> only one block, lock to #{}", h));
+                            self.log_debug(format!("Blocks DOWN -> only one block, lock to #{h}"));
                         }
                         return;
                     }
@@ -765,10 +774,10 @@ impl App {
                             self.details_scroll = 0;
                             self.cache_block_with_context(new_height);
                             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
-                            self.log_debug(format!("Blocks DOWN -> #{}", new_height));
+                            self.log_debug(format!("Blocks DOWN -> #{new_height}"));
                         } else {
                             // Block not available - try archival fetch
-                            self.log_debug(format!("Blocks DOWN -> #{} not available", new_height));
+                            self.log_debug(format!("Blocks DOWN -> #{new_height} not available"));
                             self.request_archival_block(new_height);
                         }
                     }
@@ -780,7 +789,7 @@ impl App {
                     self.details_scroll = 0;
                     self.cache_block_with_context(new_height);
                     self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
-                    self.log_debug(format!("Blocks DOWN -> not in list, jump to newest #{}", new_height));
+                    self.log_debug(format!("Blocks DOWN -> not in list, jump to newest #{new_height}"));
                 }
             }
             1 => {  // Tx pane: navigate to next transaction
@@ -813,7 +822,7 @@ impl App {
                         self.manual_block_nav = true;  // Enter manual mode
                         self.details_scroll = 0;
                         self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
-                        self.log_debug(format!("Left -> jump to newest #{}", newest_height));
+                        self.log_debug(format!("Left -> jump to newest #{newest_height}"));
                     }
                 }
             }
@@ -851,7 +860,7 @@ impl App {
                     self.manual_block_nav = true;  // Enter manual mode
                     self.details_scroll = 0;
                     self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
-                    self.log_debug(format!("Right -> paginate to block #{}", new_height));
+                    self.log_debug(format!("Right -> paginate to block #{new_height}"));
                 }
             }
             1 => {
@@ -906,9 +915,9 @@ impl App {
             // Only request if not already loading this block
             if self.loading_block != Some(height) {
                 self.loading_block = Some(height);
-                self.log_debug(format!("Requesting archival fetch for block #{}", height));
+                self.log_debug(format!("Requesting archival fetch for block #{height}"));
                 if let Err(e) = tx.send(height) {
-                    self.log_debug(format!("Failed to send archival fetch request: {}", e));
+                    self.log_debug(format!("Failed to send archival fetch request: {e}"));
                     self.loading_block = None;
                 }
             }
@@ -972,6 +981,7 @@ impl App {
                 }
             }
             AppEvent::NewBlock(b) => {
+                log::info!("📥 App received NewBlock event - height: {}, txs: {}", b.height, b.tx_count);
                 // Check if this block was being fetched from archival
                 if self.loading_block == Some(b.height) {
                     self.loading_block = None;  // Clear loading state
@@ -1018,7 +1028,7 @@ impl App {
                     self.manual_block_nav = true;
                     self.log_debug(format!("[AUTO_LOCK] Block #{} arr, FIRST MATCH, auto-locked -> manual_nav=true, sel_height={:?}", height, self.sel_block_height));
                 } else {
-                    self.log_debug(format!("[AUTO_FOLLOW] Block #{} arr, FIRST block, auto-follow ON (no matches) -> manual_nav=false, sel_height=None", height));
+                    self.log_debug(format!("[AUTO_FOLLOW] Block #{height} arr, FIRST block, auto-follow ON (no matches) -> manual_nav=false, sel_height=None"));
                 }
             } else {
                 // Subsequent blocks: check if we should auto-lock to first matching block
@@ -1042,8 +1052,7 @@ impl App {
                     let old_sel_height = self.sel_block_height;
                     self.sel_block_height = None;
                     self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
-                    self.log_debug(format!("[AUTO_FOLLOW] Block #{} arr, continuing auto-follow, cur_matches={}, new_matches={}, sel_height: {:?} -> None",
-                        height, current_matches, new_matches, old_sel_height));
+                    self.log_debug(format!("[AUTO_FOLLOW] Block #{height} arr, continuing auto-follow, cur_matches={current_matches}, new_matches={new_matches}, sel_height: {old_sel_height:?} -> None"));
                 }
             }
         } else {
@@ -1051,13 +1060,13 @@ impl App {
             if let Some(locked_height) = self.sel_block_height {
                 if self.find_block_index(Some(locked_height)).is_some() {
                     // Block still in main buffer
-                    self.log_debug(format!("Block #{} arr, MANUAL mode locked to #{}", height, locked_height));
+                    self.log_debug(format!("Block #{height} arr, MANUAL mode locked to #{locked_height}"));
                 } else if self.cached_blocks.contains_key(&locked_height) {
                     // Block aged out but available in cache
-                    self.log_debug(format!("[MANUAL_CACHED] Block #{} arr, MANUAL mode viewing cached block #{}", height, locked_height));
+                    self.log_debug(format!("[MANUAL_CACHED] Block #{height} arr, MANUAL mode viewing cached block #{locked_height}"));
                 } else {
                     // Block not in buffer or cache - shouldn't happen, but handle gracefully
-                    self.log_debug(format!("[FALLBACK] Block #{} arr, WARNING: locked block #{} not found, FORCING auto-follow -> manual_nav=false, sel_height=None", height, locked_height));
+                    self.log_debug(format!("[FALLBACK] Block #{height} arr, WARNING: locked block #{locked_height} not found, FORCING auto-follow -> manual_nav=false, sel_height=None"));
                     self.manual_block_nav = false;
                     self.sel_block_height = None;
                     self.sel_tx = 0;
@@ -1132,7 +1141,7 @@ impl App {
     }
 
     // ----- Marks methods -----
-    pub fn open_marks(&mut self, marks_list: Vec<crate::marks::Mark>) {
+    pub fn open_marks(&mut self, marks_list: Vec<crate::types::Mark>) {
         self.marks_list = marks_list;
         self.marks_selection = 0;
         self.input_mode = InputMode::Marks;
@@ -1145,7 +1154,7 @@ impl App {
     }
 
     #[allow(dead_code)]
-    pub fn marks_list(&self) -> &[crate::marks::Mark] {
+    pub fn marks_list(&self) -> &[crate::types::Mark] {
         &self.marks_list
     }
 
@@ -1165,7 +1174,7 @@ impl App {
         }
     }
 
-    pub fn get_selected_mark(&self) -> Option<&crate::marks::Mark> {
+    pub fn get_selected_mark(&self) -> Option<&crate::types::Mark> {
         self.marks_list.get(self.marks_selection)
     }
 
@@ -1184,7 +1193,7 @@ impl App {
         (pane, height, tx_hash)
     }
 
-    pub fn jump_to_mark(&mut self, mark: &crate::marks::Mark) {
+    pub fn jump_to_mark(&mut self, mark: &crate::types::Mark) {
         // Navigate to the mark's location
         if let Some(height) = mark.height {
             if self.blocks.iter().any(|b| b.height == height) {

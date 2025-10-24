@@ -1,0 +1,44 @@
+[build]
+# The index HTML file to drive the bundling process
+target = "index.html"
+
+# Build in release mode for production (smaller WASM)
+release = true
+
+# Output directory for built assets
+dist = "dist"
+
+# Public URL base path (use "/" for root, or "/ratacat/" for subdirectory)
+public_url = "/"
+
+# Optimize the WASM bundle
+[build.rust]
+# Features to enable for the web build
+default-features = false
+features = ["web"]
+
+# Binary to build (ratacat-web)
+bin = "ratacat-web"
+
+[watch]
+# Paths to watch for changes during development
+watch = ["src/"]
+
+# Paths to ignore
+ignore = ["dist/", "target/"]
+
+[serve]
+# Development server configuration
+address = "127.0.0.1"
+port = 8082
+
+# Open browser automatically
+open = true
+
+# Enable HTTPS for local development (optional)
+# tls = true
+
+[clean]
+# Directories to clean
+dist = "dist"
+cargo = false  # Don't clean cargo target directory

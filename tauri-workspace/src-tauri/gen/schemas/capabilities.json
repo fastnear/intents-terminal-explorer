@@ -1,0 +1,1 @@
+{"deep-link-capability":{"identifier":"deep-link-capability","description":"Deep links + event permissions","local":true,"windows":["main"],"permissions":["core:event:default","deep-link:default"]}}

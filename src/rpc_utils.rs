@@ -1,19 +1,40 @@
 use anyhow::{Result, anyhow};
 use serde_json::{json, Value};
-use tokio::task::JoinSet;
-use tokio::time::{Duration, sleep};
 use std::sync::OnceLock;
 use crate::types::{BlockRow, TxLite, TxDetailed, ActionSummary};
+
+// Platform-specific imports
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::task::JoinSet;
+
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::time::{Duration, sleep};
+
+#[cfg(target_arch = "wasm32")]
+use web_time::Duration;
+
+#[cfg(target_arch = "wasm32")]
+use gloo_timers::future::sleep;
 
 static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
 
 fn http_client() -> &'static reqwest::Client {
     HTTP.get_or_init(|| {
-        reqwest::Client::builder()
-            .pool_max_idle_per_host(8)
-            .tcp_nodelay(true)
-            .build()
-            .expect("reqwest client")
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            reqwest::Client::builder()
+                .pool_max_idle_per_host(8)
+                .tcp_nodelay(true)
+                .build()
+                .expect("reqwest client")
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            reqwest::Client::builder()
+                .build()
+                .expect("reqwest client")
+        }
     })
 }
 
@@ -27,7 +48,10 @@ pub async fn rpc_post(url:&str, body:&Value, timeout_ms:u64, auth_token: Option<
             .timeout(Duration::from_millis(timeout_ms));
 
         if let Some(token) = auth_token {
-            req = req.header("Authorization", format!("Bearer {}", token));
+            log::debug!("🔑 Adding Authorization header with token ({}... chars)", token.len());
+            req = req.header("Authorization", format!("Bearer {token}"));
+        } else {
+            log::debug!("⚠️ No auth token provided for RPC call");
         }
 
         let res = req.send().await?;
@@ -36,7 +60,7 @@ pub async fn rpc_post(url:&str, body:&Value, timeout_ms:u64, auth_token: Option<
             if let Some(err) = v.get("error") {
                 let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or_default();
                 let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("rpc error");
-                return Err(anyhow!("rpc {} {}", code, msg));
+                return Err(anyhow!("rpc {code} {msg}"));
             }
             if let Some(r) = v.get("result") {
                 return Ok(r.clone());
@@ -66,55 +90,77 @@ pub async fn get_chunk(url:&str, hash:&str, t:u64, auth_token: Option<&str>) -> 
     rpc_post(url, &json!({"jsonrpc":"2.0","id":"ratacat","method":"chunk","params":{"chunk_id":hash}}), t, auth_token).await
 }
 
+/// Extract transactions from a chunk JSON response
+fn extract_transactions_from_chunk(chunk: &Value, txs: &mut Vec<TxLite>) {
+    if let Some(arr) = chunk["transactions"].as_array() {
+        for t in arr {
+            // Try to parse full transaction details
+            if let Some(detailed) = parse_transaction_detailed(t) {
+                txs.push(TxLite {
+                    hash: detailed.hash,
+                    signer_id: Some(detailed.signer_id),
+                    receiver_id: Some(detailed.receiver_id),
+                    actions: Some(detailed.actions),
+                    nonce: Some(detailed.nonce),
+                });
+            } else if let Some(hh) = t["hash"].as_str() {
+                // Fallback to just hash if parsing fails
+                txs.push(TxLite {
+                    hash: hh.to_string(),
+                    signer_id: None,
+                    receiver_id: None,
+                    actions: None,
+                    nonce: None,
+                });
+            }
+        }
+    }
+}
+
 pub async fn fetch_block_with_txs(
     url: &str,
     height: u64,
     timeout_ms: u64,
-    chunk_concurrency: usize,
+    #[allow(unused_variables)] chunk_concurrency: usize,
     auth_token: Option<&str>
 ) -> Result<BlockRow> {
     let b = get_block_by_height(url, height, timeout_ms, auth_token).await?;
 
-    // Fetch all chunks with bounded concurrency.
-    let mut set = JoinSet::new();
     let chunks = b["chunks"].as_array().cloned().unwrap_or_default();
-    for c in chunks.iter() {
-        if let Some(hash) = c["chunk_hash"].as_str() {
-            let url = url.to_string();
-            let hash = hash.to_string();
-            let t = timeout_ms;
-            let token = auth_token.map(|s| s.to_string());
-            set.spawn(async move { get_chunk(&url, &hash, t, token.as_deref()).await });
-            if set.len() >= chunk_concurrency.max(1) {
-                let _ = set.join_next().await;
+    let mut txs = Vec::<TxLite>::new();
+
+    // Native: Use JoinSet for concurrent chunk fetching
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut set = JoinSet::new();
+        for c in chunks.iter() {
+            if let Some(hash) = c["chunk_hash"].as_str() {
+                let url = url.to_string();
+                let hash = hash.to_string();
+                let t = timeout_ms;
+                let token = auth_token.map(|s| s.to_string());
+                set.spawn(async move { get_chunk(&url, &hash, t, token.as_deref()).await });
+                if set.len() >= chunk_concurrency.max(1) {
+                    let _ = set.join_next().await;
+                }
+            }
+        }
+
+        while let Some(res) = set.join_next().await {
+            if let Ok(Ok(chunk)) = res {
+                extract_transactions_from_chunk(&chunk, &mut txs);
             }
         }
     }
 
-    let mut txs = Vec::<TxLite>::new();
-    while let Some(res) = set.join_next().await {
-        if let Ok(Ok(chunk)) = res {
-            if let Some(arr)=chunk["transactions"].as_array(){
-                for t in arr {
-                    // Try to parse full transaction details
-                    if let Some(detailed) = parse_transaction_detailed(t) {
-                        txs.push(TxLite {
-                            hash: detailed.hash,
-                            signer_id: Some(detailed.signer_id),
-                            receiver_id: Some(detailed.receiver_id),
-                            actions: Some(detailed.actions),
-                            nonce: Some(detailed.nonce),
-                        });
-                    } else if let Some(hh)=t["hash"].as_str(){
-                        // Fallback to just hash if parsing fails
-                        txs.push(TxLite {
-                            hash: hh.to_string(),
-                            signer_id: None,
-                            receiver_id: None,
-                            actions: None,
-                            nonce: None,
-                        });
-                    }
+    // WASM: Sequential chunk fetching (no threads, no Send requirement)
+    #[cfg(target_arch = "wasm32")]
+    {
+        for c in chunks.iter() {
+            if let Some(hash) = c["chunk_hash"].as_str() {
+                match get_chunk(url, hash, timeout_ms, auth_token).await {
+                    Ok(chunk) => extract_transactions_from_chunk(&chunk, &mut txs),
+                    Err(e) => log::warn!("Failed to fetch chunk {hash}: {e}"),
                 }
             }
         }

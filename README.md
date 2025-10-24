@@ -1,6 +1,6 @@
 # Ratacat - NEAR Blockchain Transaction Viewer
 
-A high-performance terminal UI for monitoring NEAR Protocol blockchain transactions in real-time. Built in Rust with [Ratatui](https://ratatui.rs).
+**Version 0.4.0** - High-performance **quad-mode** application for monitoring NEAR Protocol blockchain transactions. Runs as native terminal app, web browser app, Tauri desktop app, or browser extension integration. Built in Rust with [Ratatui](https://ratatui.rs).
 
 ## Features
 
@@ -63,16 +63,22 @@ Press `Spacebar` to toggle fullscreen mode for the details pane, giving maximum 
 - **Catch-up Limits**: Prevents cascade failures during network delays
 - **Soft-wrapped Tokens**: Long base58/base64 strings wrapped cleanly
 
-## Installation
+## Installation & Quick Start
+
+Ratacat runs in **four modes**: native terminal (recommended), Tauri desktop app, web browser (experimental), and browser extension.
+
+### Native Terminal Mode (Recommended)
 
 ```bash
+# Build and run
 cargo build --release
 ./target/release/ratacat
+
+# Or run directly with cargo
+cargo run --release
 ```
 
-## Quick Start
-
-### WebSocket Mode (Recommended for Dev)
+**WebSocket Mode** (for development):
 ```bash
 # Terminal 1: Start your Node server with WebSocket breakout
 cd ../node
@@ -82,14 +88,103 @@ npm run dev
 SOURCE=ws cargo run
 ```
 
-### RPC Mode (Direct NEAR Connection)
+**RPC Mode** (for production):
 ```bash
-# Polls NEAR testnet directly
+# Testnet
 SOURCE=rpc NEAR_NODE_URL=https://rpc.testnet.fastnear.com/ cargo run
 
-# Or mainnet
+# Mainnet
 SOURCE=rpc NEAR_NODE_URL=https://rpc.mainnet.near.org/ cargo run
 ```
+
+### Tauri Desktop App Mode
+
+Native desktop application with deep link support for `near://` protocol URLs.
+
+**Quick Start**:
+```bash
+cd tauri-workspace
+cargo tauri dev
+```
+
+**Build for Distribution**:
+```bash
+cd tauri-workspace
+cargo tauri build
+
+# Manual workaround for bundler bug:
+mkdir -p target/release/bundle/macos/Ratacat.app/Contents/MacOS
+cp target/release/explorer-tauri target/release/bundle/macos/Ratacat.app/Contents/MacOS/
+```
+
+**Key Features**:
+- **Deep Link Handler**: Opens `near://tx/HASH?network=mainnet` URLs from browser
+- **Single Instance**: Prevents multiple app windows
+- **Native Performance**: Full desktop integration
+- **DevTools**: Press `Cmd+Option+I` (macOS) or `F12` (Windows/Linux)
+- **Debug Logging**: Comprehensive waterfall logs at `~/Library/Logs/com.ratacat.fast/Ratacat.log` (macOS)
+
+**Testing Deep Links**:
+```bash
+# Open app with deep link
+open 'near://tx/ABC123?network=mainnet'
+
+# View logs
+tail -f ~/Library/Logs/com.ratacat.fast/Ratacat.log
+```
+
+**Configuration**:
+- Bundle ID: `com.ratacat.fast`
+- URL Scheme: `near://`
+- Log Location: `~/Library/Logs/com.ratacat.fast/` (macOS)
+
+**Known Issues**:
+- Tauri bundler bug requires manual binary copy (see build steps above)
+- DevTools button requires `devtools` Cargo feature (already enabled)
+- macOS only for now (Windows/Linux testing pending)
+
+For detailed technical documentation, see `CLAUDE.md` § Tauri Desktop App Mode.
+
+### Web Browser Mode (Experimental) 🚀
+
+Run Ratacat in your browser with the same terminal UI experience!
+
+```bash
+# Install web build tools (one-time setup)
+cargo install --locked trunk
+rustup target add wasm32-unknown-unknown
+
+# Build and serve locally
+trunk serve --release --no-default-features --features web
+# Opens at http://127.0.0.1:8080
+
+# Build for deployment
+trunk build --release --no-default-features --features web
+# Output in dist/ directory - deploy to any static host!
+```
+
+**Important Build Flags:**
+- `--no-default-features` is **required** - prevents pulling in native-only NEAR SDK crates with C dependencies
+- `--features web` enables web-specific dependencies (Ratzilla, wasm-bindgen, etc.)
+- Without these flags, the build will fail with zstd/secp256k1 compilation errors
+
+**Web Features:**
+- ✅ Same 3-pane TUI interface in browser
+- ✅ All keyboard shortcuts work identically
+- ✅ RPC polling with real-time updates
+- ✅ Filtering, search, and FPS control
+- ✅ Web-native clipboard support
+- ✅ Deploy to GitHub Pages, Vercel, Netlify, etc.
+- ⚠️ No SQLite history (in-memory only)
+- ⚠️ No WebSocket mode (RPC only)
+- ⚠️ No jump marks persistence (in-memory only)
+
+**Try it now:** Visit `http://localhost:8080?rpc=https://rpc.mainnet.fastnear.com&filter=intents.near` after running `trunk serve`
+
+**Technical Notes:**
+- Web build isolates NEAR SDK crates (near-primitives, near-crypto, etc.) which have C dependencies incompatible with WASM
+- Uses platform abstraction layer for clipboard (web-sys), storage (in-memory), and runtime (wasm-bindgen)
+- Ratatui 0.29+ required for Ratzilla compatibility
 
 ## Keyboard Shortcuts
 
@@ -340,12 +435,106 @@ By leveraging these official crates, Ratacat:
 
 This approach ensures that transaction parsing, block structure handling, and RPC communication remain accurate as the NEAR Protocol evolves.
 
+## Quad-Mode Architecture
+
+Ratacat v0.4.0 features a **quad-mode architecture** - write once, run everywhere:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Ratacat Application                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │   Terminal   │  │  Web Browser │  │  Tauri App   │     │
+│  │ (Crossterm)  │  │  (Ratzilla)  │  │(Deep Links)  │     │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘     │
+│         │                 │                 │              │
+│         └─────────────────┼─────────────────┘              │
+│                           ▼                                │
+│              ┌────────────────────────────┐                │
+│              │   Shared Core (Rust)       │                │
+│              │ • App state & UI rendering │                │
+│              │ • RPC client & polling     │                │
+│              │ • Filter & search logic    │                │
+│              │ • Types & JSON formatting  │                │
+│              └────────────────────────────┘                │
+│                                                             │
+│  Platform Abstraction:                                      │
+│  • Clipboard: copypasta / web-sys / tauri                  │
+│  • Storage: SQLite / in-memory                             │
+│  • Runtime: tokio (full/wasm/tauri)                        │
+│  • Deep Links: native messaging / tauri plugin             │
+│                                                             │
+│  ┌──────────────────────────────────────────────────┐      │
+│  │  Browser Extension (Native Messaging)            │      │
+│  │  • Chrome/Firefox/Edge integration               │      │
+│  │  • "Open in Ratacat" button on tx pages         │      │
+│  │  • Sends near:// deep links to Tauri app        │      │
+│  └──────────────────────────────────────────────────┘      │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Benefits:**
+- ✨ **Write once, deploy everywhere** - Terminal, browser, AND desktop from same code
+- 🎨 **True terminal UI everywhere** - Not a simulation, actual ratatui rendering
+- ⚡ **Zero JavaScript core** - Pure Rust compiled to native/WASM
+- 🚀 **Fast & lightweight** - 30+ FPS, native performance
+- 🔧 **Platform-specific optimizations** - SQLite on native, web APIs in browser, native messaging for extensions
+- 🔗 **Deep link integration** - Browser → Desktop app flow via `near://` protocol
+
 ## Building from Source
 
+**Native:**
 ```bash
 git clone <repo>
 cd ratacat
-cargo run
+cargo build --release
+./target/release/ratacat
+```
+
+**Web:**
+```bash
+# One-time setup
+cargo install --locked trunk
+rustup target add wasm32-unknown-unknown
+
+# Build for deployment
+trunk build --release --no-default-features --features web
+
+# Or serve locally for development
+trunk serve --release --no-default-features --features web
+```
+
+**Understanding the Build Flags:**
+
+The web build requires careful feature flag management to avoid pulling in NEAR SDK crates with C dependencies (zstd-sys, secp256k1-sys) that cannot compile to WebAssembly:
+
+- `--no-default-features`: Disables the default `native` feature, which includes:
+  - crossterm, copypasta, rusqlite, notify (native-only UI/IO)
+  - near-primitives, near-crypto, near-jsonrpc-client (C dependencies)
+  - Full tokio runtime (incompatible with WASM)
+
+- `--features web`: Enables web-specific dependencies:
+  - ratzilla (renders ratatui TUI in browser via egui)
+  - wasm-bindgen, wasm-bindgen-futures (Rust↔JavaScript bridge)
+  - web-sys (Web APIs for clipboard, storage)
+  - getrandom with "js" feature (WASM-compatible RNG)
+  - console_error_panic_hook, wasm-logger (debugging)
+
+**Trunk Configuration:**
+
+The `Trunk.toml` file is pre-configured with these flags:
+```toml
+[build.rust]
+default-features = false
+features = ["web"]
+bin = "ratacat-web"
+```
+
+The `index.html` specifies which binary to build:
+```html
+<link data-trunk rel="rust" data-bin="ratacat-web" />
 ```
 
 ## Troubleshooting
@@ -361,6 +550,22 @@ cargo run
 ### RPC timeouts
 - Increase timeout: `RPC_TIMEOUT_MS=15000 cargo run`
 - Reduce concurrency: `POLL_CHUNK_CONCURRENCY=2 cargo run`
+
+### Web build errors
+
+**Error: `zstd-sys` or `secp256k1-sys` compilation failed**
+- Ensure you're using `--no-default-features --features web` flags
+- Check `Trunk.toml` has `default-features = false`
+
+**Runtime error: "time not implemented on this platform"**
+- Known issue: Some time-related code not yet fully WASM-compatible
+- Workaround: Use direct RPC endpoints instead of proxy
+- Status: Active development, fix planned for v0.4.0
+
+**Connection refused to localhost:3030**
+- Web version expects RPC proxy or direct RPC endpoint
+- Configure via URL parameters: `?rpc=https://rpc.mainnet.fastnear.com`
+- Or set default in `load_web_config()` function
 
 ## Version History
 

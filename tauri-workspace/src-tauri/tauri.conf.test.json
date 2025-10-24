@@ -1,0 +1,35 @@
+{
+  "$schema": "../gen/schemas/tauri-schema.json",
+  "productName": "Ratacat Test",
+  "version": "0.1.0",
+  "identifier": "com.ratacat.test",
+  "build": {
+    "devUrl": "../test-ui/index.html",
+    "frontendDist": "../test-ui"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Ratacat Deep Link Test",
+        "width": 900,
+        "height": 700
+      }
+    ],
+    "security": {
+      "capabilities": ["deep-link-capability"]
+    }
+  },
+  "bundle": {
+    "resources": [
+      "../../native-host/target/release/ratacat-native-host"
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["myapp"]
+      }
+    }
+  }
+}

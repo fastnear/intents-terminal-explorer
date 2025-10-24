@@ -7,7 +7,20 @@ use ratatui::{
 };
 use crate::app::{App, InputMode};
 use crate::history::HistoryHit;
-use crate::marks::Mark;
+
+#[cfg(feature = "native")]
+use crate::types::Mark;
+
+#[cfg(not(feature = "native"))]
+#[derive(Clone, Debug, Default)]
+pub struct Mark {
+    pub label: String,
+    pub pane: u8,
+    pub height: Option<u64>,
+    pub tx_hash: Option<String>,
+    pub when_ms: i64,
+    pub pinned: bool,
+}
 
 // ===============================
 // Top-level draw
@@ -27,7 +40,7 @@ pub fn draw(f:&mut Frame, app:&mut App, marks:&[Mark]){
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
-        .split(f.size());
+        .split(f.area());
 
     let mut idx = 0usize;
     header(f, chunks[idx], app); idx += 1;
@@ -94,7 +107,7 @@ fn filter_bar(f:&mut Frame, area:Rect, app:&App){
         // Cursor inside the input box
         let x = area.x + 1 + (filter_text.len().min((area.width.saturating_sub(2)) as usize) as u16);
         let y = area.y + 1;
-        f.set_cursor(x, y);
+        f.set_cursor_position((x, y));
     }
 }
 
@@ -193,7 +206,7 @@ fn render_blocks_pane(f: &mut Frame, area: Rect, app: &App) {
 
     let items_blocks: Vec<ListItem> = filtered_blocks.iter().map(|b| {
         let owned = app.owned_count(b.height);
-        let badge = if owned > 0 { format!(" ★{}", owned) } else { String::new() };
+        let badge = if owned > 0 { format!(" ★{owned}") } else { String::new() };
         let text = format!("{}  | {} txs{} | {}", b.height, b.tx_count, badge, b.when);
 
         // Gray out blocks not in cache when viewing cached selection
@@ -300,7 +313,7 @@ fn render_details_pane(f: &mut Frame, area: Rect, app: &mut App) {
 
     // Show loading state if archival fetch in progress
     let details_text = if let Some(loading_height) = app.loading_block() {
-        format!("⏳ Loading block #{} from archival...\n\nThis may take 1-2 seconds.\n\nNavigate away to cancel.", loading_height)
+        format!("⏳ Loading block #{loading_height} from archival...\n\nThis may take 1-2 seconds.\n\nNavigate away to cancel.")
     } else {
         app.details().to_string()
     };
@@ -350,7 +363,7 @@ fn footer(f:&mut Frame, area:Rect, app:&App, marks:&[Mark]){
     }
     if pinned_total > 0 {
         spans.push(Span::raw(" • "));
-        spans.push(Span::styled(format!("★ {}", pinned_total), Style::default().fg(Color::Yellow)));
+        spans.push(Span::styled(format!("★ {pinned_total}"), Style::default().fg(Color::Yellow)));
     }
     if app.debug_visible() {
         spans.push(Span::raw(" • "));
@@ -395,7 +408,7 @@ fn debug_panel(f:&mut Frame, area:Rect, app:&App){
 // ===============================
 fn draw_search_overlay(f:&mut Frame, query:&str, results:&[HistoryHit], sel:usize){
     // Centered overlay (90% width, 80% height)
-    let area = f.size();
+    let area = f.area();
     let width = (area.width * 9) / 10;
     let height = (area.height * 8) / 10;
     let x = (area.width.saturating_sub(width)) / 2;
@@ -433,7 +446,7 @@ fn draw_search_overlay(f:&mut Frame, query:&str, results:&[HistoryHit], sel:usiz
     if !query.is_empty() && chunks[0].width > 2 {
         let x = chunks[0].x + 1 + (query.len().min((chunks[0].width.saturating_sub(2)) as usize) as u16);
         let y = chunks[0].y + 1;
-        f.set_cursor(x, y);
+        f.set_cursor_position((x, y));
     }
 
     // Results
@@ -463,7 +476,7 @@ fn draw_search_overlay(f:&mut Frame, query:&str, results:&[HistoryHit], sel:usiz
 
 fn draw_marks_overlay(f:&mut Frame, marks:&[Mark], sel:usize){
     // Centered overlay (70% width, 60% height)
-    let area = f.size();
+    let area = f.area();
     let width = (area.width * 7) / 10;
     let height = (area.height * 6) / 10;
     let x = (area.width.saturating_sub(width)) / 2;
@@ -495,7 +508,7 @@ fn draw_marks_overlay(f:&mut Frame, marks:&[Mark], sel:usize){
     let items: Vec<ListItem> = marks.iter().map(|m| {
         let pin = if m.pinned { "★" } else { " " };
         let pane = match m.pane { 0 => "Blocks", 1 => "Txs", 2 => "Details", _ => "?" };
-        let height_str = m.height.map(|h| format!("#{}", h)).unwrap_or_else(|| "-".into());
+        let height_str = m.height.map(|h| format!("#{h}")).unwrap_or_else(|| "-".into());
         let tx_str = m.tx_hash.as_deref().map(|h| &h[..8.min(h.len())]).unwrap_or("-");
         ListItem::new(format!("{} {:3} | {:8} | {:8} | {}", pin, m.label, pane, height_str, tx_str))
     }).collect();
@@ -521,7 +534,7 @@ fn draw_marks_overlay(f:&mut Frame, marks:&[Mark], sel:usize){
 
 fn draw_toast_modal(f: &mut Frame, message: &str) {
     // Small centered box (40% width, 3 lines height)
-    let area = f.size();
+    let area = f.area();
     let width = (area.width * 4) / 10;
     let height = 3;
     let x = (area.width.saturating_sub(width)) / 2;
@@ -535,7 +548,7 @@ fn draw_toast_modal(f: &mut Frame, message: &str) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::Green));
 
-    let text = Paragraph::new(format!("✓ {}", message))
+    let text = Paragraph::new(format!("✓ {message}"))
         .style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
         .block(block);
 

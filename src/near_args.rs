@@ -1,8 +1,10 @@
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
+use serde::{Serialize, Deserialize};
 use serde_json::Value;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "variant")]
 pub enum DecodedArgs {
     Json(Value),
     Text(String),
@@ -33,7 +35,7 @@ pub fn decode_args_base64(b64: Option<&str>, preview_len: usize) -> DecodedArgs 
 
     // Try UTF-8 text if mostly printable
     let text = String::from_utf8_lossy(&bytes).to_string();
-    let printable = text.chars().filter(|&ch| ch >= ' ' && ch <= '~').count();
+    let printable = text.chars().filter(|&ch| (' '..='~').contains(&ch)).count();
     if printable as f32 / (text.len().max(1) as f32) > 0.85 {
         return DecodedArgs::Text(text);
     }
@@ -42,7 +44,7 @@ pub fn decode_args_base64(b64: Option<&str>, preview_len: usize) -> DecodedArgs 
     let n = preview_len.min(bytes.len());
     let hex = bytes[..n]
         .iter()
-        .map(|b| format!("{:02x}", b))
+        .map(|b| format!("{b:02x}"))
         .collect::<String>();
     let preview = bytes[..n]
         .iter()

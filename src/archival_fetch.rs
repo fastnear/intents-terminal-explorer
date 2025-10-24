@@ -15,10 +15,10 @@ pub async fn run_archival_fetch(
         None => return Ok(()), // No archival URL, exit immediately
     };
 
-    eprintln!("[Archival] Starting archival fetch task with URL: {}", archival_url);
+    eprintln!("[Archival] Starting archival fetch task with URL: {archival_url}");
 
     while let Some(height) = fetch_rx.recv().await {
-        eprintln!("[Archival] Received request to fetch block #{}", height);
+        eprintln!("[Archival] Received request to fetch block #{height}");
 
         match fetch_block_with_txs(
             &archival_url,
@@ -31,12 +31,12 @@ pub async fn run_archival_fetch(
                 eprintln!("[Archival] Successfully fetched block #{} ({} txs)", height, block.tx_count);
                 // Send block via existing event channel
                 if let Err(e) = block_tx.send(AppEvent::NewBlock(block)) {
-                    eprintln!("[Archival] Failed to send block: {}", e);
+                    eprintln!("[Archival] Failed to send block: {e}");
                     break;
                 }
             }
             Err(e) => {
-                eprintln!("[Archival] Failed to fetch block #{}: {}", height, e);
+                eprintln!("[Archival] Failed to fetch block #{height}: {e}");
                 // TODO: Send error event to App so it can show toast notification
                 // For now, just log the error
             }

@@ -5,7 +5,6 @@
 ///
 /// This utility recursively detects and parses these strings for better readability.
 /// Ported from csli-dashboard's json-auto-parse.ts
-
 use serde_json::Value;
 
 /// Recursively walks a JSON value and parses JSON-serialized strings

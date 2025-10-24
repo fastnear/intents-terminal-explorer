@@ -1,19 +1,16 @@
+//! Jump marks system for navigation bookmarks
+//!
+//! This module is only available on native targets (depends on persistent history).
+
+#![cfg(feature = "native")]
+
 use crate::history::{History, PersistedMark};
+use crate::types::Mark;
 
 const LABELS: &[&str] = &[
     "1", "2", "3", "4", "5", "6", "7", "8", "9",
     "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
 ];
-
-#[derive(Clone, Debug)]
-pub struct Mark {
-    pub label: String,
-    pub pane: u8,
-    pub height: Option<u64>,
-    pub tx_hash: Option<String>,
-    pub when_ms: i64,
-    pub pinned: bool,
-}
 
 pub struct JumpMarks {
     marks: Vec<Mark>,

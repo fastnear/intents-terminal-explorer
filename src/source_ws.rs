@@ -1,3 +1,9 @@
+//! WebSocket data source for NEAR blockchain
+//!
+//! This module is only available on native targets (not WASM).
+
+#![cfg(feature = "native")]
+
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::connect_async;

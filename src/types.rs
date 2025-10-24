@@ -23,7 +23,7 @@ pub struct TxAction {
     pub method: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockRow {
     pub height: u64,
     pub hash: String,
@@ -33,7 +33,7 @@ pub struct BlockRow {
     pub transactions: Vec<TxLite>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxLite {
     pub hash: String,
     // Optional detailed fields (populated when available)
@@ -57,7 +57,8 @@ pub struct TxDetailed {
     pub raw_transaction: Option<Vec<u8>>,  // For debugging/export
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum ActionSummary {
     CreateAccount,
     DeployContract { code_len: usize },
@@ -75,4 +76,15 @@ pub enum AppEvent {
     FromWs(WsPayload),
     NewBlock(BlockRow),
     Quit,
+}
+
+/// Jump mark for navigation bookmarks
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Mark {
+    pub label: String,
+    pub pane: u8,
+    pub height: Option<u64>,
+    pub tx_hash: Option<String>,
+    pub when_ms: i64,
+    pub pinned: bool,
 }

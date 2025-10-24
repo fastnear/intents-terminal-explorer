@@ -1,5 +1,6 @@
 # Rust
 /target/
+**/target/
 **/*.rs.bk
 *.pdb
 
@@ -30,3 +31,24 @@ ratacat_history.db-wal
 
 # Debug logs
 ratacat_debug.log
+debug.log
+*.log
+
+# Web build artifacts (Trunk)
+/dist/
+**/dist/
+
+# Session notes and summaries (Claude Code artifacts)
+*_SUMMARY.md
+*_STATUS.md
+*_FIX*.md
+*_SETUP.md
+*_IMPLEMENTATION.md
+*_COMPARISON.md
+*_QUICK_TEST.md
+*_QUICK_START.md
+SESSION_*.md
+PE_PASS_*.md
+
+# Archives
+*.zip

@@ -11,7 +11,7 @@ impl std::str::FromStr for Source {
         match s.to_lowercase().as_str() {
             "ws" | "websocket" => Ok(Source::Ws),
             "rpc" => Ok(Source::Rpc),
-            _ => Err(anyhow!("Invalid source '{}'. Valid options: ws, rpc", s)),
+            _ => Err(anyhow!("Invalid source '{s}'. Valid options: ws, rpc")),
         }
     }
 }
@@ -131,7 +131,7 @@ where
     T: PartialOrd + std::fmt::Display + Copy,
 {
     if val < min || val > max {
-        Err(anyhow!("{} must be in range [{}, {}], got {}", name, min, max, val))
+        Err(anyhow!("{name} must be in range [{min}, {max}], got {val}"))
     } else {
         Ok(val)
     }
@@ -238,7 +238,7 @@ pub fn load() -> Result<Config> {
                 .split(',')
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
-                .map(|account| format!("acct:{}", account))
+                .map(|account| format!("acct:{account}"))
                 .collect::<Vec<_>>()
                 .join(" ")
         }
@@ -275,16 +275,15 @@ pub fn load() -> Result<Config> {
 /// Validate URL format (basic check)
 fn validate_url(url: &str, name: &str) -> Result<()> {
     if url.is_empty() {
-        return Err(anyhow!("{} cannot be empty", name));
+        return Err(anyhow!("{name} cannot be empty"));
     }
 
     // Basic scheme validation
-    if url.starts_with("ws://") || url.starts_with("wss://") {
-        Ok(())
-    } else if url.starts_with("http://") || url.starts_with("https://") {
+    if url.starts_with("ws://") || url.starts_with("wss://")
+        || url.starts_with("http://") || url.starts_with("https://") {
         Ok(())
     } else {
-        Err(anyhow!("{} must start with ws://, wss://, http://, or https://", name))
+        Err(anyhow!("{name} must start with ws://, wss://, http://, or https://"))
     }
 }
 
