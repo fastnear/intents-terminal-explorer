@@ -251,6 +251,13 @@ fn handle_urls<R: Runtime>(app: &tauri::AppHandle<R>, raws: &[String]) {
     emit_or_queue(app, out);
 }
 
+/// Copy text to clipboard using Tauri clipboard plugin
+#[tauri::command]
+async fn copy_text(text: String, handle: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    handle.clipboard().write_text(text).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
@@ -274,11 +281,13 @@ pub fn run() {
 
     builder = builder
         .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             deeplink_frontend_ready,
             open_devtools,
-            close_devtools
+            close_devtools,
+            copy_text
         ])
         .setup(|app| {
             log::info!("🚀 Ratacat Tauri starting...");

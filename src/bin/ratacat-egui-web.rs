@@ -3,8 +3,8 @@
 //! Production-grade web harness using egui for WebGL canvas rendering
 //! and egui_ratatui to bridge ratatui widgets into egui.
 //!
-//! This solves all the DOM timing issues we had with Ratzilla by using
-//! immediate-mode Canvas rendering instead of DOM manipulation.
+//! This uses immediate-mode Canvas rendering (WebGL) instead of DOM manipulation
+//! for superior performance and reliability.
 
 #![cfg_attr(target_arch = "wasm32", no_main)]
 
@@ -14,7 +14,7 @@ cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
         use std::{cell::RefCell, rc::Rc};
         use egui_ratatui::RataguiBackend;
-        use soft_ratatui::SoftBackend;
+        use soft_ratatui::{EmbeddedGraphics, SoftBackend};
         use ratatui::Terminal;
         use wasm_bindgen::prelude::*;
         use eframe::wasm_bindgen;
@@ -24,6 +24,7 @@ cfg_if! {
             config::{Config, Source},
             types::AppEvent,
             source_rpc,
+            theme::Theme,
         };
 
         // ---------------------------
@@ -31,27 +32,49 @@ cfg_if! {
         // ---------------------------
 
         struct RatacatApp {
-            backend: RataguiBackend<SoftBackend>,
+            terminal: Terminal<RataguiBackend<EmbeddedGraphics>>,
             app: Rc<RefCell<App>>,
             event_rx: Rc<RefCell<tokio::sync::mpsc::UnboundedReceiver<AppEvent>>>,
         }
 
         impl RatacatApp {
             fn new(config: Config, event_rx: tokio::sync::mpsc::UnboundedReceiver<AppEvent>) -> Self {
+                log::info!("🎯 Creating App with filter: '{}'", config.default_filter);
                 let app = App::new(
                     config.render_fps,
                     config.render_fps_choices.clone(),
                     config.keep_blocks,
                     config.default_filter.clone(),
                     None, // No archival fetch for web
+                    config.theme.colors(),
                 );
+                log::info!("✅ App created successfully");
 
                 // Create egui_ratatui backend with soft renderer
-                let soft_backend = SoftBackend::new(80, 24); // Initial size
+                // Use pixel-perfect bitmap font atlases (8x13) for crisp rendering
+                // No TTF rasterization = no antialiasing blur
+                use soft_ratatui::embedded_graphics_unicodefonts::{
+                    mono_8x13_atlas,
+                    mono_8x13_bold_atlas,
+                    mono_8x13_italic_atlas,
+                };
+
+                let font_regular = mono_8x13_atlas();
+                let font_bold = Some(mono_8x13_bold_atlas());
+                let font_italic = Some(mono_8x13_italic_atlas());
+
+                let soft_backend = SoftBackend::<EmbeddedGraphics>::new(
+                    85,            // width in columns (8x13 bitmap font)
+                    30,            // height in rows (maintains aspect ratio)
+                    font_regular,
+                    font_bold,
+                    font_italic,
+                );
                 let backend = RataguiBackend::new("ratacat", soft_backend);
+                let terminal = Terminal::new(backend).expect("Failed to create terminal");
 
                 Self {
-                    backend,
+                    terminal,
                     app: Rc::new(RefCell::new(app)),
                     event_rx: Rc::new(RefCell::new(event_rx)),
                 }
@@ -107,6 +130,7 @@ cfg_if! {
                                     log::info!("Quit requested (close tab)");
                                     app.show_toast("Press Ctrl+W to close tab".to_string());
                                 }
+                                (egui::Key::Tab, false) if modifiers.shift => app.prev_pane(),
                                 (egui::Key::Tab, false) => app.next_pane(),
                                 (egui::Key::ArrowUp, false) => app.up(),
                                 (egui::Key::ArrowDown, false) => app.down(),
@@ -128,21 +152,15 @@ cfg_if! {
                                 (egui::Key::F, true) => app.start_search(),
                                 (egui::Key::U, true) => app.toggle_owned_filter(),
                                 (egui::Key::C, false) => {
-                                    let content = app.get_copy_content();
-                                    // Copy to clipboard using web-sys
-                                    if let Some(window) = web_sys::window() {
-                                        let clipboard = window.navigator().clipboard();
-                                        let _ = clipboard.write_text(&content);
-                                        let msg = match app.pane() {
-                                            0 => "Copied block info",
-                                            1 => "Copied tx hash",
-                                            2 => "Copied details",
-                                            _ => "Copied",
-                                        };
-                                        app.show_toast(msg.to_string());
-                                    } else {
-                                        app.show_toast("Copy failed".to_string());
-                                    }
+                                    let payload = ratacat::copy_api::get_copy_content(&app);
+                                    let _ok = ratacat::platform::copy_to_clipboard(&payload);
+                                    let msg = match app.pane() {
+                                        0 => "Copied block JSON",
+                                        1 => "Copied transaction JSON",
+                                        2 => "Copied details JSON",
+                                        _ => "Copied",
+                                    };
+                                    app.show_toast(msg.to_string());
                                 }
                                 (egui::Key::Slash, false) => app.start_filter(),
                                 (egui::Key::F, false) if !modifiers.ctrl => app.start_filter(),
@@ -206,16 +224,60 @@ cfg_if! {
 
         impl eframe::App for RatacatApp {
             fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-                // Process blockchain events
+                // ═══════════════════════════════════════════════════════════════
+                // TIME-BUDGETED EVENT DRAIN: Process events with 3ms budget
+                // ═══════════════════════════════════════════════════════════════
+                // This prevents UI stutter during initial catch-up by limiting
+                // how long we spend processing events per frame. If we hit the
+                // budget, we request another repaint to continue processing.
                 if let Ok(mut rx) = self.event_rx.try_borrow_mut() {
+                    use web_time::Instant;
+                    let start = Instant::now();
+                    let budget_ms = 3; // 3ms budget per frame
                     let mut count = 0;
-                    while let Ok(event) = rx.try_recv() {
-                        self.app.borrow_mut().on_event(event);
-                        count += 1;
+                    let mut hit_budget = false;
+
+                    loop {
+                        match rx.try_recv() {
+                            Ok(event) => {
+                                log::debug!("📥 Received event in update(): {:?}", event);
+                                self.app.borrow_mut().on_event(event);
+                                count += 1;
+
+                                // Check if we've exceeded our time budget
+                                if start.elapsed().as_millis() >= budget_ms {
+                                    hit_budget = true;
+                                    log::debug!("⏱️  Hit {}ms budget after {} events - will continue next frame", budget_ms, count);
+                                    break;
+                                }
+                            }
+                            Err(_) => break, // Channel empty or closed
+                        }
                     }
+
                     if count > 0 {
-                        log::debug!("Processed {} events this frame", count);
+                        log::info!("✅ Processed {} events this frame in {:.1}ms{}",
+                            count,
+                            start.elapsed().as_secs_f64() * 1000.0,
+                            if hit_budget { " (budget hit - more pending)" } else { "" }
+                        );
+
+                        // Log current app state
+                        let app = self.app.borrow();
+                        let (_, _, total_blocks) = app.filtered_blocks();
+                        log::info!("📊 App state: {} blocks in buffer", total_blocks);
+
+                        // Update HTML status bar
+                        if let Some(window) = web_sys::window() {
+                            let _ = js_sys::Reflect::get(&window, &"updateStatus".into())
+                                .and_then(|f| {
+                                    let func = js_sys::Function::from(f);
+                                    func.call2(&window, &format!("Connected | {} blocks", total_blocks).into(), &"connected".into())
+                                });
+                        }
                     }
+                } else {
+                    log::error!("❌ Failed to borrow event_rx!");
                 }
 
                 // Handle keyboard input
@@ -225,18 +287,15 @@ cfg_if! {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
                     .show(ctx, |ui| {
-                        // Create terminal with our backend
-                        let mut terminal = Terminal::new(&mut self.backend).expect("terminal");
-
                         // Draw ratatui UI
                         let app_ref = self.app.clone();
-                        terminal.draw(|f| {
+                        self.terminal.draw(|f| {
                             let mut app = app_ref.borrow_mut();
                             ratacat::ui::draw(f, &mut app, &[]); // Empty marks list for web
                         }).ok();
 
-                        // Render the terminal in egui
-                        self.backend.show(ui);
+                        // Render the terminal as an egui widget
+                        ui.add(self.terminal.backend_mut());
                     });
 
                 // Request continuous repaint (60 FPS)
@@ -263,11 +322,13 @@ cfg_if! {
                 .or_else(|| local_storage.as_ref().and_then(|ls| ls.get_item("RPC_URL").ok().flatten()))
                 .unwrap_or_else(|| "https://rpc.mainnet.fastnear.com/".to_string());
 
-            // Auth token priority: ?token param > localStorage > none
+            // Auth token priority: ?token param > localStorage > compile-time env > none
             let (auth_token, token_source) = if let Some(token) = search_params.as_ref().and_then(|p| p.get("token")) {
                 (Some(token), "URL param")
             } else if let Some(token) = local_storage.as_ref().and_then(|ls| ls.get_item("RPC_BEARER").ok().flatten()) {
                 (Some(token), "localStorage")
+            } else if let Some(token) = option_env!("FASTNEAR_AUTH_TOKEN") {
+                (Some(token.to_string()), "compile-time env")
             } else {
                 (None, "none")
             };
@@ -275,14 +336,34 @@ cfg_if! {
             let filter = search_params
                 .as_ref()
                 .and_then(|p| p.get("filter"))
-                .unwrap_or_else(|| "intents.near".to_string());
+                .or_else(|| local_storage.as_ref().and_then(|ls| ls.get_item("DEFAULT_FILTER").ok().flatten()))
+                .unwrap_or_else(|| "".to_string()); // Empty = show all blocks
+
+            // Theme priority: ?theme param > localStorage > default (Nord)
+            let theme = search_params
+                .as_ref()
+                .and_then(|p| p.get("theme"))
+                .or_else(|| local_storage.as_ref().and_then(|ls| ls.get_item("THEME").ok().flatten()))
+                .and_then(|s| Theme::from_str(&s).ok())
+                .unwrap_or_default();
 
             log::info!("🚀 Ratacat egui-web starting");
-            log::info!("RPC: {}, Filter: {}, Token: {} (from {})",
-                rpc_url, filter,
-                auth_token.as_ref().map(|t| format!("{}...", &t.chars().take(8).collect::<String>())).unwrap_or_else(|| "none".to_string()),
+            log::info!("RPC: {}", rpc_url);
+            log::info!("Filter: {}", if filter.is_empty() { "(empty - showing all blocks)".to_string() } else { format!("'{}'", filter) });
+            log::info!("Theme: {:?}", theme);
+            log::info!("Token: {} (from {})",
+                auth_token.as_ref().map(|t| format!("{}...", &t.chars().take(8).collect::<String>())).unwrap_or_else(|| "❌ NONE".to_string()),
                 token_source
             );
+
+            // Update HTML status bar
+            if let Some(window) = web_sys::window() {
+                let _ = js_sys::Reflect::get(&window, &"updateStatus".into())
+                    .and_then(|f| {
+                        let func = js_sys::Function::from(f);
+                        func.call2(&window, &format!("RPC: {} | Filter: {}", rpc_url, filter).into(), &"loading".into())
+                    });
+            }
 
             Config {
                 source: Source::Rpc,
@@ -291,7 +372,7 @@ cfg_if! {
                 near_node_url: rpc_url,
                 near_node_url_explicit: true,
                 fastnear_auth_token: auth_token,
-                poll_interval_ms: 1000,
+                poll_interval_ms: 400,  // 400ms polling for NEAR's 600ms block time
                 poll_max_catchup: 5,
                 poll_chunk_concurrency: 4,
                 rpc_timeout_ms: 8000,
@@ -301,6 +382,7 @@ cfg_if! {
                 render_fps_choices: vec![20, 30, 60],
                 keep_blocks: 100,
                 default_filter: filter,
+                theme,
             }
         }
 
@@ -313,25 +395,64 @@ cfg_if! {
         pub async fn main() {
             // Setup panic hook and logging
             console_error_panic_hook::set_once();
-            wasm_logger::init(wasm_logger::Config::new(log::Level::Info));
+            wasm_logger::init(wasm_logger::Config::new(log::Level::Debug));
 
-            log::info!("🦀 Ratacat egui-web initializing...");
+            log::info!("╔═══════════════════════════════════════════════════════════╗");
+            log::info!("║       🦀 Ratacat egui-web v0.4.0 - Starting Up        ║");
+            log::info!("╚═══════════════════════════════════════════════════════════╝");
 
             // Load configuration
             let config = Rc::new(load_web_config());
 
+            log::info!("📋 Startup Diagnostics:");
+            log::info!("  • WASM binary: ratacat-egui-web");
+            log::info!("  • UI framework: egui + egui_ratatui + soft_ratatui");
+            log::info!("  • Font backend: EmbeddedGraphics (8x13 monospace)");
+            log::info!("  • Async runtime: tokio (wasm-compatible subset)");
+            log::info!("  • Log level: Debug (all RPC activity visible)");
+
             // Setup event channel for blockchain data
             let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
 
-            // Start RPC polling task
-            let config_clone = config.clone();
+            // ═══════════════════════════════════════════════════════════════
+            // 🚀 START RPC POLLING IMMEDIATELY - BEFORE UI INITIALIZATION
+            // ═══════════════════════════════════════════════════════════════
+            // This is CRITICAL for performance: spawn the RPC task NOW so it
+            // starts running during eframe's .await (which yields control).
+            // Result: RPC fills cache while UI loads = instant blocks!
+            let config_for_rpc = config.clone();
+            log::info!("╔═══════════════════════════════════════════════════════════╗");
+            log::info!("║  🚀 SPAWNING RPC TASK **BEFORE** UI INIT (MAX SPEED)   ║");
+            log::info!("╚═══════════════════════════════════════════════════════════╝");
+            log::info!("  • RPC URL: {}", config_for_rpc.near_node_url);
+            log::info!("  • Poll Interval: {}ms", config_for_rpc.poll_interval_ms);
+            log::info!("  • Has Auth Token: {}", config_for_rpc.fastnear_auth_token.is_some());
+            log::info!("  • Filter: '{}'", config_for_rpc.default_filter);
+            log::info!("  • Strategy: RPC runs DURING UI load (parallel!)");
+
             wasm_bindgen_futures::spawn_local(async move {
-                if let Err(e) = source_rpc::run_rpc(&config_clone, event_tx).await {
-                    log::error!("RPC polling failed: {}", e);
+                log::info!("╔═══════════════════════════════════════════════════════════╗");
+                log::info!("║  ✅ RPC TASK SPAWNED - WILL RUN DURING UI INIT         ║");
+                log::info!("╚═══════════════════════════════════════════════════════════╝");
+
+                log::info!("📞 Calling source_rpc::run_rpc() NOW...");
+                match source_rpc::run_rpc(&config_for_rpc, event_tx).await {
+                    Ok(_) => {
+                        log::warn!("⚠️  RPC loop exited normally (unexpected!)");
+                    }
+                    Err(e) => {
+                        log::error!("╔═══════════════════════════════════════════════════════════╗");
+                        log::error!("║  ❌ RPC POLLING FAILED                                   ║");
+                        log::error!("╚═══════════════════════════════════════════════════════════╝");
+                        log::error!("  Error: {}", e);
+                        log::error!("  Error (debug): {:?}", e);
+                        web_sys::console::error_1(&format!("RPC polling failed: {}", e).into());
+                    }
                 }
+                log::error!("🛑 RPC task exited - this should never happen!");
             });
 
-            // Create egui app
+            // Create egui app (UI will receive blocks from RPC via event channel)
             let app = RatacatApp::new((*config).clone(), event_rx);
 
             // Get canvas element from DOM
@@ -343,19 +464,25 @@ cfg_if! {
                 .dyn_into::<web_sys::HtmlCanvasElement>()
                 .expect("canvas is not HtmlCanvasElement");
 
-            // Start eframe web runner
+            // Start eframe web runner with scaled-up rendering for better readability
             let web_options = eframe::WebOptions::default();
 
             eframe::WebRunner::new()
                 .start(
                     canvas,
                     web_options,
-                    Box::new(|_cc| Ok(Box::new(app))),
+                    Box::new(|_cc| {
+                        // Let egui auto-detect DPI using window.devicePixelRatio for crisp fonts
+                        // Non-integral scaling (like 1.5) causes blurry fonts with bilinear sampling
+                        // Auto-detection provides native resolution rendering
+                        Ok(Box::new(app))
+                    }),
                 )
                 .await
                 .expect("failed to start eframe");
 
             log::info!("✅ Ratacat egui-web running!");
+            log::info!("   (RPC task already running in parallel - check logs above)");
         }
     }
 }

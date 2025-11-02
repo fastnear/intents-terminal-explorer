@@ -10,8 +10,11 @@ use tokio::task::JoinSet;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::time::{Duration, sleep};
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+
 #[cfg(target_arch = "wasm32")]
-use web_time::Duration;
+use web_time::{Duration, Instant};
 
 #[cfg(target_arch = "wasm32")]
 use gloo_timers::future::sleep;
@@ -22,6 +25,7 @@ fn http_client() -> &'static reqwest::Client {
     HTTP.get_or_init(|| {
         #[cfg(not(target_arch = "wasm32"))]
         {
+            log::debug!("🌐 Initializing reqwest client (native)...");
             reqwest::Client::builder()
                 .pool_max_idle_per_host(8)
                 .tcp_nodelay(true)
@@ -31,48 +35,122 @@ fn http_client() -> &'static reqwest::Client {
 
         #[cfg(target_arch = "wasm32")]
         {
-            reqwest::Client::builder()
-                .build()
-                .expect("reqwest client")
+            log::info!("╔═══════════════════════════════════════════════════════════╗");
+            log::info!("║  🌐 Initializing reqwest WASM HTTP client               ║");
+            log::info!("╚═══════════════════════════════════════════════════════════╝");
+            match reqwest::Client::builder().build() {
+                Ok(client) => {
+                    log::info!("  ✅ HTTP client created successfully!");
+                    client
+                }
+                Err(e) => {
+                    log::error!("  ❌ Failed to create HTTP client: {}", e);
+                    panic!("Failed to create reqwest WASM client: {}", e);
+                }
+            }
         }
     })
 }
 
 pub async fn rpc_post(url:&str, body:&Value, timeout_ms:u64, auth_token: Option<&str>) -> Result<Value> {
+    #[cfg(target_arch = "wasm32")]
+    log::info!("═══════════════════════════════════════");
+
+    #[cfg(not(target_arch = "wasm32"))]
+    log::debug!("═══════════════════════════════════════");
+
+    log::debug!("📡 RPC POST to: {}", url);
+    let method = body.get("method").and_then(|m| m.as_str()).unwrap_or("unknown");
+    log::debug!("📋 Method: {}", method);
+    log::debug!("⏱️  Timeout: {}ms", timeout_ms);
+
     // Small, bounded retry on transient HTTP failures
     let mut attempt = 0u32;
     loop {
-        let mut req = http_client()
+        #[cfg(target_arch = "wasm32")]
+        log::info!("🔧 Getting HTTP client...");
+
+        let client = http_client();
+
+        #[cfg(target_arch = "wasm32")]
+        log::info!("🔧 Building POST request...");
+
+        let mut req = client
             .post(url)
             .json(body)
             .timeout(Duration::from_millis(timeout_ms));
 
         if let Some(token) = auth_token {
-            log::debug!("🔑 Adding Authorization header with token ({}... chars)", token.len());
+            let token_preview = if token.len() > 8 {
+                format!("{}...{}",
+                    &token.chars().take(4).collect::<String>(),
+                    &token.chars().skip(token.len().saturating_sub(4)).collect::<String>())
+            } else {
+                format!("{}...", &token.chars().take(4).collect::<String>())
+            };
+            log::debug!("🔑 Auth: Bearer {} ({} chars total)", token_preview, token.len());
             req = req.header("Authorization", format!("Bearer {token}"));
         } else {
-            log::debug!("⚠️ No auth token provided for RPC call");
+            log::warn!("⚠️  NO AUTH TOKEN - May hit rate limits (HTTP 429)!");
         }
 
+        log::debug!("🚀 Sending HTTP request (attempt {})...", attempt + 1);
+        let start = Instant::now();
+
         let res = req.send().await?;
+        let elapsed = start.elapsed();
+
+        log::debug!("📨 Response: {} ({:.2}ms)", res.status(), elapsed.as_secs_f64() * 1000.0);
+
         if res.status().is_success() {
             let v: Value = res.json().await?;
+
             if let Some(err) = v.get("error") {
+                log::error!("❌ RPC error response:");
+                log::error!("   {}", serde_json::to_string_pretty(err).unwrap_or_default());
                 let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or_default();
                 let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("rpc error");
+                log::debug!("═══════════════════════════════════════");
                 return Err(anyhow!("rpc {code} {msg}"));
             }
+
             if let Some(r) = v.get("result") {
+                // Log result summary based on method
+                match method {
+                    "block" => {
+                        let height = r.get("header").and_then(|h| h.get("height")).and_then(|h| h.as_u64());
+                        let chunks = r.get("chunks").and_then(|c| c.as_array()).map(|a| a.len());
+                        log::debug!("✅ Block: height={:?}, chunks={:?}", height, chunks);
+                    },
+                    "chunk" => {
+                        let txs = r.get("transactions").and_then(|t| t.as_array()).map(|a| a.len());
+                        log::debug!("✅ Chunk: transactions={:?}", txs);
+                    },
+                    _ => {
+                        log::debug!("✅ RPC success!");
+                    }
+                }
+                log::debug!("═══════════════════════════════════════");
                 return Ok(r.clone());
             }
+
+            log::error!("❌ Invalid RPC response - no 'result' field");
+            log::error!("   Full response: {}", serde_json::to_string(&v).unwrap_or_default());
+            log::debug!("═══════════════════════════════════════");
             return Err(anyhow!("invalid rpc payload (no result)"));
         } else {
+            log::warn!("⚠️  HTTP {} {}", res.status(), res.status().canonical_reason().unwrap_or(""));
+
             // Retry only on transient statuses
             if matches!(res.status().as_u16(), 429 | 500 | 502 | 503 | 504) && attempt < 2 {
                 attempt += 1;
+                log::info!("🔄 Retrying in {}ms... (attempt {}/3)", 150 * attempt, attempt + 1);
                 sleep(Duration::from_millis(150 * attempt as u64)).await;
                 continue;
             }
+
+            log::error!("❌ Giving up after {} attempts", attempt + 1);
+            log::debug!("═══════════════════════════════════════");
             return Err(anyhow!("http {}", res.status()));
         }
     }
@@ -124,9 +202,13 @@ pub async fn fetch_block_with_txs(
     #[allow(unused_variables)] chunk_concurrency: usize,
     auth_token: Option<&str>
 ) -> Result<BlockRow> {
+    log::debug!("🏗️  fetch_block_with_txs: Starting for block #{}", height);
+
     let b = get_block_by_height(url, height, timeout_ms, auth_token).await?;
 
     let chunks = b["chunks"].as_array().cloned().unwrap_or_default();
+    log::debug!("📦 Block #{} has {} chunks to fetch", height, chunks.len());
+
     let mut txs = Vec::<TxLite>::new();
 
     // Native: Use JoinSet for concurrent chunk fetching
@@ -153,17 +235,47 @@ pub async fn fetch_block_with_txs(
         }
     }
 
-    // WASM: Sequential chunk fetching (no threads, no Send requirement)
+    // WASM: Concurrent chunk fetching using buffer_unordered (bounded pool)
     #[cfg(target_arch = "wasm32")]
     {
-        for c in chunks.iter() {
-            if let Some(hash) = c["chunk_hash"].as_str() {
-                match get_chunk(url, hash, timeout_ms, auth_token).await {
-                    Ok(chunk) => extract_transactions_from_chunk(&chunk, &mut txs),
-                    Err(e) => log::warn!("Failed to fetch chunk {hash}: {e}"),
-                }
+        use futures::stream::{self, StreamExt};
+        use web_time::Instant;
+
+        let start = Instant::now();
+        let max_concurrent = chunk_concurrency.max(1).min(6); // Cap at 6 (browser per-origin limit)
+
+        log::debug!("🚀 WASM: Fetching {} chunks with concurrency={}", chunks.len(), max_concurrent);
+
+        // Build list of chunk hashes to fetch
+        let chunk_hashes: Vec<String> = chunks.iter()
+            .filter_map(|c| c["chunk_hash"].as_str().map(|s| s.to_string()))
+            .collect();
+
+        // Create stream of futures
+        let url_s = url.to_string();
+        let auth_s = auth_token.map(|s| s.to_string());
+
+        let chunk_futures = stream::iter(chunk_hashes).map(move |hash| {
+            let url = url_s.clone();
+            let auth = auth_s.clone();
+            async move {
+                get_chunk(&url, &hash, timeout_ms, auth.as_deref()).await
+            }
+        });
+
+        // Execute with bounded concurrency
+        let mut results = chunk_futures.buffer_unordered(max_concurrent);
+
+        while let Some(result) = results.next().await {
+            match result {
+                Ok(chunk) => extract_transactions_from_chunk(&chunk, &mut txs),
+                Err(e) => log::warn!("⚠️  Failed to fetch chunk: {}", e),
             }
         }
+
+        let elapsed = start.elapsed();
+        log::info!("✅ WASM: Fetched {} chunks in {:.0}ms (concurrency={})",
+            chunks.len(), elapsed.as_secs_f64() * 1000.0, max_concurrent);
     }
 
     let timestamp = b["header"]["timestamp_nanosec"].as_str()
@@ -178,14 +290,24 @@ pub async fn fetch_block_with_txs(
 
     let hash = b["header"]["hash"].as_str().unwrap_or("").to_string();
 
-    Ok(BlockRow {
+    log::debug!("📊 Block #{} summary:", height);
+    log::debug!("   Hash: {}", hash);
+    log::debug!("   Timestamp: {}", when);
+    log::debug!("   Total transactions: {}", txs.len());
+    log::debug!("   Chunks processed: {}", chunks.len());
+
+    let row = BlockRow {
         height,
         hash,
         timestamp: (timestamp / 1_000_000) as u64,
         tx_count: txs.len(),
         when,
         transactions: txs
-    })
+    };
+
+    log::info!("✅ Block #{} fetched successfully ({} txs)", height, row.tx_count);
+
+    Ok(row)
 }
 
 fn chrono_fmt(nano: i64) -> String {

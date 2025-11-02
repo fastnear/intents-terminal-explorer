@@ -17,13 +17,14 @@ use ratacat::{
     app::{App, InputMode},
     source_ws, source_rpc, archival_fetch, credentials,
     ui, marks::JumpMarks,
-    platform::{History, BlockPersist, TxPersist},
+    history::History,
+    platform::{BlockPersist, TxPersist},
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Load .env file if it exists (safe to ignore if not found)
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
 
     let cfg = load().context("Failed to load configuration")?;
 
@@ -78,6 +79,7 @@ async fn main() -> Result<()> {
         cfg.keep_blocks,
         cfg.default_filter.clone(),
         if cfg.archival_rpc_url.is_some() { Some(archival_tx) } else { None },
+        cfg.theme.colors(),
     );
 
     // source task
@@ -288,16 +290,15 @@ async fn handle_key(app:&mut App, k:KeyEvent, history:&History, jump_marks:&mut 
         (KeyCode::Char(' '), _) => app.toggle_details_fullscreen(),  // Spacebar to toggle fullscreen
         (KeyCode::Char('o'), KeyModifiers::CONTROL) => app.cycle_fps(),
         (KeyCode::Char('c'), _) => {
-            // copy content based on active pane
-            let content = app.get_copy_content();
+            let content = ratacat::copy_api::get_copy_content(&app);
             if ratacat::platform::copy_to_clipboard(&content) {
                 let msg = match app.pane() {
-                    0 => "Copied block info".to_string(),
-                    1 => "Copied tx hash".to_string(),
-                    2 => "Copied details".to_string(),
-                    _ => "Copied".to_string(),
+                    0 => "Copied block JSON",
+                    1 => "Copied transaction JSON",
+                    2 => "Copied details JSON",
+                    _ => "Copied",
                 };
-                app.show_toast(msg);
+                app.show_toast(msg.to_string());
             } else {
                 app.show_toast("Copy failed".to_string());
             }

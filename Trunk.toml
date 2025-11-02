@@ -1,6 +1,6 @@
 [build]
 # The index HTML file to drive the bundling process
-target = "index.html"
+target = "index-egui.html"
 
 # Build in release mode for production (smaller WASM)
 release = true
@@ -13,12 +13,12 @@ public_url = "/"
 
 # Optimize the WASM bundle
 [build.rust]
-# Features to enable for the web build
+# Features to enable for the egui web build
 default-features = false
-features = ["web"]
+features = ["egui-web"]
 
-# Binary to build (ratacat-web)
-bin = "ratacat-web"
+# Binary to build (ratacat-egui-web)
+bin = "ratacat-egui-web"
 
 [watch]
 # Paths to watch for changes during development
@@ -29,16 +29,11 @@ ignore = ["dist/", "target/"]
 
 [serve]
 # Development server configuration
-address = "127.0.0.1"
-port = 8082
+addresses = ["127.0.0.1"]
+port = 8080
 
 # Open browser automatically
 open = true
 
 # Enable HTTPS for local development (optional)
 # tls = true
-
-[clean]
-# Directories to clean
-dist = "dist"
-cargo = false  # Don't clean cargo target directory

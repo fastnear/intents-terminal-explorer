@@ -1,17 +1,14 @@
-//! Platform abstraction layer for native and web targets
-//!
-//! This module provides a unified interface for platform-specific functionality
-//! like clipboard access, persistent storage, and async runtime.
+//! Platform abstraction (clipboard, shared bits).
 
-#[cfg(feature = "native")]
+#[cfg(target_arch = "wasm32")]
+mod wasm;
+#[cfg(target_arch = "wasm32")]
+pub use wasm::copy_to_clipboard;
+
+#[cfg(not(target_arch = "wasm32"))]
 mod native;
-#[cfg(feature = "native")]
-pub use native::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use native::copy_to_clipboard;
 
-#[cfg(feature = "web")]
-mod web;
-#[cfg(feature = "web")]
-pub use web::*;
-
-// Re-export types that are common across platforms
+// Re-export types used by UI code (kept for compatibility)
 pub use crate::history::{BlockPersist, TxPersist, HistoryHit};

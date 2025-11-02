@@ -20,7 +20,7 @@ use axum::{
     body::Body,
     extract::{Path, Query, State},
     http::{Method, StatusCode},
-    response::{IntoResponse, Json, Response},
+    response::{Json, Response},
     routing::{get, post},
     Router,
 };

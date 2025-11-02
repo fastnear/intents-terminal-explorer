@@ -31,6 +31,7 @@ pub struct App {
     sel_tx: usize,
 
     details: String,
+    details_json: Option<serde_json::Value>,  // JSON representation of current transaction details
     details_scroll: u16,
 
     fps: u32,
@@ -76,14 +77,29 @@ pub struct App {
     // UI layout state
     details_fullscreen: bool,                  // Spacebar toggle for 100% details view
     details_viewport_height: u16,              // Actual visible height of details pane (set by UI layer)
+
+    // Animation state
+    spinner_frame: u8,                         // Frame counter for loading spinner animation (0-9)
+
+    // Theme
+    theme: crate::theme::ColorScheme,          // Current color scheme
 }
 
 /// Recursively format an action for PRETTY view display
 fn format_action(action: &ActionSummary) -> serde_json::Value {
+    use serde_json::Map;
+
     match action {
-        ActionSummary::CreateAccount => json!({"type": "CreateAccount"}),
+        ActionSummary::CreateAccount => {
+            let mut map = Map::new();
+            map.insert("type".to_string(), json!("CreateAccount"));
+            json!(map)
+        }
         ActionSummary::DeployContract { code_len } => {
-            json!({"type": "DeployContract", "code_size": format!("{} bytes", code_len)})
+            let mut map = Map::new();
+            map.insert("type".to_string(), json!("DeployContract"));
+            map.insert("code_size".to_string(), json!(format!("{} bytes", code_len)));
+            json!(map)
         }
         ActionSummary::FunctionCall { method_name, args_decoded, gas, deposit, .. } => {
             use crate::near_args::DecodedArgs;
@@ -99,19 +115,27 @@ fn format_action(action: &ActionSummary) -> serde_json::Value {
                 DecodedArgs::Error(e) => json!(format!("<decode error: {}>", e)),
             };
 
-            json!({
-                "type": "FunctionCall",
-                "method": method_name,
-                "args": args_display,
-                "gas": format_gas(*gas),
-                "deposit": format_near(*deposit),
-            })
+            // Build ordered map: type first, method second, then rest
+            let mut map = Map::new();
+            map.insert("type".to_string(), json!("FunctionCall"));
+            map.insert("method".to_string(), json!(method_name));
+            map.insert("args".to_string(), args_display);
+            map.insert("gas".to_string(), json!(format_gas(*gas)));
+            map.insert("deposit".to_string(), json!(format_near(*deposit)));
+            json!(map)
         }
         ActionSummary::Transfer { deposit } => {
-            json!({"type": "Transfer", "amount": format_near(*deposit)})
+            let mut map = Map::new();
+            map.insert("type".to_string(), json!("Transfer"));
+            map.insert("amount".to_string(), json!(format_near(*deposit)));
+            json!(map)
         }
         ActionSummary::Stake { stake, public_key } => {
-            json!({"type": "Stake", "amount": format_near(*stake), "public_key": public_key})
+            let mut map = Map::new();
+            map.insert("type".to_string(), json!("Stake"));
+            map.insert("amount".to_string(), json!(format_near(*stake)));
+            map.insert("public_key".to_string(), json!(public_key));
+            json!(map)
         }
         ActionSummary::AddKey { public_key, access_key } => {
             // Parse access_key if it's stringified JSON (same pattern as FunctionCall args)
@@ -120,25 +144,35 @@ fn format_action(action: &ActionSummary) -> serde_json::Value {
             } else {
                 json!(access_key)  // Fallback to string if not valid JSON
             };
-            json!({"type": "AddKey", "public_key": public_key, "access_key": parsed_access_key})
+            let mut map = Map::new();
+            map.insert("type".to_string(), json!("AddKey"));
+            map.insert("public_key".to_string(), json!(public_key));
+            map.insert("access_key".to_string(), parsed_access_key);
+            json!(map)
         }
         ActionSummary::DeleteKey { public_key } => {
-            json!({"type": "DeleteKey", "public_key": public_key})
+            let mut map = Map::new();
+            map.insert("type".to_string(), json!("DeleteKey"));
+            map.insert("public_key".to_string(), json!(public_key));
+            json!(map)
         }
         ActionSummary::DeleteAccount { beneficiary_id } => {
-            json!({"type": "DeleteAccount", "beneficiary": beneficiary_id})
+            let mut map = Map::new();
+            map.insert("type".to_string(), json!("DeleteAccount"));
+            map.insert("beneficiary".to_string(), json!(beneficiary_id));
+            json!(map)
         }
         ActionSummary::Delegate { sender_id, receiver_id, actions } => {
             // Recursively format nested actions
             let nested_formatted: Vec<serde_json::Value> = actions.iter()
                 .map(format_action)
                 .collect();
-            json!({
-                "type": "Delegate",
-                "sender": sender_id,
-                "receiver": receiver_id,
-                "actions": nested_formatted
-            })
+            let mut map = Map::new();
+            map.insert("type".to_string(), json!("Delegate"));
+            map.insert("sender".to_string(), json!(sender_id));
+            map.insert("receiver".to_string(), json!(receiver_id));
+            map.insert("actions".to_string(), json!(nested_formatted));
+            json!(map)
         }
     }
 }
@@ -150,6 +184,7 @@ impl App {
         keep_blocks:usize,
         default_filter:String,
         archival_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<u64>>,
+        theme: crate::theme::ColorScheme,
     ) -> Self {
         let filter_compiled = if default_filter.is_empty() {
             CompiledFilter::default()
@@ -162,6 +197,7 @@ impl App {
             blocks:Vec::with_capacity(keep_blocks),
             sel_block_height:None, sel_tx:0,  // Start in auto-follow mode
             details:"(No blocks yet)".into(),
+            details_json: None,
             details_scroll:0,
             fps, fps_choices, keep_blocks,
             manual_block_nav: false,
@@ -185,6 +221,8 @@ impl App {
             toast_message: None,
             details_fullscreen: false,  // Normal view by default
             details_viewport_height: 20,  // Default estimate, will be updated by UI
+            spinner_frame: 0,  // Start at first frame
+            theme,
         }
     }
 
@@ -192,6 +230,7 @@ impl App {
     pub fn fps(&self)->u32{ self.fps }
     pub fn quit_flag(&self)->bool{ self.quit }
     pub fn pane(&self)->usize{ self.pane }
+    pub fn theme(&self) -> &crate::theme::ColorScheme { &self.theme }
     pub fn is_viewing_cached_block(&self)->bool {
         if let Some(height) = self.sel_block_height {
             self.find_block_index(Some(height)).is_none() && self.cached_blocks.contains_key(&height)
@@ -215,7 +254,7 @@ impl App {
 
     /// Get the currently selected block (fallback to cache if aged out of main buffer)
     /// Filter-aware in auto-follow mode: returns first block with matching transactions
-    fn current_block(&self) -> Option<&BlockRow> {
+    pub fn current_block(&self) -> Option<&BlockRow> {
         if let Some(idx) = self.find_block_index(self.sel_block_height) {
             // Manual mode: return block at specific height
             self.blocks.get(idx)
@@ -356,6 +395,17 @@ impl App {
     pub fn debug_visible(&self)->bool { self.debug_visible }
     pub fn details_fullscreen(&self)->bool { self.details_fullscreen }
     pub fn loading_block(&self)->Option<u64> { self.loading_block }
+
+    /// Get current spinner frame character for loading animations
+    pub fn spinner_char(&self) -> char {
+        const SPINNER_FRAMES: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        SPINNER_FRAMES[self.spinner_frame as usize % 10]
+    }
+
+    /// Advance spinner animation to next frame (call on each render)
+    pub fn tick_spinner(&mut self) {
+        self.spinner_frame = (self.spinner_frame + 1) % 10;
+    }
 
     /// Set the actual viewport height of details pane (called from UI layer)
     pub fn set_details_viewport_height(&mut self, height: u16) {
@@ -573,34 +623,94 @@ impl App {
         match self.pane {
             0 => self.copy_block_info(),
             1 => self.copy_tx_hash(),
-            2 => self.details().to_string(),
+            2 => {
+                // Use stored JSON if available, otherwise regenerate from current tx
+                if let Some(ref json) = self.details_json {
+                    serde_json::to_string_pretty(json).unwrap_or_default()
+                } else {
+                    // Fallback: regenerate from current selection
+                    self.copy_tx_hash()
+                }
+            }
             _ => String::new(),
         }
     }
 
     fn copy_block_info(&self) -> String {
         if let Some(block) = self.current_block() {
-            format!("#{} | {}", block.height, block.hash)
+            // Get transaction list (filtered or all)
+            let (filtered_txs, _, _) = self.txs();
+            let filtered_active = self.owned_only_filter || !self.filter_query.trim().is_empty();
+
+            // Build list of transaction references
+            let txs_to_export: Vec<&TxLite> = if filtered_active {
+                filtered_txs.iter().collect()
+            } else {
+                block.transactions.iter().collect()
+            };
+
+            // Build JSON
+            let block_json = self.build_block_json(block, &txs_to_export);
+
+            // Return pretty-printed JSON
+            serde_json::to_string_pretty(&block_json).unwrap_or_default()
         } else {
             String::new()
         }
     }
 
     fn copy_tx_hash(&self) -> String {
-        if self.current_block().is_some() {
+        if let Some(block) = self.current_block() {
             let (filtered_txs, _, _) = self.txs();
             if let Some(tx) = filtered_txs.get(self.sel_tx) {
-                // If we have signer/receiver, format as "signer → receiver | hash"
-                if let (Some(signer), Some(receiver)) = (&tx.signer_id, &tx.receiver_id) {
-                    format!("{} → {} | {}", signer, receiver, tx.hash)
-                } else {
-                    tx.hash.clone()
-                }
+                // Build JSON using helper
+                let tx_json = self.build_tx_json(block, tx);
+
+                // Return pretty-printed JSON
+                serde_json::to_string_pretty(&tx_json).unwrap_or_default()
             } else {
                 String::new()
             }
         } else {
             String::new()
+        }
+    }
+
+    /// Format action summary for brief display (one line)
+    /// Reserved for future UI enhancements (transaction list view)
+    #[allow(dead_code)]
+    fn format_action_brief(&self, action: &ActionSummary) -> String {
+        use crate::util_text::*;
+        match action {
+            ActionSummary::CreateAccount => "CreateAccount".to_string(),
+            ActionSummary::DeployContract { code_len } => {
+                format!("DeployContract ({} bytes)", code_len)
+            }
+            ActionSummary::FunctionCall { method_name, gas, deposit, .. } => {
+                format!("FunctionCall: {}() [gas: {}, deposit: {}]",
+                    method_name,
+                    format_gas(*gas),
+                    format_near(*deposit)
+                )
+            }
+            ActionSummary::Transfer { deposit } => {
+                format!("Transfer: {}", format_near(*deposit))
+            }
+            ActionSummary::Stake { stake, public_key } => {
+                format!("Stake: {} [key: {}]", format_near(*stake), &public_key[..8])
+            }
+            ActionSummary::AddKey { public_key, .. } => {
+                format!("AddKey: {}", &public_key[..16])
+            }
+            ActionSummary::DeleteKey { public_key } => {
+                format!("DeleteKey: {}", &public_key[..16])
+            }
+            ActionSummary::DeleteAccount { beneficiary_id } => {
+                format!("DeleteAccount → {}", beneficiary_id)
+            }
+            ActionSummary::Delegate { sender_id, receiver_id, actions } => {
+                format!("Delegate: {} → {} ({} actions)", sender_id, receiver_id, actions.len())
+            }
         }
     }
 
@@ -924,36 +1034,63 @@ impl App {
         }
     }
 
+    /// Build JSON representation of a transaction with formatted actions
+    fn build_tx_json(&self, block: &BlockRow, tx: &TxLite) -> serde_json::Value {
+        let mut tx_json = json!({
+            "hash": tx.hash,
+            "block": block.height,
+        });
+
+        // Add signer/receiver if available
+        if let Some(ref signer) = tx.signer_id {
+            tx_json["signer"] = json!(signer);
+        }
+        if let Some(ref receiver) = tx.receiver_id {
+            tx_json["receiver"] = json!(receiver);
+        }
+        if let Some(nonce) = tx.nonce {
+            tx_json["nonce"] = json!(nonce);
+        }
+
+        // Format actions with human-readable gas/deposits
+        if let Some(ref actions) = tx.actions {
+            let formatted_actions: Vec<serde_json::Value> = actions.iter().map(|action| {
+                format_action(action)
+            }).collect();
+            tx_json["actions"] = json!(formatted_actions);
+        }
+
+        tx_json
+    }
+
+    /// Build JSON representation of a block with all transactions
+    fn build_block_json(&self, block: &BlockRow, txs: &[&TxLite]) -> serde_json::Value {
+        let transactions: Vec<serde_json::Value> = txs.iter()
+            .map(|tx| self.build_tx_json(block, tx))
+            .collect();
+
+        json!({
+            "block": {
+                "height": block.height,
+                "hash": block.hash.clone(),
+                "timestamp": block.timestamp,
+                "when": block.when.clone(),
+                "tx_count": block.tx_count,
+                "transactions": transactions
+            }
+        })
+    }
+
     pub fn select_tx(&mut self) {
         if let Some(b) = self.current_block() {
             let (filtered_txs, _, _) = self.txs();
             if let Some(tx) = filtered_txs.get(self.sel_tx) {
-                // Build PRETTY view with formatted actions
-                let mut pretty_json = json!({
-                    "hash": tx.hash,
-                    "block": b.height,
-                });
+                // Build JSON representation
+                let tx_json = self.build_tx_json(b, tx);
 
-                // Add signer/receiver if available
-                if let Some(ref signer) = tx.signer_id {
-                    pretty_json["signer"] = json!(signer);
-                }
-                if let Some(ref receiver) = tx.receiver_id {
-                    pretty_json["receiver"] = json!(receiver);
-                }
-                if let Some(nonce) = tx.nonce {
-                    pretty_json["nonce"] = json!(nonce);
-                }
-
-                // Format actions with human-readable gas/deposits
-                if let Some(ref actions) = tx.actions {
-                    let formatted_actions: Vec<serde_json::Value> = actions.iter().map(|action| {
-                        format_action(action)
-                    }).collect();
-                    pretty_json["actions"] = json!(formatted_actions);
-                }
-
-                self.details = pretty(&pretty_json, 2);
+                // Store JSON and create pretty-printed view
+                self.details_json = Some(tx_json.clone());
+                self.details = pretty(&tx_json, 2);
             }
         }
     }
@@ -982,10 +1119,34 @@ impl App {
             }
             AppEvent::NewBlock(b) => {
                 log::info!("📥 App received NewBlock event - height: {}, txs: {}", b.height, b.tx_count);
+
+                // Check filter matching before pushing
+                let matching_txs = b.transactions.iter()
+                    .filter(|tx| {
+                        let tx_json = serde_json::to_value(tx).unwrap_or_default();
+                        filter::tx_matches_filter(&tx_json, &self.filter_compiled)
+                    })
+                    .count();
+
+                log::debug!("🎯 Filter analysis for block #{}:", b.height);
+                log::debug!("   Current filter: {:?}", self.filter_query);
+                log::debug!("   Total transactions: {}", b.tx_count);
+                log::debug!("   Matching transactions: {}", matching_txs);
+                log::debug!("   Owned-only filter: {}", self.owned_only_filter);
+
+                if matching_txs > 0 {
+                    log::info!("✅ Block #{} has {} matching txs - WILL BE SHOWN", b.height, matching_txs);
+                } else if self.filter_query.is_empty() && !self.owned_only_filter {
+                    log::debug!("📋 Block #{} - no filter active, showing all blocks", b.height);
+                } else {
+                    log::debug!("⏭️  Block #{} has 0 matching txs - will be HIDDEN by filter", b.height);
+                }
+
                 // Check if this block was being fetched from archival
                 if self.loading_block == Some(b.height) {
                     self.loading_block = None;  // Clear loading state
                 }
+
                 self.push_block(b);
             }
         }

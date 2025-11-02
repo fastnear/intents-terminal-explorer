@@ -26,6 +26,7 @@ pub mod config;
 pub mod types;
 pub mod util_text;
 pub mod json_pretty;
+pub mod json_syntax;
 pub mod json_auto_parse;
 
 // RPC utilities (same direct JSON-RPC implementation for both native and web)
@@ -35,6 +36,7 @@ pub mod app;
 pub mod ui;
 pub mod near_args;
 pub mod filter;
+pub mod theme;
 
 // History module (has native-only implementation internally)
 pub mod history;
@@ -58,28 +60,12 @@ pub mod marks;
 
 // Platform abstraction layer
 pub mod platform;
+pub mod copy_payload;
+pub mod copy_api;
 
-// Arbitrage engine (native-only for now)
-#[cfg(feature = "native")]
-pub mod arb_engine;
-
-#[cfg(feature = "native")]
-pub mod ref_finance_client;
-
-#[cfg(feature = "native")]
-pub mod price_discovery;
-
-#[cfg(feature = "native")]
-pub mod arb_config;
-
-#[cfg(feature = "native")]
-pub mod slippage;
-
-#[cfg(feature = "native")]
-pub mod risk_manager;
-
-#[cfg(feature = "native")]
-pub mod execution_engine;
+// NOTE: Arbitrage engine has been moved to separate workspace member: ref-arb-scanner/
+// To build: cargo build -p ref-arb-scanner
+// To run: cargo run -p ref-arb-scanner
 
 // Re-export commonly used types
 pub use app::{App, InputMode};
