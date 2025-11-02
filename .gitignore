@@ -52,3 +52,10 @@ PE_PASS_*.md
 
 # Archives
 *.zip
+
+# Font files (development artifacts)
+Fira_Code/
+assets/fonts/
+
+# Archived documentation
+docs/archive/

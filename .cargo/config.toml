@@ -1,0 +1,18 @@
+# Ratacat Cargo Configuration
+#
+# This configuration enforces zero-warning policy for both native and WASM targets.
+# All warnings are treated as errors during compilation to maintain code quality.
+
+[build]
+target-dir = "target"
+
+# Enforce warnings as errors for native targets
+[target.'cfg(not(target_arch = "wasm32"))']
+rustflags = ["-Dwarnings"]
+
+# Enforce warnings as errors for WASM targets
+[target.wasm32-unknown-unknown]
+rustflags = ["-Dwarnings"]
+
+[env]
+RUST_LOG = "info"

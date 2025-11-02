@@ -17,7 +17,7 @@ Ratacat v0.4.0 features a revolutionary **quad-deployment architecture** - write
 │  │  Terminal  │  │  Browser   │  │   Tauri    │  │  Browser Ext +   │ │
 │  │  (Native)  │  │   (WASM)   │  │  Desktop   │  │  Native Host     │ │
 │  │            │  │            │  │            │  │                  │ │
-│  │ • Crossterm│  │ • Ratzilla │  │ • Deep     │  │ • MV3 Extension  │ │
+│  │ • Crossterm│  │ • egui     │  │ • Deep     │  │ • MV3 Extension  │ │
 │  │ • SQLite   │  │ • In-mem   │  │   links    │  │ • stdio bridge   │ │
 │  │ • WS + RPC │  │ • RPC only │  │ • Single   │  │ • myapp://       │ │
 │  └─────┬──────┘  └─────┬──────┘  │   instance │  │   deep links     │ │
@@ -35,10 +35,11 @@ Ratacat v0.4.0 features a revolutionary **quad-deployment architecture** - write
 │                         ▼                                               │
 │              ┌─────────────────────────────────────┐                    │
 │              │    Platform Abstraction             │                    │
-│              │  • Clipboard (copypasta/web-sys)    │                    │
+│              │  • Clipboard (unified 4-tier)       │                    │
+│              │    - Tauri plugin / Extension relay │                    │
+│              │    - Navigator API / execCommand    │                    │
 │              │  • Storage (SQLite/in-memory)       │                    │
 │              │  • Runtime (tokio full/wasm)        │                    │
-│              │  • Feature flags (dep: mappings)    │                    │
 │              └─────────────────────────────────────┘                    │
 │                                                                         │
 │              NEAR Blockchain + Browser Integration                      │
@@ -202,10 +203,10 @@ cp .env.example .env
 vim .env
 
 # Run with default settings
-cargo run
+cargo run --bin ratacat --features native
 
 # Or override with CLI arguments
-cargo run -- --source rpc --render-fps 60
+cargo run --bin ratacat --features native -- --source rpc --render-fps 60
 ```
 
 ### Configuration Methods
@@ -327,7 +328,7 @@ Error: POLL_INTERVAL_MS must be in range [100, 10000], got 50000
 
 **Development with local Node server:**
 ```bash
-SOURCE=ws cargo run
+SOURCE=ws cargo run --bin ratacat --features native
 ```
 
 **Production mainnet monitoring:**
@@ -351,7 +352,7 @@ SOURCE=ws cargo run
 
 **High-performance local monitoring:**
 ```bash
-SOURCE=ws RENDER_FPS=60 KEEP_BLOCKS=500 cargo run
+SOURCE=ws RENDER_FPS=60 KEEP_BLOCKS=500 cargo run --bin ratacat --features native
 ```
 
 For complete documentation of all options, see `.env.example`.
@@ -387,34 +388,107 @@ For complete documentation of all options, see `.env.example`.
 - `c` - Copy details to clipboard (shows toast notification with pane-specific message)
 - `q` or `Ctrl+C` - Quit
 
+### Text Selection & Copying
+
+**Terminal Version (Native)**:
+Ratacat enables mouse capture for pane navigation. To select text from the terminal:
+
+- **macOS iTerm2**: Hold `Option/Alt` while clicking and dragging
+- **macOS Terminal.app**: Hold `Fn` while selecting
+- **Linux**: Hold `Shift` while clicking and dragging (GNOME Terminal, Alacritty, xterm, etc.)
+- **Windows**: Hold `Shift` while selecting (Windows Terminal, ConEmu)
+
+**Tips**:
+- Double-click with modifier key to select entire words (useful for transaction hashes, account names)
+- Triple-click with modifier to select entire lines
+- The details pane has no left border specifically to make mouse selection easier
+
+**Web Version**:
+Text selection works natively in the browser. Simply click and drag to select - no modifier keys needed.
+
+**Copy Shortcuts**:
+Press `c` to copy pane-specific content to clipboard:
+- **Blocks pane**: All transactions in selected block (structured format with metadata)
+- **Transactions pane**: Human-readable view + raw JSON payload
+- **Details pane**: Full JSON content (what you see in the pane)
+
 ## Building & Running
 
 ### Native Terminal Mode
 
+**Font Rendering Note**: The native terminal version uses your terminal emulator's font settings. Ratacat does not control font rendering - this is managed by your terminal emulator (iTerm2, Alacritty, Terminal.app, etc.).
+
+**Recommended Monospace Fonts**:
+- **JetBrains Mono** - Excellent Unicode coverage, designed for code
+- **Cascadia Code** - Microsoft's modern terminal font with ligatures
+- **Fira Code** - Popular with programmers, good ligature support
+- **SF Mono** (macOS) - Apple's system monospace font
+- **Menlo** (macOS) - Classic Mac terminal font
+
+**Terminal Emulator Configuration Examples**:
+
+<details>
+<summary>Alacritty (YAML config)</summary>
+
+```yaml
+# ~/.config/alacritty/alacritty.yml
+font:
+  normal:
+    family: "JetBrains Mono"
+    style: Regular
+  bold:
+    family: "JetBrains Mono"
+    style: Bold
+  italic:
+    family: "JetBrains Mono"
+    style: Italic
+  size: 14.0
+
+  # Optional: adjust spacing for better readability
+  offset:
+    x: 0
+    y: 0
+  glyph_offset:
+    x: 0
+    y: 0
+```
+</details>
+
+<details>
+<summary>iTerm2 (macOS GUI settings)</summary>
+
+1. Open **iTerm2 → Preferences → Profiles → Text**
+2. Click **Change Font** button
+3. Select font family (e.g., "JetBrains Mono") and size (14pt recommended)
+4. Enable **Anti-aliased** and **Use thin strokes** for crisp rendering
+</details>
+
 ```bash
-# Build release version
-cargo build --release
+# Build release version (requires native feature)
+cargo build --bin ratacat --features native --release
 
 # Run with default settings (WebSocket mode)
-cargo run
+cargo run --bin ratacat --features native
 
 # Run in RPC mode
-cargo run -- --source rpc
+cargo run --bin ratacat --features native -- --source rpc
 
 # Run with custom settings
-cargo run -- --source rpc --render-fps 60 --keep-blocks 200
+cargo run --bin ratacat --features native -- --source rpc --render-fps 60 --keep-blocks 200
 
 # Or use environment variables
-SOURCE=rpc RENDER_FPS=60 cargo run
+SOURCE=rpc RENDER_FPS=60 cargo run --bin ratacat --features native
 
 # View all CLI options
-cargo run -- --help
+cargo run --bin ratacat --features native -- --help
 
 # Run release binary directly
 ./target/release/ratacat --source rpc --near-node-url https://rpc.mainnet.fastnear.com/
 ```
 
 ### Web Browser Mode
+
+**Technology Stack**: Uses **eframe** (egui's app framework) with **egui_ratatui** to render terminal UI in browser via WebGL.
 
 **Prerequisites:**
 ```bash
@@ -427,19 +501,20 @@ rustup target add wasm32-unknown-unknown
 
 **Build Commands:**
 ```bash
-# Development server (auto-reload on changes)
-trunk serve --release --no-default-features --features web
+# Development server (auto-reload on changes) - uses egui
+trunk serve
 # Opens at http://127.0.0.1:8080
 
 # Production build
-trunk build --release --no-default-features --features web
+trunk build --release
 # Output: dist/index.html, dist/*.wasm, dist/*.js
 ```
 
-**Critical Build Flags:**
-- `--no-default-features` - **REQUIRED** - Prevents inclusion of native feature (which includes NEAR SDK crates with C dependencies)
-- `--features web` - Enables web-specific dependencies (Ratzilla, wasm-bindgen, web-sys)
-- `--release` - Optimizations (smaller WASM, faster runtime)
+**Critical Build Details:**
+- `--no-default-features` - **REQUIRED** - Configured in `Trunk.toml` to prevent NEAR SDK crates (C dependencies)
+- `--features egui-web` - Enables eframe, egui_ratatui, soft_ratatui, wasm-bindgen, web-sys
+- Binary: `ratacat-egui-web` (specified in `Trunk.toml`)
+- HTML: `index-egui.html` (specifies `data-bin="ratacat-egui-web"`)
 
 **Common Build Errors & Solutions:**
 
@@ -453,30 +528,30 @@ trunk build --release --no-default-features --features web
 
 3. **Error: Entry symbol `main` declared multiple times**
    - **Cause:** WASM binaries need `#![no_main]` attribute
-   - **Fix:** Already in `src/bin/ratacat-web.rs`:
+   - **Fix:** Already in `src/bin/ratacat-egui-web.rs`:
      ```rust
      #![cfg_attr(target_arch = "wasm32", no_main)]
      ```
 
 4. **Error: Multiple target artifacts found**
    - **Cause:** Trunk doesn't know which binary to build
-   - **Fix:** Already in `index.html`:
+   - **Fix:** Already in `index-egui.html`:
      ```html
-     <link data-trunk rel="rust" data-bin="ratacat-web" />
+     <link data-trunk rel="rust" data-bin="ratacat-egui-web" />
      ```
 
 **Verifying the Build:**
 ```bash
 # Check that no NEAR crates are in WASM dependency tree
-cargo tree --target wasm32-unknown-unknown --no-default-features --features web | grep near-
+cargo tree --target wasm32-unknown-unknown --no-default-features --features egui-web | grep near-
 
 # Should return empty (no near-* crates)
 ```
 
 ### Ratatui Version Requirements
 
-**Web builds require ratatui 0.29+** for Ratzilla compatibility:
-- Ratzilla 0.2 depends on ratatui ^0.29
+**Web builds require ratatui 0.29+** for egui_ratatui compatibility:
+- egui_ratatui 2.0 depends on ratatui ^0.29
 - Native builds work with any version, but 0.29 used for consistency
 
 **Breaking Changes in 0.29 Upgrade:**
@@ -554,6 +629,12 @@ Ratacat implements an **8-point color-coded debug logging waterfall** to trace d
 - **Development**: `tauri-plugin-log` forwards Rust logs to browser DevTools console
 - **Production**: Logs written to `~/Library/Logs/com.ratacat.fast/Ratacat.log` (macOS)
 - Both: `env_logger` outputs to stdout/stderr
+
+**Clipboard**:
+- **Plugin**: `tauri-plugin-clipboard-manager` (v2.3+) - Official Tauri clipboard plugin
+- **JavaScript Bridge**: `web/platform.js` calls `__TAURI__.invoke("copy_text", { text })` as first fallback
+- **Command**: `copy_text` command in `lib.rs` using `ClipboardExt` trait
+- **Graceful Degradation**: Falls back to Navigator API → execCommand if plugin unavailable
 
 #### Build Process
 
@@ -736,21 +817,26 @@ This enables the browser extension to send `near://` deep links to the desktop a
 ```
 ratacat/
 ├── Cargo.toml           # Dependencies with feature flags (native/web)
-├── index.html           # Web app entry point
+├── index-egui.html      # Web app entry point (egui + ratatui)
 ├── Trunk.toml           # Web build configuration
+├── web/
+│   └── platform.js      # Unified clipboard bridge (Tauri/Extension/Navigator/execCommand)
 ├── src/
 │   ├── lib.rs           # Library exports (shared core)
 │   ├── bin/
 │   │   ├── ratacat.rs   # Native terminal binary
-│   │   └── ratacat-web.rs # Web browser binary (WASM)
+│   │   ├── ratacat-egui-web.rs # Web browser binary (WASM + egui)
+│   │   └── ratacat-proxy.rs    # RPC proxy server (development)
 │   ├── platform/        # Platform abstraction layer
 │   │   ├── mod.rs       # Platform dispatch
-│   │   ├── native.rs    # Native implementations
-│   │   └── web.rs       # Web implementations
+│   │   ├── native.rs    # Native implementations (copypasta)
+│   │   └── web.rs       # Web implementations (WASM-bindgen bridge)
 │   ├── app.rs           # Application state (shared)
 │   ├── ui.rs            # Ratatui rendering (70/30 layout split, shared)
 │   ├── config.rs        # CLI args + env config with validation
 │   ├── types.rs         # Data models (shared)
+│   ├── theme.rs         # Color themes (Nord/DosBlue/AmberCrt/GreenPhosphor)
+│   ├── json_syntax.rs   # JSON syntax highlighting (WCAG AAA colors)
 │   ├── source_ws.rs     # WebSocket client (native-only)
 │   ├── source_rpc.rs    # NEAR RPC poller (shared)
 │   ├── archival_fetch.rs # Background archival RPC fetcher (shared)
@@ -759,10 +845,22 @@ ratacat/
 │   ├── json_pretty.rs   # ANSI-colored JSON (shared)
 │   ├── json_auto_parse.rs # Recursive nested JSON parser (shared)
 │   ├── util_text.rs     # Soft-wrapping (shared)
-│   ├── clipboard.rs     # Clipboard integration (native-only)
+│   ├── rpc_utils.rs     # RPC client utilities (shared)
 │   ├── near_args.rs     # Base64 args decoder (shared)
 │   ├── marks.rs         # Jump marks system (native-only)
 │   └── credentials.rs   # Credentials watcher (native-only)
+├── tauri-workspace/
+│   └── src-tauri/
+│       ├── Cargo.toml   # Tauri dependencies + clipboard plugin
+│       ├── src/
+│       │   ├── lib.rs   # Core logic + clipboard command
+│       │   ├── main.rs  # Entry point
+│       │   └── bin/
+│       │       └── ratacat-egui-tauri.rs # Tauri + egui integration
+│       └── tauri.conf.json # Tauri configuration
+├── vendor/
+│   ├── egui_ratatui/    # egui + ratatui bridge (local patches)
+│   └── soft_ratatui/    # Software rendering backend (local patches)
 └── .env.example         # Configuration template
 ```
 
@@ -775,6 +873,25 @@ ratacat/
 - **egui_ratatui bridge**: Web uses `egui_ratatui` to render ratatui widgets in egui
 
 ## Recent Improvements (v0.3.0)
+
+### Unified Clipboard System (v0.4.1)
+- **Problem**: Inline clipboard code duplicated across web and Tauri binaries, no fallback chain for reliability
+- **Solution**: Platform abstraction with JavaScript bridge and 4-tier fallback chain
+- **Key Features**:
+  - `src/platform/web.rs`: WASM-bindgen bridge to JavaScript
+  - `web/platform.js`: Unified clipboard facade with fallback chain:
+    1. Tauri clipboard plugin (via invoke command)
+    2. Browser extension relay (via `chrome.runtime.sendMessage`)
+    3. Navigator Clipboard API (modern browsers, HTTPS/localhost only)
+    4. Legacy execCommand fallback (older browsers/WebViews)
+  - `tauri-plugin-clipboard-manager`: Official Tauri v2 clipboard plugin
+  - Removed code duplication from `ratacat-egui-web.rs` and `ratacat-egui-tauri.rs`
+  - All binaries now use `ratacat::platform::copy_to_clipboard()` abstraction
+- **Benefits**:
+  - Maximum compatibility across all environments (web, Tauri, extension, legacy)
+  - Single source of truth eliminates maintenance burden
+  - Production-ready with graceful degradation
+  - Browser extension integration ready
 
 ### Block Selection Refactor (Height-Based Tracking)
 - **Previous behavior**: Selection tracked by array index, causing UI to shift as new blocks arrived
@@ -920,13 +1037,21 @@ native = [
     "tokio/rt-multi-thread", "tokio/macros", "tokio/time", "tokio/signal",
     "tokio/fs", "tokio/io-util",
 ]
-web = [
-    # Web rendering
-    "dep:ratzilla",
-    # WASM bridge
-    "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:web-sys",
-    # WASM-compatible utilities
-    "dep:getrandom", "dep:console_error_panic_hook", "dep:wasm-logger"
+
+egui-web = [
+    "dep:egui",
+    "dep:eframe",
+    "dep:egui_ratatui",
+    "dep:soft_ratatui",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:js-sys",
+    "dep:web-sys",
+    "dep:getrandom",
+    "dep:console_error_panic_hook",
+    "dep:wasm-logger",
+    "dep:web-time",
+    "dep:gloo-timers",
 ]
 
 [dependencies]
@@ -941,7 +1066,7 @@ base64 = "0.22"
 once_cell = "1"
 cfg-if = "1"
 
-# TUI (version 0.29+ for Ratzilla compatibility)
+# TUI (version 0.29+ for egui_ratatui compatibility)
 ratatui = { version = "0.29", default-features = false }
 
 # Chrono with WASM support
@@ -976,7 +1101,10 @@ tungstenite = { version = "0.21", optional = true }
 futures-util = { version = "0.3", optional = true }
 
 # Web-only dependencies
-ratzilla = { version = "0.2", optional = true }
+egui = { version = "0.32", optional = true }
+eframe = { version = "0.32", optional = true, default-features = false, features = ["glow", "default_fonts"] }
+egui_ratatui = { version = "2.0", optional = true }
+soft_ratatui = { version = "0.1", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 web-sys = { version = "0.3", optional = true, features = ["Window", "Navigator", "Clipboard", "Storage", "console"] }
@@ -1040,8 +1168,9 @@ Features like clipboard, SQLite, file watching are native-only.
 **Solution:**
 - Platform abstraction layer (`src/platform/`)
 - Separate implementations:
-  - `platform/native.rs` - Uses copypasta, rusqlite
-  - `platform/web.rs` - Uses web-sys, in-memory storage
+  - `platform/native.rs` - Uses copypasta for clipboard, rusqlite for storage
+  - `platform/web.rs` - WASM-bindgen bridge to JavaScript clipboard facade (`web/platform.js`)
+  - `web/platform.js` - 4-tier fallback: Tauri plugin → Extension relay → Navigator API → execCommand
 - Conditional module selection in lib.rs:
   ```rust
   #[cfg(feature = "native")]
@@ -1066,12 +1195,12 @@ Features like clipboard, SQLite, file watching are native-only.
 
 **High CPU usage**:
 ```bash
-RENDER_FPS=20 KEEP_BLOCKS=50 cargo run
+RENDER_FPS=20 KEEP_BLOCKS=50 cargo run --bin ratacat --features native
 ```
 
 **RPC timeouts**:
 ```bash
-RPC_TIMEOUT_MS=15000 POLL_CHUNK_CONCURRENCY=2 cargo run
+RPC_TIMEOUT_MS=15000 POLL_CHUNK_CONCURRENCY=2 cargo run --bin ratacat --features native
 ```
 
 **Search not finding results**:
@@ -1123,18 +1252,23 @@ Ratacat now includes a standalone arbitrage scanning engine that monitors Ref Fi
 ### Quick Start
 
 ```bash
-# Build the arbitrage scanner
-cargo build --bin ref-arb-scanner --release
+# Build the arbitrage scanner (now a workspace member!)
+cargo build -p ref-arb-scanner --release
 
 # Run with mainnet
 NEAR_NODE_URL=https://rpc.mainnet.fastnear.com/ \
 FASTNEAR_AUTH_TOKEN=your_token_here \
-./target/release/ref-arb-scanner
+cargo run -p ref-arb-scanner --release
 
 # Run with testnet
 NEAR_NODE_URL=https://rpc.testnet.fastnear.com/ \
+cargo run -p ref-arb-scanner --release
+
+# Or run the binary directly
 ./target/release/ref-arb-scanner
 ```
+
+**Note**: As of recent updates, ref-arb-scanner has been moved to a separate workspace member at `ref-arb-scanner/`. This makes it independently buildable and easy to revert if needed. See `REF_ARB_SCANNER_REVERSAL.md` for details on bringing it back into the main codebase.
 
 ### Architecture
 
@@ -1325,26 +1459,36 @@ The arbitrage engine is designed as a **standalone module** that can be:
 
 ### File Structure
 
+**New Location**: Separate workspace member at `ref-arb-scanner/`
+
 ```
-src/
-├── arb_engine.rs           # Core detection logic (520 lines)
-│   ├── TickMA              # Moving average ring buffer
-│   ├── PoolTracker         # Per-pool state + MA
-│   ├── LightningArbEngine  # Main detection engine
-│   ├── ArbOpportunity      # Output struct
-│   └── TrianglePath        # 3-pool cycle definition
+ref-arb-scanner/              # Workspace member (independent crate)
+├── Cargo.toml                # Independent package config
+├── src/
+│   ├── lib.rs                # Library re-exports
+│   ├── main.rs               # Binary entry point (was bin/ref-arb-scanner.rs)
+│   ├── arb_engine.rs         # Core detection logic (623 lines)
+│   │   ├── TickMA            # Moving average ring buffer
+│   │   ├── PoolTracker       # Per-pool state + MA
+│   │   ├── LightningArbEngine  # Main detection engine
+│   │   ├── ArbOpportunity    # Output struct
+│   │   └── TrianglePath      # 3-pool cycle definition
+│   │
+│   ├── ref_finance_client.rs # RPC client (268 lines)
+│   │   ├── RefFinanceClient  # Pool data fetcher
+│   │   ├── View functions    # get_pools(), get_pool()
+│   │   └── Auto-discovery    # NEAR pair finder
+│   │
+│   ├── arb_config.rs         # Configuration (317 lines)
+│   ├── price_discovery.rs    # USD price graph (225 lines)
+│   ├── risk_manager.rs       # Position sizing (300 lines)
+│   ├── execution_engine.rs   # Display/Simulate/Execute (212 lines)
+│   └── slippage.rs           # Constant product formula (157 lines)
 │
-├── ref_finance_client.rs   # RPC client (230 lines)
-│   ├── RefFinanceClient    # Pool data fetcher
-│   ├── View functions      # get_pools(), get_pool()
-│   └── Auto-discovery      # NEAR pair finder
-│
-└── bin/
-    └── ref-arb-scanner.rs  # Standalone binary (145 lines)
-        ├── Pool registration
-        ├── Real-time monitoring
-        └── Formatted output
+└── (Total: ~2,313 lines across 8 files)
 ```
+
+**Reversal**: See `REF_ARB_SCANNER_REVERSAL.md` for step-by-step instructions to move it back into the main codebase (takes ~5 minutes).
 
 ### Configuration
 
@@ -1367,8 +1511,8 @@ RUST_LOG=debug
 ### API Example
 
 ```rust
-use ratacat::arb_engine::{LightningArbEngine, ArbType};
-use ratacat::ref_finance_client::RefFinanceClient;
+use ref_arb_scanner::arb_engine::{LightningArbEngine, ArbType};
+use ref_arb_scanner::ref_finance_client::RefFinanceClient;
 
 #[tokio::main]
 async fn main() -> Result<()> {
