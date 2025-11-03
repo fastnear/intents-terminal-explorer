@@ -2,6 +2,23 @@
 
 **Version 0.4.0** - High-performance **quad-mode** application for monitoring NEAR Protocol blockchain transactions. Runs as native terminal app, web browser app, Tauri desktop app, or browser extension integration. Built in Rust with [Ratatui](https://ratatui.rs).
 
+## Prerequisites (once per machine)
+
+The repository pins Rust **1.89.0** via `rust-toolchain.toml`. Install the toolchain and the build targets before running any of
+the commands below:
+
+```bash
+rustup toolchain install 1.89.0
+rustup target add wasm32-unknown-unknown --toolchain 1.89.0
+
+# Optional helpers used in this README
+cargo install --locked trunk       # required for `trunk serve` / `trunk build`
+cargo install --locked tauri-cli   # provides the `cargo tauri` subcommand
+```
+
+> Tip: `rustup target list --installed` should show `wasm32-unknown-unknown`. If it is missing, run the `rustup target add` line
+> above before invoking the web build commands.
+
 ## Quick Start
 
 ### Fastest Way to Run (Native Terminal - Recommended)
@@ -24,10 +41,7 @@ SOURCE=rpc NEAR_NODE_URL=https://rpc.mainnet.fastnear.com/ \
 ### Other Build Targets
 
 ```bash
-# Web Browser (egui + WebGL)
-rustup toolchain install 1.89.0 # one-time if not already installed
-rustup target add wasm32-unknown-unknown --toolchain 1.89.0
-cargo install --locked trunk
+# Web Browser (egui + WebGL) - requires wasm32 target from prerequisites
 trunk serve  # Opens at http://127.0.0.1:8080
 
 # Tauri Desktop App (deep links support)
@@ -186,6 +200,7 @@ Run Ratacat in your browser with the same terminal UI experience using **egui + 
 
 ```bash
 # Install web build tools (one-time setup)
+# (Skip if you completed the prerequisites section.)
 rustup target add wasm32-unknown-unknown --toolchain 1.89.0
 cargo install --locked trunk
 
@@ -194,7 +209,8 @@ trunk serve
 # Opens at http://127.0.0.1:8080
 
 # Build for deployment
-trunk build --release
+# Pass --locked through to cargo so Trunk honors Cargo.lock
+TRUNK_BUILD_ARGS="--locked" trunk build --release
 # Output in dist/ directory - deploy to any static host!
 ```
 
@@ -671,6 +687,10 @@ These commands rely on the pinned Rust 1.89.0 toolchain and `Cargo.lock`. Networ
 **Error: `zstd-sys` or `secp256k1-sys` compilation failed**
 - Ensure you're using `--no-default-features --features egui-web` flags
 - Check `Trunk.toml` has `default-features = false`
+
+**Error: `can't find crate for \`std\`` during wasm build**
+- Install the target once: `rustup target add wasm32-unknown-unknown --toolchain 1.89.0`
+- Verify with `rustup target list --installed | grep wasm32`
 
 **Runtime error: "time not implemented on this platform"**
 - Fixed in the current runtime shim (`src/platform/runtime_wasm.rs`)

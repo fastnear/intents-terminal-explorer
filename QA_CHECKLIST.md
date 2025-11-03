@@ -2,11 +2,16 @@
 
 ## Build Verification ✅
 
+> Pre-flight: ensure the pinned toolchain and wasm target are installed
+> (`rustup toolchain install 1.89.0` and `rustup target add wasm32-unknown-unknown --toolchain 1.89.0`).
+
 All three build targets verified:
 
 - [x] **Native Terminal** - `cargo build --release` (0.59s)
 - [x] **Tauri Desktop** - `cargo build --release --manifest-path tauri-workspace/src-tauri/Cargo.toml` (0.67s)
-- [x] **egui-web WASM** - `trunk build --release` (2.50s)
+- [x] **egui-web WASM** - `TRUNK_BUILD_ARGS="--locked" trunk build --release` (2.50s)
+
+> `TRUNK_BUILD_ARGS="--locked"` forwards the `--locked` flag to Cargo so Trunk honors `Cargo.lock`.
 
 ---
 

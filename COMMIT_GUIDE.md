@@ -20,6 +20,8 @@ Use this page as a pre-flight checklist before opening a PR.
 
 All commands assume you are in the repository root. They intentionally mirror README sections so reviewers can reproduce results verbatim.
 
+> Ensure the README prerequisites are satisfied (`rustup toolchain install 1.89.0` and `rustup target add wasm32-unknown-unknown --toolchain 1.89.0`). Without the wasm target the web build and Trunk pipeline will fail with `can't find crate for 'std'`.
+
 ```bash
 # Native terminal app
 cargo build --locked --bin ratacat --features native --release

@@ -2,6 +2,16 @@
 
 One-page reference for building and testing all components.
 
+## ✅ Prerequisites
+
+```bash
+rustup toolchain install 1.89.0
+rustup target add wasm32-unknown-unknown --toolchain 1.89.0
+
+cargo install --locked trunk       # required for `trunk build` / `trunk serve`
+cargo install --locked tauri-cli   # provides the `cargo tauri` subcommand
+```
+
 ## 🚀 Build Everything
 
 ```bash
@@ -15,7 +25,8 @@ cargo tauri build --bundles app
 
 # 3. Web app (WASM)
 cd ..
-trunk build --release --no-default-features --features web
+# Pass --locked through to cargo so Trunk honors Cargo.lock
+TRUNK_BUILD_ARGS="--locked" trunk build --release
 
 # 4. Extension packages
 cd extension
