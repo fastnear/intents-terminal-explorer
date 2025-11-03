@@ -20,7 +20,7 @@ Use this page as a pre-flight checklist before opening a PR.
 
 All commands assume you are in the repository root. They intentionally mirror README sections so reviewers can reproduce results verbatim.
 
-> Ensure the README prerequisites are satisfied (`rustup toolchain install 1.89.0` and `rustup target add wasm32-unknown-unknown --toolchain 1.89.0`). Without the wasm target the web build and Trunk pipeline will fail with `can't find crate for 'std'`.
+> Ensure the README prerequisites are satisfied (`rustup toolchain install 1.89.0`, `rustup target add wasm32-unknown-unknown --toolchain 1.89.0`, and the `cargo fetch` cache warm-up). Without the wasm target the web build and Trunk pipeline will fail with `can't find crate for 'std'`, and without the fetch step offline builds will error out when registry access is unavailable.
 
 ```bash
 # Native terminal app
@@ -47,7 +47,7 @@ cargo clippy --locked --bin ratacat-egui-web --target wasm32-unknown-unknown \
 cargo fmt
 ```
 
-> ℹ️ The first build requires network access to download dependencies. With the toolchain and crates cached, subsequent builds can run offline using `CARGO_NET_OFFLINE=true`.
+> ℹ️ Run the README `cargo fetch` commands once while online so all workspace crates (native, wasm, Tauri, native host) are cached locally. After that, you can flip on `CARGO_NET_OFFLINE=true` to confirm no new dependencies were introduced.
 
 ---
 

@@ -2,8 +2,13 @@
 
 ## Build Verification ✅
 
-> Pre-flight: ensure the pinned toolchain and wasm target are installed
-> (`rustup toolchain install 1.89.0` and `rustup target add wasm32-unknown-unknown --toolchain 1.89.0`).
+> Pre-flight: ensure the pinned toolchain, wasm target, and cargo cache are ready.
+> Run once while online:
+> `rustup toolchain install 1.89.0`
+> `rustup target add wasm32-unknown-unknown --toolchain 1.89.0`
+> `cargo fetch --locked --target x86_64-unknown-linux-gnu --target wasm32-unknown-unknown`
+> `cargo fetch --locked --manifest-path tauri-workspace/src-tauri/Cargo.toml`
+> `cargo fetch --locked --manifest-path native-host/Cargo.toml`
 
 All three build targets verified:
 
@@ -11,7 +16,7 @@ All three build targets verified:
 - [x] **Tauri Desktop** - `cargo build --release --manifest-path tauri-workspace/src-tauri/Cargo.toml` (0.67s)
 - [x] **egui-web WASM** - `TRUNK_BUILD_ARGS="--locked" trunk build --release` (2.50s)
 
-> `TRUNK_BUILD_ARGS="--locked"` forwards the `--locked` flag to Cargo so Trunk honors `Cargo.lock`.
+> `TRUNK_BUILD_ARGS="--locked"` forwards the `--locked` flag to Cargo so Trunk honors `Cargo.lock` and reuses the fetched cache on subsequent offline runs.
 
 ---
 

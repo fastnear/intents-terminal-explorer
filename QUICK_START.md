@@ -8,6 +8,13 @@ One-page reference for building and testing all components.
 rustup toolchain install 1.89.0
 rustup target add wasm32-unknown-unknown --toolchain 1.89.0
 
+# Pre-download crates for offline verification (run once online)
+cargo fetch --locked \
+  --target x86_64-unknown-linux-gnu \
+  --target wasm32-unknown-unknown
+cargo fetch --locked --manifest-path tauri-workspace/src-tauri/Cargo.toml
+cargo fetch --locked --manifest-path native-host/Cargo.toml
+
 cargo install --locked trunk       # required for `trunk build` / `trunk serve`
 cargo install --locked tauri-cli   # provides the `cargo tauri` subcommand
 ```

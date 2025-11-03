@@ -11,13 +11,21 @@ the commands below:
 rustup toolchain install 1.89.0
 rustup target add wasm32-unknown-unknown --toolchain 1.89.0
 
+# Populate the Cargo cache once while online so offline builds succeed
+cargo fetch --locked \
+  --target x86_64-unknown-linux-gnu \
+  --target wasm32-unknown-unknown
+cargo fetch --locked --manifest-path tauri-workspace/src-tauri/Cargo.toml
+cargo fetch --locked --manifest-path native-host/Cargo.toml
+
 # Optional helpers used in this README
 cargo install --locked trunk       # required for `trunk serve` / `trunk build`
 cargo install --locked tauri-cli   # provides the `cargo tauri` subcommand
 ```
 
 > Tip: `rustup target list --installed` should show `wasm32-unknown-unknown`. If it is missing, run the `rustup target add` line
-> above before invoking the web build commands.
+> above before invoking the web build commands. The `cargo fetch` commands pre-download the crates referenced by every build
+> target so `CARGO_NET_OFFLINE=true` checks succeed later.
 
 ## Quick Start
 
@@ -666,7 +674,9 @@ cargo clippy --locked --bin ratacat-egui-web --target wasm32-unknown-unknown \
   --no-default-features --features egui-web -- -D warnings
 ```
 
-These commands rely on the pinned Rust 1.89.0 toolchain and `Cargo.lock`. Network access to crates.io (or a local mirror) is required the first time you build so the dependencies can be cached. Subsequent builds succeed offline as long as the cache persists.
+These commands rely on the pinned Rust 1.89.0 toolchain and `Cargo.lock`. Run the prerequisite `cargo fetch` commands above while
+you have network access so the dependencies are cached; afterwards the builds (and `CARGO_NET_OFFLINE=true` spot-checks) succeed
+without hitting crates.io.
 
 ## Troubleshooting
 
