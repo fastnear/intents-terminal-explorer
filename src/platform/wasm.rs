@@ -19,14 +19,18 @@ pub fn copy_to_clipboard(s: &str) -> bool {
     }
 
     // 2) Fallback: plain web clipboard (secure contexts).
-    let Some(win) = web_sys::window() else { return false; };
-    let clip = win.navigator().clipboard();
-    if let Some(clip) = clip {
-        let p = clip.write_text(s);
-        wasm_bindgen_futures::spawn_local(async move {
-            let _ = JsFuture::from(p).await;
-        });
-        return true;
+    let Some(win) = web_sys::window() else {
+        return false;
+    };
+    match win.navigator().clipboard() {
+        Ok(clip) => {
+            let p = clip.write_text(s);
+            wasm_bindgen_futures::spawn_local(async move {
+                let _ = JsFuture::from(p).await;
+            });
+            return true;
+        }
+        Err(_) => {}
     }
 
     // No path available (old WebViews etc.).

@@ -13,11 +13,12 @@ pub struct Instant(f64);
 
 impl Instant {
     pub fn now() -> Self {
-        if let Some(perf) = web_sys::window().and_then(|w| w.performance().ok()) {
-            Self(perf.now())
-        } else {
-            Self(js_sys::Date::now())
+        if let Some(window) = web_sys::window() {
+            if let Ok(perf) = window.performance() {
+                return Self(perf.now());
+            }
         }
+        Self(js_sys::Date::now())
     }
 
     pub fn duration_since(&self, earlier: Instant) -> Duration {
