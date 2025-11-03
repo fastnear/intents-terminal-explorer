@@ -21,10 +21,36 @@ use ratacat::{
     platform::{BlockPersist, TxPersist},
 };
 
+fn load_env_file() {
+    let path = std::path::Path::new(".env");
+    if !path.exists() {
+        return;
+    }
+
+    if let Ok(contents) = std::fs::read_to_string(path) {
+        for line in contents.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            let line = line.strip_prefix("export ").unwrap_or(line);
+            let mut parts = line.splitn(2, '=');
+            let key = parts.next().map(str::trim).unwrap_or("");
+            if key.is_empty() {
+                continue;
+            }
+            let raw_value = parts.next().unwrap_or("").trim();
+            let value = raw_value.trim_matches(|c| c == '"' || c == '\'');
+            std::env::set_var(key, value);
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Load .env file if it exists (safe to ignore if not found)
-    dotenvy::dotenv().ok();
+    load_env_file();
 
     let cfg = load().context("Failed to load configuration")?;
 

@@ -7,17 +7,7 @@ use crate::types::{BlockRow, TxLite, TxDetailed, ActionSummary};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::task::JoinSet;
 
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::time::{Duration, sleep};
-
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::Instant;
-
-#[cfg(target_arch = "wasm32")]
-use web_time::{Duration, Instant};
-
-#[cfg(target_arch = "wasm32")]
-use gloo_timers::future::sleep;
+use crate::platform::{Duration, Instant, sleep};
 
 static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
 
@@ -239,7 +229,6 @@ pub async fn fetch_block_with_txs(
     #[cfg(target_arch = "wasm32")]
     {
         use futures::stream::{self, StreamExt};
-        use web_time::Instant;
 
         let start = Instant::now();
         let max_concurrent = chunk_concurrency.max(1).min(6); // Cap at 6 (browser per-origin limit)

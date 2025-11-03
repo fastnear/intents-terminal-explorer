@@ -12,7 +12,9 @@ extern "C" {
 pub fn copy_to_clipboard(s: &str) -> bool {
     // 1) Preferred: bridge present (Tauri / Extension / Web).
     if let Ok(promise) = __copy_text_js(s) {
-        wasm_bindgen_futures::spawn_local(async move { let _ = JsFuture::from(promise).await; });
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = JsFuture::from(promise).await;
+        });
         return true;
     }
 
@@ -21,7 +23,9 @@ pub fn copy_to_clipboard(s: &str) -> bool {
     let clip = win.navigator().clipboard();
     if let Some(clip) = clip {
         let p = clip.write_text(s);
-        wasm_bindgen_futures::spawn_local(async move { let _ = JsFuture::from(p).await; });
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = JsFuture::from(p).await;
+        });
         return true;
     }
 

@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 #[cfg(target_arch = "wasm32")]
-use web_time::{Duration, Instant};
+use crate::platform::{Duration, Instant};
 
 use crate::types::{AppEvent, BlockRow, TxLite, WsPayload, ActionSummary};
 use crate::util_text::{format_gas, format_near};

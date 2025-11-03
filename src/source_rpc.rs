@@ -1,18 +1,7 @@
 use anyhow::Result;
 use crate::{types::AppEvent, config::Config, rpc_utils::{get_latest_block, fetch_block_with_txs}};
+use crate::platform::{Duration, Instant, sleep};
 use tokio::sync::mpsc::UnboundedSender;
-
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::time::{sleep, Duration};
-
-#[cfg(target_arch = "wasm32")]
-use web_time::Duration;
-
-#[cfg(target_arch = "wasm32")]
-async fn sleep(duration: Duration) {
-    // Use gloo-timers for reliable WASM sleep
-    gloo_timers::future::sleep(std::time::Duration::from_millis(duration.as_millis() as u64)).await;
-}
 
 pub async fn run_rpc(cfg:&Config, tx: UnboundedSender<AppEvent>) -> Result<()> {
     let mut last_height: u64 = 0;
@@ -26,11 +15,6 @@ pub async fn run_rpc(cfg:&Config, tx: UnboundedSender<AppEvent>) -> Result<()> {
         Ok(_) => log::info!("✅ HTTP client warmed up successfully"),
         Err(e) => log::warn!("⚠️  HTTP warm-up failed (continuing anyway): {}", e),
     }
-
-    #[cfg(target_arch = "wasm32")]
-    use web_time::Instant;
-    #[cfg(not(target_arch = "wasm32"))]
-    use std::time::Instant;
 
     let mut last_poll_time = Instant::now();
 

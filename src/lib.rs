@@ -63,10 +63,6 @@ pub mod platform;
 pub mod copy_payload;
 pub mod copy_api;
 
-// NOTE: Arbitrage engine has been moved to separate workspace member: ref-arb-scanner/
-// To build: cargo build -p ref-arb-scanner
-// To run: cargo run -p ref-arb-scanner
-
 // Re-export commonly used types
 pub use app::{App, InputMode};
 pub use types::{AppEvent, BlockRow, TxLite, Mark};

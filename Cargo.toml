@@ -23,15 +23,10 @@ name = "ratacat-egui-web"
 path = "src/bin/ratacat-egui-web.rs"
 required-features = ["egui-web"]
 
-# NOTE: ref-arb-scanner has been moved to separate workspace member
-# Build with: cargo build -p ref-arb-scanner
-# Run with: cargo run -p ref-arb-scanner
-
 [workspace]
 resolver = "2"
 members = [
   ".",                       # ratacat root
-  "ref-arb-scanner",
   "plugins/tx-analyzer",
   "plugins/validator-monitor"
 ]
@@ -94,10 +89,6 @@ egui-web = [
     "dep:js-sys",
     "dep:web-sys",
     "dep:getrandom",
-    "dep:console_error_panic_hook",
-    "dep:wasm-logger",
-    "dep:web-time",
-    "dep:gloo-timers",
 ]
 
 [dependencies]
@@ -106,7 +97,6 @@ anyhow = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
-dotenvy = "0.15"
 clap = { version = "4.5", features = ["derive", "env"] }
 async-trait = "0.1"
 log = "0.4"
@@ -165,10 +155,6 @@ web-sys = { version = "0.3", optional = true, features = [
     "FontFaceSet", "FontFaceSetLoadStatus", "ResizeObserver", "ResizeObserverEntry"
 ] }
 getrandom = { version = "0.2", optional = true, features = ["js"] }
-console_error_panic_hook = { version = "0.1", optional = true }
-wasm-logger = { version = "0.2", optional = true }
-web-time = { version = "1.0", optional = true }
-gloo-timers = { version = "0.3", optional = true, features = ["futures"] }
 
 # Proxy-only dependencies (backend server)
 axum = { version = "0.7", optional = true }
@@ -180,7 +166,7 @@ tokio = { version = "1", default-features = false, features = ["sync", "macros",
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Navigator", "Clipboard"] }
+web-sys = { version = "0.3", features = ["Window", "Navigator", "Clipboard", "Performance", "console"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }

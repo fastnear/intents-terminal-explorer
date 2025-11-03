@@ -25,6 +25,7 @@ cfg_if! {
             types::AppEvent,
             source_rpc,
             theme::Theme,
+            platform,
         };
 
         // ---------------------------
@@ -231,8 +232,7 @@ cfg_if! {
                 // how long we spend processing events per frame. If we hit the
                 // budget, we request another repaint to continue processing.
                 if let Ok(mut rx) = self.event_rx.try_borrow_mut() {
-                    use web_time::Instant;
-                    let start = Instant::now();
+                    let start = platform::Instant::now();
                     let budget_ms = 3; // 3ms budget per frame
                     let mut count = 0;
                     let mut hit_budget = false;
@@ -394,8 +394,8 @@ cfg_if! {
         #[wasm_bindgen(start)]
         pub async fn main() {
             // Setup panic hook and logging
-            console_error_panic_hook::set_once();
-            wasm_logger::init(wasm_logger::Config::new(log::Level::Debug));
+            platform::install_panic_hook();
+            platform::init_logging(log::Level::Debug);
 
             log::info!("╔═══════════════════════════════════════════════════════════╗");
             log::info!("║       🦀 Ratacat egui-web v0.4.0 - Starting Up        ║");

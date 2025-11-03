@@ -7,10 +7,10 @@
 ### Fastest Way to Run (Native Terminal - Recommended)
 
 ```bash
-# Clone and build
+# Clone and build (uses pinned Rust 1.89.0 from rust-toolchain.toml)
 git clone <repo>
 cd ratacat
-cargo build --bin ratacat --features native --release
+cargo build --locked --bin ratacat --features native --release
 
 # Run with RPC (production-ready)
 SOURCE=rpc NEAR_NODE_URL=https://rpc.mainnet.fastnear.com/ ./target/release/ratacat
@@ -25,16 +25,14 @@ SOURCE=rpc NEAR_NODE_URL=https://rpc.mainnet.fastnear.com/ \
 
 ```bash
 # Web Browser (egui + WebGL)
+rustup toolchain install 1.89.0 # one-time if not already installed
+rustup target add wasm32-unknown-unknown --toolchain 1.89.0
 cargo install --locked trunk
-rustup target add wasm32-unknown-unknown
 trunk serve  # Opens at http://127.0.0.1:8080
 
 # Tauri Desktop App (deep links support)
 cd tauri-workspace
 cargo tauri dev
-
-# Ref Finance Arbitrage Scanner
-cargo run -p ref-arb-scanner --release
 ```
 
 ## Features
@@ -106,11 +104,11 @@ Ratacat runs in **four modes**: native terminal (recommended), Tauri desktop app
 
 ```bash
 # Build and run (requires native feature flag)
-cargo build --bin ratacat --features native --release
+cargo build --locked --bin ratacat --features native --release
 ./target/release/ratacat
 
 # Or run directly with cargo
-cargo run --bin ratacat --features native --release
+cargo run --locked --bin ratacat --features native --release
 ```
 
 **WebSocket Mode** (for development):
@@ -188,8 +186,8 @@ Run Ratacat in your browser with the same terminal UI experience using **egui + 
 
 ```bash
 # Install web build tools (one-time setup)
+rustup target add wasm32-unknown-unknown --toolchain 1.89.0
 cargo install --locked trunk
-rustup target add wasm32-unknown-unknown
 
 # Build and serve locally (uses egui + egui_ratatui)
 trunk serve
@@ -553,21 +551,21 @@ This repository contains multiple build targets across 3 workspaces. All builds 
 ```bash
 git clone <repo>
 cd ratacat
-cargo build --bin ratacat --features native --release
+cargo build --locked --bin ratacat --features native --release
 ./target/release/ratacat
 ```
 
 **Proxy Server (optional):**
 ```bash
-cargo build --bin ratacat-proxy --features proxy --release
+cargo build --locked --bin ratacat-proxy --features proxy --release
 ./target/release/ratacat-proxy
 ```
 
 **Web (egui + WebGL):**
 ```bash
 # One-time setup
+rustup target add wasm32-unknown-unknown --toolchain 1.89.0
 cargo install --locked trunk
-rustup target add wasm32-unknown-unknown
 
 # Build for deployment (uses egui)
 trunk build --release
@@ -591,7 +589,7 @@ The web build uses **eframe** (egui's app framework) with **egui_ratatui** to re
   - wasm-bindgen, wasm-bindgen-futures (Rust↔JavaScript bridge)
   - web-sys (Web APIs for clipboard, storage)
   - getrandom with "js" feature (WASM-compatible RNG)
-  - console_error_panic_hook, wasm-logger (debugging)
+  - Built-in panic hook + console logger (implemented in `platform`)
 
 **Trunk Configuration:**
 
@@ -608,33 +606,27 @@ The `index-egui.html` specifies which binary to build:
 <link data-trunk rel="rust" data-bin="ratacat-egui-web" />
 ```
 
+When invoking cargo directly, mirror the same configuration:
+
+```bash
+cargo build --locked --bin ratacat-egui-web \
+  --target wasm32-unknown-unknown \
+  --no-default-features --features egui-web --release
+```
+
 ### Workspace Members
 
 The repository includes additional independent workspace members:
 
-**Ref Finance Arbitrage Scanner:**
-```bash
-# Build the scanner
-cargo build -p ref-arb-scanner --release
-
-# Run it
-cargo run -p ref-arb-scanner --release
-
-# Or run the binary directly
-./target/release/ref-arb-scanner
-```
-
-The ref-arb-scanner is a separate workspace member for arbitrage detection on Ref Finance DEX. See `ref-arb-scanner/` directory and `REF_ARB_SCANNER_REVERSAL.md` for details.
-
 **Tauri Desktop App:**
 ```bash
-cargo build --release --manifest-path tauri-workspace/src-tauri/Cargo.toml
+cargo build --locked --release --manifest-path tauri-workspace/src-tauri/Cargo.toml
 # Or use: cd tauri-workspace && cargo tauri build
 ```
 
 **Native Messaging Host (Browser Extension):**
 ```bash
-cargo build --release --manifest-path native-host/Cargo.toml
+cargo build --locked --release --manifest-path native-host/Cargo.toml
 ```
 
 ### Build Verification
@@ -643,17 +635,22 @@ To verify all targets build without warnings:
 
 ```bash
 # Main workspace binaries
-cargo build --bin ratacat --features native --release
-cargo build --bin ratacat-proxy --features proxy --release
-cargo build --bin ratacat-egui-web --target wasm32-unknown-unknown --no-default-features --features egui-web --release
+cargo build --locked --bin ratacat --features native --release
+cargo build --locked --bin ratacat-proxy --features proxy --release
+cargo build --locked --bin ratacat-egui-web --target wasm32-unknown-unknown \
+  --no-default-features --features egui-web --release
 
 # Workspace members
-cargo build -p ref-arb-scanner --release
-cargo build --release --manifest-path tauri-workspace/src-tauri/Cargo.toml
-cargo build --release --manifest-path native-host/Cargo.toml
+cargo build --locked --release --manifest-path tauri-workspace/src-tauri/Cargo.toml
+cargo build --locked --release --manifest-path native-host/Cargo.toml
+
+# Optional lint passes once the registry is available
+cargo clippy --locked --bin ratacat --features native -- -D warnings
+cargo clippy --locked --bin ratacat-egui-web --target wasm32-unknown-unknown \
+  --no-default-features --features egui-web -- -D warnings
 ```
 
-All 6 build targets should complete with ✅ **0 warnings, 0 errors**.
+These commands rely on the pinned Rust 1.89.0 toolchain and `Cargo.lock`. Network access to crates.io (or a local mirror) is required the first time you build so the dependencies can be cached. Subsequent builds succeed offline as long as the cache persists.
 
 ## Troubleshooting
 
@@ -672,13 +669,12 @@ All 6 build targets should complete with ✅ **0 warnings, 0 errors**.
 ### Web build errors
 
 **Error: `zstd-sys` or `secp256k1-sys` compilation failed**
-- Ensure you're using `--no-default-features --features web` flags
+- Ensure you're using `--no-default-features --features egui-web` flags
 - Check `Trunk.toml` has `default-features = false`
 
 **Runtime error: "time not implemented on this platform"**
-- Known issue: Some time-related code not yet fully WASM-compatible
-- Workaround: Use direct RPC endpoints instead of proxy
-- Status: Active development, fix planned for v0.4.0
+- Fixed in the current runtime shim (`src/platform/runtime_wasm.rs`)
+- If you see this in an older build artifact, wipe `dist/` and rebuild with `trunk build --release`
 
 **Connection refused to localhost:3030**
 - Web version expects RPC proxy or direct RPC endpoint
