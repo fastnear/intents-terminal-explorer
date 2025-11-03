@@ -17,13 +17,16 @@
 //! [embedded-graphics]: https://github.com/embedded-graphics/embedded-graphics
 //!  [cosmic-text]: https://github.com/pop-os/cosmic-text
 //! [bdf-parser]: https://github.com/embedded-graphics/bdf
+//!
+//! > Note: This vendored copy disables the upstream `bdf-parser` feature to keep
+//! > offline builds self-contained. Enablement would require reintroducing the
+//! > optional `copper-bdf-parser` dependency.
 //! [unicodefonts]: https://github.com/j-g00da/embedded-graphics-unicodefonts
 //! [embedded-ttf]: https://github.com/peckpeck/embedded-ttf
 //!
 //! ## Feature Flags
 //!
 //! - **`unicodefonts`**: Enables embedded-graphics-[unicodefonts] (automatically activates [embedded-graphics], is the default feature)
-//! - **`bdf-parser`**: Enables [`Bdf`] backend for bitmap fonts ([bdf-parser])
 //! - **`embedded-ttf`**: Enables [`EmbeddedTTF`] backend for TrueType fonts (automatically activates [embedded-graphics]) ([embedded-ttf])
 //! - **`cosmic-text`**: Enables [`CosmicText`] backend for advanced text shaping ([cosmic-text])
 //! - **`embedded-graphics`**: Enables [`EmbeddedGraphics`] backend
@@ -38,7 +41,6 @@
 //! |---------|---------|-------------|
 //! | [`EmbeddedGraphics`] | `embedded-graphics` | Uses embedded-graphics font atlases |
 //! | [`EmbeddedTTF`] | `embedded-ttf` | TrueType font rendering via RustType |
-//! | [`Bdf`] | `bdf-parser` | Bitmap Distribution Format fonts |
 //! | [`CosmicText`] | `cosmic-text` | Advanced text shaping and layout |
 //!
 //! ## Quick Start
@@ -142,7 +144,3 @@ mod embedded_ttf_backend;
 pub use embedded_ttf_backend::EmbeddedTTF;
 #[cfg(feature = "cosmic-text")]
 mod cosmic_backend;
-#[cfg(feature = "bdf-parser")]
-pub use bdf_backend::Bdf;
-#[cfg(feature = "bdf-parser")]
-mod bdf_backend;

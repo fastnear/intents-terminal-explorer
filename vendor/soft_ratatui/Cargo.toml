@@ -35,7 +35,7 @@ repository = "https://github.com/gold-silver-copper/soft_ratatui"
 all-features = true
 
 [features]
-bdf-parser = ["dep:copper-bdf-parser"]
+bdf-parser = []
 cosmic-text = ["dep:cosmic-text"]
 default = ["unicodefonts"]
 embedded-graphics = ["dep:embedded-graphics"]
@@ -57,9 +57,6 @@ crate-type = [
 ]
 path = "src/lib.rs"
 
-[dependencies.copper-bdf-parser]
-version = "0.1.1"
-optional = true
 
 [dependencies.cosmic-text]
 version = "0.14.2"

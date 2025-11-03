@@ -278,18 +278,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
-name = "bdf-parser"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c904362ac94c74c5b55de49db4911ff01dbc220cf417bd08e75c4df56a443578"
-dependencies = [
- "bstr 0.2.17",
- "nom",
- "strum 0.20.0",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "bincode"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -652,18 +640,6 @@ name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
-
-[[package]]
-name = "copper-bdf-parser"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfe6d5182dc602d57a41cba57b646e198f6c0fd62aac315768120f3539b6813b"
-dependencies = [
- "bdf-parser",
- "bstr 1.12.1",
- "strum 0.27.2",
- "thiserror 2.0.17",
-]
 
 [[package]]
 name = "copypasta"
@@ -4632,7 +4608,6 @@ dependencies = [
 name = "soft_ratatui"
 version = "0.1.2"
 dependencies = [
- "copper-bdf-parser",
  "cosmic-text",
  "embedded-graphics",
  "embedded-graphics-unicodefonts",
