@@ -95,8 +95,8 @@ impl RatacatEguiApp {
         let font_italic = Some(mono_8x13_italic_atlas());
 
         let soft_backend = SoftBackend::<EmbeddedGraphics>::new(
-            85,  // width in columns (8x13 bitmap font)
-            30,  // height in rows
+            120,  // width in columns (desktop-optimized, larger than web's 85)
+            40,   // height in rows (desktop-optimized, larger than web's 30)
             font_regular,
             font_bold,
             font_italic,
