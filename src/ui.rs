@@ -32,7 +32,7 @@ pub fn draw(f:&mut Frame, app:&mut App, marks:&[Mark]){
 
     let mut constraints: Vec<Constraint> = Vec::with_capacity(5);
     constraints.push(Constraint::Length(1));                                // header
-    if filter_expanded { constraints.push(Constraint::Length(3)); }         // filter (only when expanded)
+    if filter_expanded { constraints.push(Constraint::Length(5)); }         // filter (only when expanded) - increased from 3 for comfortable input
     constraints.push(Constraint::Min(0));                                   // body (fills remainder)
     if show_debug { constraints.push(Constraint::Length(3)); }              // debug (auto-collapses)
     constraints.push(Constraint::Length(1));                                // footer
