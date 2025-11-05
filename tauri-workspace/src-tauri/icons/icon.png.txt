@@ -1,0 +1,2 @@
+This is a placeholder. You need to add a proper icon.png file here.
+For now, create a simple 32x32 PNG icon.

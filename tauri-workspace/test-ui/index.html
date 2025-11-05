@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ratacat Deep Link Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        h1 { color: #4ec9b0; }
+        .box {
+            background: #2d2d30;
+            border: 1px solid #3e3e42;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        button:hover { background: #1177bb; }
+        .log {
+            background: #1e1e1e;
+            border: 1px solid #3e3e42;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            padding: 5px 0;
+            border-bottom: 1px solid #3e3e42;
+        }
+        .token { color: #ce9178; }
+        .success { color: #4ec9b0; }
+        .error { color: #f48771; }
+        code {
+            background: #3e3e42;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #ce9178;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔗 Ratacat Deep Link Test</h1>
+
+    <div class="box">
+        <h2>Security Token</h2>
+        <p>Current token: <span id="token" class="token">Loading...</span></p>
+        <button onclick="getToken()">Refresh Token</button>
+    </div>
+
+    <div class="box">
+        <h2>Test Deep Links</h2>
+        <p>Click these buttons to open deep links (requires Tauri app to be registered):</p>
+        <button onclick="testLink('myapp://ratacat')">Open Ratacat</button>
+        <button onclick="testLink('myapp://tx/DEADBEEF123456')">Test Transaction</button>
+        <button onclick="testLink('myapp://account/alice.near')">Test Account</button>
+        <button onclick="testLink('myapp://block/42')">Test Block</button>
+        <button onclick="testLink('myapp://open?path=/test/path')">Test Path</button>
+        <button onclick="testLink('myapp://open/session/test123?readOnly=1')">Test Session</button>
+    </div>
+
+    <div class="box">
+        <h2>Deep Link Events</h2>
+        <p>Events received via deep links will appear here:</p>
+        <div id="eventLog" class="log">
+            <div class="log-entry">Waiting for deep link events...</div>
+        </div>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+
+    <div class="box">
+        <h2>Instructions</h2>
+        <ol>
+            <li>Get the security token above (auto-refreshes on load)</li>
+            <li>Test deep links either:
+                <ul>
+                    <li>Click buttons above (may not work in browser context)</li>
+                    <li>Run in terminal: <code>open 'myapp://tx/HASH?t=TOKEN'</code></li>
+                </ul>
+            </li>
+            <li>Watch the event log for incoming deep links</li>
+            <li>Production builds require <code>?t=&lt;token&gt;</code> in the URL</li>
+            <li>Debug builds allow links without token (with warning)</li>
+        </ol>
+    </div>
+
+    <script>
+        const { invoke } = window.__TAURI__.core;
+        const { listen } = window.__TAURI__.event;
+
+        // Get security token from Tauri backend
+        async function getToken() {
+            try {
+                const token = await invoke('get_security_token');
+                document.getElementById('token').textContent = token;
+                logEvent(`Token retrieved: ${token.substring(0, 8)}...`, 'success');
+            } catch (error) {
+                document.getElementById('token').textContent = 'Error';
+                logEvent(`Token error: ${error}`, 'error');
+            }
+        }
+
+        // Test a deep link
+        function testLink(url) {
+            logEvent(`Attempting to open: ${url}`);
+            // In a real browser, this won't work - use terminal instead
+            window.location.href = url;
+        }
+
+        // Listen for deep link events
+        listen('deep-link', (event) => {
+            logEvent(`Received deep link: ${JSON.stringify(event.payload)}`, 'success');
+        });
+
+        // Listen for single-instance events
+        listen('single-instance-argv', (event) => {
+            logEvent(`Single instance argv: ${JSON.stringify(event.payload)}`);
+        });
+
+        // Log an event to the UI
+        function logEvent(message, type = 'normal') {
+            const log = document.getElementById('eventLog');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        // Clear log
+        function clearLog() {
+            document.getElementById('eventLog').innerHTML =
+                '<div class="log-entry">Log cleared.</div>';
+        }
+
+        // Auto-load token on startup
+        getToken();
+        logEvent('Test UI loaded', 'success');
+    </script>
+</body>
+</html>

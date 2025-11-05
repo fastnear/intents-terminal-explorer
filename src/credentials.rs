@@ -1,5 +1,11 @@
+//! Credentials watcher for owned account filtering
+//!
+//! This module is only available on native targets (file system access not available in WASM).
+
+#![cfg(feature = "native")]
+
 use anyhow::Result;
-use notify::{Watcher, RecursiveMode, Event, EventKind};
+use notify::{Watcher, RecursiveMode, Event, EventKind, Error as NotifyError};
 use tokio::sync::mpsc::UnboundedSender;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -89,7 +95,7 @@ async fn watch_directory(path: PathBuf, tx: UnboundedSender<HashSet<String>>) ->
     let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel();
 
     // Create watcher
-    let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
+    let mut watcher = notify::recommended_watcher(move |res: Result<Event, NotifyError>| {
         if let Ok(event) = res {
             let _ = notify_tx.send(event);
         }

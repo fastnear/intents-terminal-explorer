@@ -1,5 +1,13 @@
 use serde_json::Value;
+use ratatui::text::Line;
 
+/// Format JSON with syntax highlighting (colored Spans)
+pub fn pretty_colored(v: &Value, space: usize) -> Vec<Line<'static>> {
+    let json_str = pretty(v, space);
+    crate::json_syntax::colorize_json(&json_str)
+}
+
+/// Format JSON as plain text (no colors)
 pub fn pretty(v: &Value, space: usize) -> String {
     // Plain JSON formatting without ANSI codes
     // Ratatui doesn't interpret ANSI escape codes - they appear as literal characters

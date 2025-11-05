@@ -1,7 +1,17 @@
+//! Transaction history persistence and search
+//!
+//! Note: SQLite-based history is only available on native targets.
+//! Web targets use an in-memory stub implementation.
+
 use anyhow::Result;
-use rusqlite::{params, Connection};
+
+#[cfg(feature = "native")]
+use rusqlite::{params, Connection, Statement, ToSql};
+#[cfg(feature = "native")]
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+#[cfg(feature = "native")]
 use tokio::sync::oneshot;
+#[cfg(feature = "native")]
 use tokio::task::spawn_blocking;
 
 #[derive(Clone, Debug)]
@@ -43,6 +53,8 @@ pub struct PersistedMark {
     pub pinned: bool,
 }
 
+// Native-only History implementation using SQLite
+#[cfg(feature = "native")]
 enum HistoryMsg {
     Persist(BlockPersist),
     Search {
@@ -76,11 +88,13 @@ enum HistoryMsg {
     },
 }
 
+#[cfg(feature = "native")]
 #[derive(Clone)]
 pub struct History {
     tx: UnboundedSender<HistoryMsg>,
 }
 
+#[cfg(feature = "native")]
 impl History {
     pub fn start(db_path: &str) -> Result<Self> {
         let (tx, mut rx) = unbounded_channel::<HistoryMsg>();
@@ -265,6 +279,7 @@ impl History {
 }
 
 // Search query parser: signer: receiver: acct: method: action: from: to: hash: + free text
+#[cfg(feature = "native")]
 struct SearchQuery {
     signer: Vec<String>,
     receiver: Vec<String>,
@@ -277,6 +292,7 @@ struct SearchQuery {
     free: Vec<String>,
 }
 
+#[cfg(feature = "native")]
 fn parse_search_query(q: &str) -> SearchQuery {
     let mut sq = SearchQuery {
         signer: vec![],
@@ -312,11 +328,12 @@ fn parse_search_query(q: &str) -> SearchQuery {
     sq
 }
 
+#[cfg(feature = "native")]
 fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<HistoryHit>> {
     let sq = parse_search_query(query);
     let mut sql = String::from("SELECT t.hash, t.height, b.ts_ms, t.signer, t.receiver, t.actions_json FROM txs t JOIN blocks b ON b.height = t.height");
     let mut where_clauses = Vec::new();
-    let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    let mut params_vec: Vec<Box<dyn ToSql>> = Vec::new();
 
     // acct: signer OR receiver
     if !sq.acct.is_empty() {
@@ -399,7 +416,7 @@ fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<History
     params_vec.push(Box::new(std::cmp::min(limit, 500) as i64));
 
     let mut stmt = conn.prepare(&sql)?;
-    let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+    let param_refs: Vec<&dyn ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
 
     let rows = stmt.query_map(param_refs.as_slice(), |row| {
         let actions_json: Option<String> = row.get(5)?;
@@ -424,6 +441,7 @@ fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<History
     Ok(hits)
 }
 
+#[cfg(feature = "native")]
 fn get_tx_db(conn: &Connection, hash: &str) -> Result<Option<String>> {
     let mut stmt = conn.prepare("SELECT raw_json FROM txs WHERE hash = ?")?;
     let mut rows = stmt.query(params![hash])?;
@@ -434,6 +452,7 @@ fn get_tx_db(conn: &Connection, hash: &str) -> Result<Option<String>> {
     Ok(None)
 }
 
+#[cfg(feature = "native")]
 fn summarize_methods(actions_json: &str) -> String {
     if let Ok(actions) = serde_json::from_str::<Vec<serde_json::Value>>(actions_json) {
         let mut methods = Vec::new();
@@ -454,6 +473,7 @@ fn summarize_methods(actions_json: &str) -> String {
     }
 }
 
+#[cfg(feature = "native")]
 fn list_marks_db(conn: &Connection) -> Result<Vec<PersistedMark>> {
     let mut stmt = conn.prepare("SELECT label, pane, height, tx, when_ms, pinned FROM marks ORDER BY when_ms DESC")?;
     let mut rows = stmt.query([])?;
@@ -471,7 +491,8 @@ fn list_marks_db(conn: &Connection) -> Result<Vec<PersistedMark>> {
     Ok(marks)
 }
 
-fn put_mark_db(_conn: &Connection, stmt: &mut rusqlite::Statement, mark: &PersistedMark) -> Result<()> {
+#[cfg(feature = "native")]
+fn put_mark_db(_conn: &Connection, stmt: &mut Statement, mark: &PersistedMark) -> Result<()> {
     stmt.execute(params![
         &mark.label,
         mark.pane,
@@ -483,17 +504,55 @@ fn put_mark_db(_conn: &Connection, stmt: &mut rusqlite::Statement, mark: &Persis
     Ok(())
 }
 
-fn del_mark_db(_conn: &Connection, stmt: &mut rusqlite::Statement, label: &str) -> Result<()> {
+#[cfg(feature = "native")]
+fn del_mark_db(_conn: &Connection, stmt: &mut Statement, label: &str) -> Result<()> {
     stmt.execute(params![label])?;
     Ok(())
 }
 
-fn set_mark_pinned_db(_conn: &Connection, stmt: &mut rusqlite::Statement, label: &str, pinned: bool) -> Result<()> {
+#[cfg(feature = "native")]
+fn set_mark_pinned_db(_conn: &Connection, stmt: &mut Statement, label: &str, pinned: bool) -> Result<()> {
     stmt.execute(params![pinned as i64, label])?;
     Ok(())
 }
 
-fn clear_marks_db(_conn: &Connection, stmt: &mut rusqlite::Statement) -> Result<()> {
+#[cfg(feature = "native")]
+fn clear_marks_db(_conn: &Connection, stmt: &mut Statement) -> Result<()> {
     stmt.execute([])?;
     Ok(())
+}
+
+// Web stub implementation (in-memory only, no persistence)
+#[cfg(not(feature = "native"))]
+#[derive(Clone)]
+pub struct History;
+
+#[cfg(not(feature = "native"))]
+impl History {
+    pub fn start(_db_path: &str) -> Result<Self> {
+        Ok(History)
+    }
+
+    pub fn persist(&self, _block: BlockPersist) {}
+
+    pub async fn search(&self, _query: &str, _limit: usize) -> Vec<HistoryHit> {
+        Vec::new()
+    }
+
+    pub async fn get_tx(&self, _hash: &str) -> Option<String> {
+        None
+    }
+
+    pub async fn list_marks(&self) -> Vec<PersistedMark> {
+        Vec::new()
+    }
+
+    pub async fn put_mark(&self, _mark: PersistedMark) {}
+
+    pub async fn del_mark(&self, _label: &str) {}
+
+    pub async fn set_mark_pinned(&self, _label: &str, _pinned: bool) {}
+
+    #[allow(dead_code)]
+    pub async fn clear_marks(&self) {}
 }

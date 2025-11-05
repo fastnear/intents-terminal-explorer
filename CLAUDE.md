@@ -1,46 +1,61 @@
 # Ratacat - NEAR Blockchain Transaction Viewer
 
-**Version 0.3.0** - High-performance terminal UI for monitoring NEAR Protocol blockchain transactions in real-time. Built with Ratatui and Rust.
+**Version 0.4.0** - High-performance **quad-mode** application for monitoring NEAR Protocol blockchain transactions. Runs in terminal (native), web browser (WASM), desktop app (Tauri), AND integrates with browsers via 1Password-style extension!
 
-## Architecture Overview
+**🆕 October 2025 Update**: Production-ready browser integration with auto-installing Native Messaging host supporting Chrome, Edge, Chromium, and **Firefox**.
 
-Ratacat follows a clean FPS-capped rendering architecture with async data sources and off-thread persistence:
+## Quad-Mode Architecture Overview
+
+Ratacat v0.4.0 features a revolutionary **quad-deployment architecture** - write once, run everywhere:
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│              NEAR Blockchain Data                        │
-│  ┌──────────────┐  ┌──────────────────┐  ┌────────────┐│
-│  │  WebSocket   │OR│   RPC Polling    │  │ Archival   ││
-│  │  (Node side) │  │  (Direct NEAR)   │  │ RPC Fetch  ││
-│  └──────┬───────┘  └────────┬─────────┘  └─────┬──────┘│
-│         │                   │                    │       │
-│         └───────────┬───────┴────────────────────┘       │
-│                     ▼                                     │
-│            ┌─────────────────┐                           │
-│            │  Event Channel  │                           │
-│            └────────┬────────┘                           │
-│                     ▼                                     │
-│            ┌─────────────────┐                           │
-│            │   App State     │                           │
-│            │  (filter/search)│                           │
-│            │  (archival req) │                           │
-│            └────────┬────────┘                           │
-│                     ▼                                     │
-│   ┌─────────────────────────────────────────┐           │
-│   │    3-Pane TUI + Filter + Search         │           │
-│   │  ┌──────┐  ┌──────┐  ┌────────────┐   │           │
-│   │  │Blocks│→ │Tx IDs│→ │  Details   │   │           │
-│   │  └──────┘  └──────┘  │(PRETTY/RAW)│   │           │
-│   │                       └────────────┘   │           │
-│   └─────────────────────────────────────────┘           │
-│                     ▲                                     │
-│                     │                                     │
-│            ┌─────────────────┐                           │
-│            │ SQLite History  │                           │
-│            │ (off-thread)    │                           │
-│            └─────────────────┘                           │
-└──────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    Ratacat Quad-Mode Architecture                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌──────────────────┐ │
+│  │  Terminal  │  │  Browser   │  │   Tauri    │  │  Browser Ext +   │ │
+│  │  (Native)  │  │   (WASM)   │  │  Desktop   │  │  Native Host     │ │
+│  │            │  │            │  │            │  │                  │ │
+│  │ • Crossterm│  │ • egui     │  │ • Deep     │  │ • MV3 Extension  │ │
+│  │ • SQLite   │  │ • In-mem   │  │   links    │  │ • stdio bridge   │ │
+│  │ • WS + RPC │  │ • RPC only │  │ • Single   │  │ • myapp://       │ │
+│  └─────┬──────┘  └─────┬──────┘  │   instance │  │   deep links     │ │
+│        │               │         └──────┬─────┘  └────────┬─────────┘ │
+│        └───────────────┼────────────────┼──────────────────┘           │
+│                        ▼                ▼                               │
+│              ┌─────────────────────────────────────┐                    │
+│              │      Shared Rust Core               │                    │
+│              │  • App state (height-based blocks)  │                    │
+│              │  • UI rendering (ratatui)           │                    │
+│              │  • RPC client & polling             │                    │
+│              │  • Filter & search (SQLite/memory)  │                    │
+│              │  • Archival fetcher (native-only)   │                    │
+│              └──────────┬──────────────────────────┘                    │
+│                         ▼                                               │
+│              ┌─────────────────────────────────────┐                    │
+│              │    Platform Abstraction             │                    │
+│              │  • Clipboard (unified 4-tier)       │                    │
+│              │    - Tauri plugin / Extension relay │                    │
+│              │    - Navigator API / execCommand    │                    │
+│              │  • Storage (SQLite/in-memory)       │                    │
+│              │  • Runtime (tokio full/wasm)        │                    │
+│              └─────────────────────────────────────┘                    │
+│                                                                         │
+│              NEAR Blockchain + Browser Integration                      │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────────────┐    │
+│  │WebSocket │  │   RPC    │  │ Archival │  │ Browser→Native→App │    │
+│  │ (Native) │  │  (All)   │  │(Optional)│  │   Deep Link Flow   │    │
+│  └──────────┘  └──────────┘  └──────────┘  └────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Deployment Modes
+
+1. **Native Terminal**: Full-featured TUI with SQLite, WebSocket, file watching
+2. **Web Browser (WASM)**: Same UI in browser, RPC-only, in-memory storage
+3. **Tauri Desktop**: Native desktop app with deep link support (`myapp://` protocol)
+4. **Browser Extension**: 1Password-style "Open in Ratacat" button on tx pages
 
 ## Key Design Principles
 
@@ -188,10 +203,10 @@ cp .env.example .env
 vim .env
 
 # Run with default settings
-cargo run
+cargo run --bin ratacat --features native
 
 # Or override with CLI arguments
-cargo run -- --source rpc --render-fps 60
+cargo run --bin ratacat --features native -- --source rpc --render-fps 60
 ```
 
 ### Configuration Methods
@@ -313,7 +328,7 @@ Error: POLL_INTERVAL_MS must be in range [100, 10000], got 50000
 
 **Development with local Node server:**
 ```bash
-SOURCE=ws cargo run
+SOURCE=ws cargo run --bin ratacat --features native
 ```
 
 **Production mainnet monitoring:**
@@ -337,7 +352,7 @@ SOURCE=ws cargo run
 
 **High-performance local monitoring:**
 ```bash
-SOURCE=ws RENDER_FPS=60 KEEP_BLOCKS=500 cargo run
+SOURCE=ws RENDER_FPS=60 KEEP_BLOCKS=500 cargo run --bin ratacat --features native
 ```
 
 For complete documentation of all options, see `.env.example`.
@@ -373,57 +388,510 @@ For complete documentation of all options, see `.env.example`.
 - `c` - Copy details to clipboard (shows toast notification with pane-specific message)
 - `q` or `Ctrl+C` - Quit
 
+### Text Selection & Copying
+
+**Terminal Version (Native)**:
+Ratacat enables mouse capture for pane navigation. To select text from the terminal:
+
+- **macOS iTerm2**: Hold `Option/Alt` while clicking and dragging
+- **macOS Terminal.app**: Hold `Fn` while selecting
+- **Linux**: Hold `Shift` while clicking and dragging (GNOME Terminal, Alacritty, xterm, etc.)
+- **Windows**: Hold `Shift` while selecting (Windows Terminal, ConEmu)
+
+**Tips**:
+- Double-click with modifier key to select entire words (useful for transaction hashes, account names)
+- Triple-click with modifier to select entire lines
+- The details pane has no left border specifically to make mouse selection easier
+
+**Web Version**:
+Text selection works natively in the browser. Simply click and drag to select - no modifier keys needed.
+
+**Copy Shortcuts**:
+Press `c` to copy pane-specific content to clipboard:
+- **Blocks pane**: All transactions in selected block (structured format with metadata)
+- **Transactions pane**: Human-readable view + raw JSON payload
+- **Details pane**: Full JSON content (what you see in the pane)
+
 ## Building & Running
 
+### Native Terminal Mode
+
+**Font Rendering Note**: The native terminal version uses your terminal emulator's font settings. Ratacat does not control font rendering - this is managed by your terminal emulator (iTerm2, Alacritty, Terminal.app, etc.).
+
+**Recommended Monospace Fonts**:
+- **JetBrains Mono** - Excellent Unicode coverage, designed for code
+- **Cascadia Code** - Microsoft's modern terminal font with ligatures
+- **Fira Code** - Popular with programmers, good ligature support
+- **SF Mono** (macOS) - Apple's system monospace font
+- **Menlo** (macOS) - Classic Mac terminal font
+
+**Terminal Emulator Configuration Examples**:
+
+<details>
+<summary>Alacritty (YAML config)</summary>
+
+```yaml
+# ~/.config/alacritty/alacritty.yml
+font:
+  normal:
+    family: "JetBrains Mono"
+    style: Regular
+  bold:
+    family: "JetBrains Mono"
+    style: Bold
+  italic:
+    family: "JetBrains Mono"
+    style: Italic
+  size: 14.0
+
+  # Optional: adjust spacing for better readability
+  offset:
+    x: 0
+    y: 0
+  glyph_offset:
+    x: 0
+    y: 0
+```
+</details>
+
+<details>
+<summary>iTerm2 (macOS GUI settings)</summary>
+
+1. Open **iTerm2 → Preferences → Profiles → Text**
+2. Click **Change Font** button
+3. Select font family (e.g., "JetBrains Mono") and size (14pt recommended)
+4. Enable **Anti-aliased** and **Use thin strokes** for crisp rendering
+</details>
+
 ```bash
-# Build release version
-cargo build --release
+# Build release version (requires native feature)
+cargo build --bin ratacat --features native --release
 
 # Run with default settings (WebSocket mode)
-cargo run
+cargo run --bin ratacat --features native
 
 # Run in RPC mode
-cargo run -- --source rpc
+cargo run --bin ratacat --features native -- --source rpc
 
 # Run with custom settings
-cargo run -- --source rpc --render-fps 60 --keep-blocks 200
+cargo run --bin ratacat --features native -- --source rpc --render-fps 60 --keep-blocks 200
 
 # Or use environment variables
-SOURCE=rpc RENDER_FPS=60 cargo run
+SOURCE=rpc RENDER_FPS=60 cargo run --bin ratacat --features native
 
 # View all CLI options
-cargo run -- --help
+cargo run --bin ratacat --features native -- --help
 
 # Run release binary directly
 ./target/release/ratacat --source rpc --near-node-url https://rpc.mainnet.fastnear.com/
 ```
 
+### Web Browser Mode
+
+**Technology Stack**: Uses **eframe** (egui's app framework) with **egui_ratatui** to render terminal UI in browser via WebGL.
+
+**Prerequisites:**
+```bash
+# Install Trunk (WASM build tool)
+cargo install --locked trunk
+
+# Add WASM target
+rustup target add wasm32-unknown-unknown
+```
+
+**Build Commands:**
+```bash
+# Development server (auto-reload on changes) - uses egui
+trunk serve
+# Opens at http://127.0.0.1:8080
+
+# Production build
+trunk build --release
+# Output: dist/index.html, dist/*.wasm, dist/*.js
+```
+
+**Critical Build Details:**
+- `--no-default-features` - **REQUIRED** - Configured in `Trunk.toml` to prevent NEAR SDK crates (C dependencies)
+- `--features egui-web` - Enables eframe, egui_ratatui, soft_ratatui, wasm-bindgen, web-sys
+- Binary: `ratacat-egui-web` (specified in `Trunk.toml`)
+- HTML: `index-egui.html` (specifies `data-bin="ratacat-egui-web"`)
+
+**Common Build Errors & Solutions:**
+
+1. **Error: `zstd-sys` compilation failed**
+   - **Cause:** Default features enabled (pulls in NEAR SDK)
+   - **Fix:** Add `--no-default-features` flag
+
+2. **Error: `mio` not supported on wasm32**
+   - **Cause:** Tokio's `net` feature enabled
+   - **Fix:** Already handled by target-specific tokio config
+
+3. **Error: Entry symbol `main` declared multiple times**
+   - **Cause:** WASM binaries need `#![no_main]` attribute
+   - **Fix:** Already in `src/bin/ratacat-egui-web.rs`:
+     ```rust
+     #![cfg_attr(target_arch = "wasm32", no_main)]
+     ```
+
+4. **Error: Multiple target artifacts found**
+   - **Cause:** Trunk doesn't know which binary to build
+   - **Fix:** Already in `index-egui.html`:
+     ```html
+     <link data-trunk rel="rust" data-bin="ratacat-egui-web" />
+     ```
+
+**Verifying the Build:**
+```bash
+# Check that no NEAR crates are in WASM dependency tree
+cargo tree --target wasm32-unknown-unknown --no-default-features --features egui-web | grep near-
+
+# Should return empty (no near-* crates)
+```
+
+### Ratatui Version Requirements
+
+**Web builds require ratatui 0.29+** for egui_ratatui compatibility:
+- egui_ratatui 2.0 depends on ratatui ^0.29
+- Native builds work with any version, but 0.29 used for consistency
+
+**Breaking Changes in 0.29 Upgrade:**
+- `Frame::size()` → deprecated, use `Frame::area()`
+- `Frame::set_cursor()` → deprecated, use `Frame::set_cursor_position()`
+
+These deprecation warnings are safe to ignore (fixes planned for future release).
+
+### Tauri Desktop App Mode
+
+**Overview**: Native desktop application with deep link support for handling `near://` URLs. Built with Tauri v2, combining Rust backend with web frontend.
+
+**Key Features**:
+- Deep link handler for `near://` protocol (e.g., `near://tx/ABC123?network=mainnet`)
+- Single-instance enforcement (prevents duplicate app launches)
+- Comprehensive debug logging waterfall
+- DevTools integration (keyboard shortcuts + UI controls)
+- Native host sidecar support for browser extension integration
+
+#### Deep Link Architecture
+
+Ratacat implements an **8-point color-coded debug logging waterfall** to trace deep link URLs through the system:
+
+```
+🔴 SINGLE-INSTANCE → 🟠 GET-CURRENT → 🟡 ON-OPEN-URL → 🟢 HANDLE-URLS
+    → 🔵 NORMALIZE → 🟣 PARSE-EVENT → 🟤 EMIT-OR-QUEUE → ⚪ FRONTEND-INIT → ⚫ ROUTE-EVENT
+```
+
+**Flow Explanation**:
+
+1. **🔴 SINGLE-INSTANCE**: Tauri plugin intercepts new launches, captures `argv` on Windows/Linux
+2. **🟠 GET-CURRENT**: Retrieves initial deep links from Tauri on first run (macOS primary method)
+3. **🟡 ON-OPEN-URL**: macOS system callback when URL opens while app already running
+4. **🟢 HANDLE-URLS**: Central processing function, receives raw URL strings
+5. **🔵 NORMALIZE**: Cleans URLs (trim, lowercase scheme, strip trailing slashes)
+6. **🟣 PARSE-EVENT**: Extracts host/path/query into `DeepLinkEvent` struct
+7. **🟤 EMIT-OR-QUEUE**: Emits to frontend if ready, queues if still initializing (prevents race conditions)
+8. **⚪ FRONTEND-INIT**: Frontend calls `get_queued_urls()` after DOM ready
+9. **⚫ ROUTE-EVENT**: JavaScript routes event to appropriate UI handler
+
+**Example Output**:
+```
+🟢 [HANDLE-URLS] Processing 1 URL(s)
+🟢 [HANDLE-URLS] URL[0]: "near://tx/ABC123?network=mainnet"
+🔵 [NORMALIZE] Input raw: "near://tx/ABC123?network=mainnet"
+🔵 [NORMALIZE] After scheme normalization: "near://tx/ABC123?network=mainnet"
+🟣 [PARSE-EVENT] ✅ Created DeepLinkEvent:
+🟣 [PARSE-EVENT]    host: "tx"
+🟣 [PARSE-EVENT]    path: ["ABC123"]
+🟣 [PARSE-EVENT]    query: {"network": "mainnet"}
+🟤 [EMIT-OR-QUEUE] Frontend ready - emitting to window
+⚫ [ROUTE-EVENT] Received event: {"host":"tx","path":["ABC123"],"query":{"network":"mainnet"}}
+```
+
+#### Configuration
+
+**Bundle Identifier**: `com.ratacat.fast`
+- **Note**: Bundle identifiers ending in `.app` are reserved by Apple
+- Configured in `tauri-workspace/src-tauri/tauri.conf.json`
+
+**Deep Link Scheme**: `near://`
+- Registered via `CFBundleURLTypes` in `Info.plist` (auto-generated by Tauri)
+- Configured in `tauri.conf.json`:
+  ```json
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["near"]
+      }
+    }
+  }
+  ```
+
+**Logging**:
+- **Development**: `tauri-plugin-log` forwards Rust logs to browser DevTools console
+- **Production**: Logs written to `~/Library/Logs/com.ratacat.fast/Ratacat.log` (macOS)
+- Both: `env_logger` outputs to stdout/stderr
+
+**Clipboard**:
+- **Plugin**: `tauri-plugin-clipboard-manager` (v2.3+) - Official Tauri clipboard plugin
+- **JavaScript Bridge**: `web/platform.js` calls `__TAURI__.invoke("copy_text", { text })` as first fallback
+- **Command**: `copy_text` command in `lib.rs` using `ClipboardExt` trait
+- **Graceful Degradation**: Falls back to Navigator API → execCommand if plugin unavailable
+
+#### Build Process
+
+**Standard Build**:
+```bash
+cd tauri-workspace
+cargo tauri build
+```
+
+**Known Issue**: Tauri bundler bug tries to copy `.rs` source files instead of binaries.
+
+**Manual Workaround**:
+```bash
+# 1. Build the release binary
+cargo build --release --manifest-path src-tauri/Cargo.toml
+
+# 2. Create bundle structure
+mkdir -p target/release/bundle/macos/Ratacat.app/Contents/MacOS
+
+# 3. Copy binary manually
+cp target/release/explorer-tauri target/release/bundle/macos/Ratacat.app/Contents/MacOS/
+
+# 4. Continue with bundle finalization
+cargo tauri build  # Will use existing binary
+```
+
+**Important**: Ensure no extra binaries in `src/bin/` directory that aren't listed in `Cargo.toml`. Move unused binaries to `.bak` extension if needed.
+
+#### Development Mode
+
+```bash
+cd tauri-workspace
+cargo tauri dev
+```
+
+**DevTools Access** (4 methods):
+1. **Keyboard**: `Cmd+Option+I` (macOS) or `F12` (Windows/Linux)
+2. **UI Button**: Click "Toggle DevTools" button in app (requires `devtools` feature)
+3. **Rust Commands**: `open_devtools()` / `close_devtools()` (requires `devtools` feature)
+4. **Auto-open**: Automatically opens in debug builds
+
+**Note**: The `devtools` Cargo feature is enabled in `tauri-workspace/src-tauri/Cargo.toml` for early development. The comprehensive debug logging waterfall provides detailed visibility into deep link processing without needing browser DevTools.
+
+#### Testing Deep Links
+
+**Test from command line**:
+```bash
+# Open the app with a deep link
+open 'near://tx/ABC123?network=mainnet'
+
+# Or with multiple paths
+open 'near://account/alice.near/history?from=100'
+```
+
+**Verify in logs**:
+```bash
+# Watch live logs (development)
+# Check browser DevTools console
+
+# View production logs (macOS)
+tail -f ~/Library/Logs/com.ratacat.fast/Ratacat.log
+```
+
+**Expected Behavior**:
+1. App launches if not running (single-instance prevents duplicates)
+2. Deep link received via `get_current()` (first launch) or `on_open_url()` (already running)
+3. Full debug waterfall appears in logs
+4. Frontend receives parsed event with host, path, query
+5. UI updates to show transaction/account details
+
+#### Registering Deep Links with macOS
+
+**Fresh Registration** (after moving app to /Applications):
+```bash
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/Ratacat.app
+```
+
+**Verify Registration**:
+```bash
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump | grep -A 3 "near:"
+```
+
+**Reset Deep Link Association** (if pointing to old app):
+1. Kill all instances: `killall explorer-tauri`
+2. Remove old app: `rm -rf /Applications/Ratacat.app`
+3. Copy fresh build: `cp -r target/release/bundle/macos/Ratacat.app /Applications/`
+4. Re-register: Run `lsregister -f` command above
+
+#### File Structure
+
+```
+tauri-workspace/
+├── src-tauri/
+│   ├── src/
+│   │   ├── lib.rs           # Core logic with 8-point debug waterfall
+│   │   └── main.rs          # Entry point (minimal, calls lib.rs)
+│   ├── Cargo.toml           # Dependencies + binary config
+│   ├── tauri.conf.json      # Tauri configuration
+│   └── build.rs             # Tauri build script
+├── assets/
+│   └── index.html           # Frontend with deep link handler
+└── target/release/bundle/
+    └── macos/
+        └── Ratacat.app/
+            └── Contents/
+                ├── Info.plist       # Auto-generated, includes CFBundleURLTypes
+                └── MacOS/
+                    └── explorer-tauri  # Binary executable
+```
+
+#### Deep Link Event Structure
+
+```rust
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DeepLinkEvent {
+    pub host: String,                    // e.g., "tx", "account"
+    pub path: Vec<String>,               // e.g., ["ABC123"], ["alice.near", "history"]
+    pub query: HashMap<String, String>,  // e.g., {"network": "mainnet"}
+}
+```
+
+**Example Parsing**:
+- Input: `near://tx/ABC123?network=mainnet`
+- Output:
+  ```json
+  {
+    "host": "tx",
+    "path": ["ABC123"],
+    "query": {"network": "mainnet"}
+  }
+  ```
+
+#### Known Issues & Workarounds
+
+**Issue 1**: Tauri bundler tries to copy `.rs` files instead of binaries
+- **Error**: `Failed to copy binary from "target/release/ratacat-egui-tauri.rs"`
+- **Workaround**: Manual binary copy (see Build Process above)
+- **Prevention**: Keep `src/bin/` clean, move unused binaries to `.bak`
+
+**Issue 2**: Bundle identifier restrictions
+- **Error**: `Bundle identifier cannot end with .app (reserved by Apple)`
+- **Solution**: Use `com.ratacat.fast` instead of `com.ratacat.app`
+
+**Issue 3**: Old app captures deep links
+- **Symptom**: Deep links open wrong app version
+- **Solution**: Kill all instances, remove old app, re-register fresh build
+
+**Issue 4**: No logs appearing in DevTools
+- **Cause**: Logger not initialized or plugin missing
+- **Solution**: Ensure both `env_logger` and `tauri-plugin-log` in dependencies
+
+#### Integration with Browser Extension
+
+The Tauri app includes a sidecar spawn utility for the native messaging host:
+
+```rust
+// Automatically spawns native-host binary when needed
+// Located at: Contents/Resources/ratacat-native-host
+// Configured in tauri.conf.json bundle.resources
+```
+
+This enables the browser extension to send `near://` deep links to the desktop app via native messaging, creating a seamless "Open in Ratacat" experience from transaction pages.
+
+#### Production Deployment
+
+**macOS Considerations**:
+1. **Code Signing**: Required for distribution outside App Store
+2. **Notarization**: Required for Gatekeeper approval
+3. **Universal Binary**: Build for both Intel and Apple Silicon
+4. **Auto-updater**: Tauri supports built-in update mechanism
+
+**Future Enhancements**:
+- Windows/Linux deep link testing
+- Auto-updater integration
+- Code signing automation
+- DMG installer with drag-to-Applications
+
 ## Project Structure
 
 ```
 ratacat/
-├── Cargo.toml           # Dependencies
+├── Cargo.toml           # Dependencies with feature flags (native/web)
+├── index-egui.html      # Web app entry point (egui + ratatui)
+├── Trunk.toml           # Web build configuration
+├── web/
+│   └── platform.js      # Unified clipboard bridge (Tauri/Extension/Navigator/execCommand)
 ├── src/
-│   ├── main.rs          # Entry point + event loop
-│   ├── app.rs           # Application state + toast notifications
-│   ├── ui.rs            # Ratatui rendering (70/30 layout split)
+│   ├── lib.rs           # Library exports (shared core)
+│   ├── bin/
+│   │   ├── ratacat.rs   # Native terminal binary
+│   │   ├── ratacat-egui-web.rs # Web browser binary (WASM + egui)
+│   │   └── ratacat-proxy.rs    # RPC proxy server (development)
+│   ├── platform/        # Platform abstraction layer
+│   │   ├── mod.rs       # Platform dispatch
+│   │   ├── native.rs    # Native implementations (copypasta)
+│   │   └── web.rs       # Web implementations (WASM-bindgen bridge)
+│   ├── app.rs           # Application state (shared)
+│   ├── ui.rs            # Ratatui rendering (70/30 layout split, shared)
 │   ├── config.rs        # CLI args + env config with validation
-│   ├── types.rs         # Data models
-│   ├── source_ws.rs     # WebSocket client
-│   ├── source_rpc.rs    # NEAR RPC poller
-│   ├── archival_fetch.rs # Background archival RPC fetcher
-│   ├── filter.rs        # Query parser + matcher
-│   ├── history.rs       # SQLite persistence + search
-│   ├── json_pretty.rs   # ANSI-colored JSON
-│   ├── json_auto_parse.rs # Recursive nested JSON parser
-│   ├── util_text.rs     # Soft-wrapping
-│   ├── clipboard.rs     # Clipboard integration
-│   ├── near_args.rs     # Base64 args decoder (3-tier fallback)
-│   └── marks.rs         # Jump marks system
+│   ├── types.rs         # Data models (shared)
+│   ├── theme.rs         # Color themes (Nord/DosBlue/AmberCrt/GreenPhosphor)
+│   ├── json_syntax.rs   # JSON syntax highlighting (WCAG AAA colors)
+│   ├── source_ws.rs     # WebSocket client (native-only)
+│   ├── source_rpc.rs    # NEAR RPC poller (shared)
+│   ├── archival_fetch.rs # Background archival RPC fetcher (shared)
+│   ├── filter.rs        # Query parser + matcher (shared)
+│   ├── history.rs       # SQLite persistence + search (native) / stub (web)
+│   ├── json_pretty.rs   # ANSI-colored JSON (shared)
+│   ├── json_auto_parse.rs # Recursive nested JSON parser (shared)
+│   ├── util_text.rs     # Soft-wrapping (shared)
+│   ├── rpc_utils.rs     # RPC client utilities (shared)
+│   ├── near_args.rs     # Base64 args decoder (shared)
+│   ├── marks.rs         # Jump marks system (native-only)
+│   └── credentials.rs   # Credentials watcher (native-only)
+├── tauri-workspace/
+│   └── src-tauri/
+│       ├── Cargo.toml   # Tauri dependencies + clipboard plugin
+│       ├── src/
+│       │   ├── lib.rs   # Core logic + clipboard command
+│       │   ├── main.rs  # Entry point
+│       │   └── bin/
+│       │       └── ratacat-egui-tauri.rs # Tauri + egui integration
+│       └── tauri.conf.json # Tauri configuration
+├── vendor/
+│   ├── egui_ratatui/    # egui + ratatui bridge (local patches)
+│   └── soft_ratatui/    # Software rendering backend (local patches)
 └── .env.example         # Configuration template
 ```
 
+**Key Architectural Decisions:**
+- **Library-first design**: Core logic in `lib.rs`, platform-specific in `bin/`
+- **Feature flags**: `native` vs `web` enable/disable platform-specific code
+- **Conditional compilation**: `#[cfg(feature = "native")]` for native-only modules
+- **Platform abstraction**: `platform/` module provides unified interface for clipboard, storage, etc.
+- **Shared UI**: Same `ui.rs` and `app.rs` code renders in both terminal and browser
+- **egui_ratatui bridge**: Web uses `egui_ratatui` to render ratatui widgets in egui
+
 ## Recent Improvements (v0.3.0)
+
+### Unified Clipboard System (v0.4.1)
+- **Problem**: Inline clipboard code duplicated across web and Tauri binaries, no fallback chain for reliability
+- **Solution**: Platform abstraction with JavaScript bridge and 4-tier fallback chain
+- **Key Features**:
+  - `src/platform/web.rs`: WASM-bindgen bridge to JavaScript
+  - `web/platform.js`: Unified clipboard facade with fallback chain:
+    1. Tauri clipboard plugin (via invoke command)
+    2. Browser extension relay (via `chrome.runtime.sendMessage`)
+    3. Navigator Clipboard API (modern browsers, HTTPS/localhost only)
+    4. Legacy execCommand fallback (older browsers/WebViews)
+  - `tauri-plugin-clipboard-manager`: Official Tauri v2 clipboard plugin
+  - Removed code duplication from `ratacat-egui-web.rs` and `ratacat-egui-tauri.rs`
+  - All binaries now use `ratacat::platform::copy_to_clipboard()` abstraction
+- **Benefits**:
+  - Maximum compatibility across all environments (web, Tauri, extension, legacy)
+  - Single source of truth eliminates maintenance burden
+  - Production-ready with graceful degradation
+  - Browser extension integration ready
 
 ### Block Selection Refactor (Height-Based Tracking)
 - **Previous behavior**: Selection tracked by array index, causing UI to shift as new blocks arrived
@@ -550,39 +1018,161 @@ ratacat/
 
 ## Dependencies
 
+### Quad-Mode Dependency Strategy
+
+Ratacat uses **feature flags** and **optional dependencies** with strict `dep:` mappings to prevent cross-contamination:
+
 ```toml
+[features]
+default = []  # No defaults - explicit feature selection required
+native = [
+    # Native UI/IO (ALL optional with dep: mapping)
+    "dep:crossterm", "dep:copypasta", "dep:rusqlite", "dep:notify",
+    # WebSocket support
+    "dep:tokio-tungstenite", "dep:tungstenite", "dep:futures-util",
+    # NEAR SDK crates (have C dependencies)
+    "dep:near-primitives", "dep:near-crypto", "dep:near-jsonrpc-client",
+    "dep:near-jsonrpc-primitives", "dep:near-account-id", "dep:near-gas", "dep:near-token",
+    # Tokio features
+    "tokio/rt-multi-thread", "tokio/macros", "tokio/time", "tokio/signal",
+    "tokio/fs", "tokio/io-util",
+]
+
+egui-web = [
+    "dep:egui",
+    "dep:eframe",
+    "dep:egui_ratatui",
+    "dep:soft_ratatui",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:js-sys",
+    "dep:web-sys",
+    "dep:getrandom",
+]
+
 [dependencies]
-# TUI
-ratatui = { version = "0.26", features = ["crossterm"] }
-crossterm = "0.27"
-
-# CLI & Configuration
-clap = { version = "4.5", features = ["derive", "env"] }
-dotenv = "0.15"
-
-# Async runtime
-tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
-
-# Blockchain data
-tokio-tungstenite = "0.21"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
-base64 = "0.22"
-
-# Data & persistence
+# Core dependencies (both platforms)
+anyhow = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rusqlite = { version = "0.31", features = ["bundled"] }
-chrono = { version = "0.4", features = ["serde"] }
-
-# Utilities
-anyhow = "1"
-copypasta = "0.10"
+clap = { version = "4.5", features = ["derive", "env"] }
+async-trait = "0.1"
 log = "0.4"
-env_logger = "0.10"
+base64 = "0.22"
 once_cell = "1"
-notify = "6.1"  # Credentials file watcher
+cfg-if = "1"
+
+# TUI (version 0.29+ for egui_ratatui compatibility)
+ratatui = { version = "0.29", default-features = false }
+
+# Chrono with WASM support
+chrono = { version = "0.4", features = ["serde", "wasmbind"] }
+
+# HTTP client (rustls works on both platforms)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# NEAR Protocol crates (optional - C dependencies prevent WASM)
+near-primitives = { version = "0.27.0", optional = true }
+near-crypto = { version = "0.27.0", optional = true }
+near-jsonrpc-client = { version = "0.15.0", features = ["any"], optional = true }
+near-jsonrpc-primitives = { version = "0.27.0", optional = true }
+near-account-id = { version = "1.0.0", optional = true }
+near-gas = { version = "0.2", features = ["serde", "borsh"], optional = true }
+near-token = { version = "0.2", features = ["serde", "borsh"], optional = true }
+
+# Tokio (base features for both, extended via features)
+tokio = { version = "1", default-features = false }
+
+# Target-specific tokio (WASM-compatible subset)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1", default-features = false, features = ["sync", "macros", "time"] }
+
+# Native-only dependencies
+crossterm = { version = "0.27", optional = true }
+copypasta = { version = "0.10", optional = true }
+rusqlite = { version = "0.31", features = ["bundled"], optional = true }
+notify = { version = "6.1", optional = true }
+tokio-tungstenite = { version = "0.21", optional = true }
+tungstenite = { version = "0.21", optional = true }
+futures-util = { version = "0.3", optional = true }
+
+# Web-only dependencies
+egui = { version = "0.32", optional = true }
+eframe = { version = "0.32", optional = true, default-features = false, features = ["glow", "default_fonts"] }
+egui_ratatui = { version = "2.0", optional = true }
+soft_ratatui = { version = "0.1", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["Window", "Navigator", "Clipboard", "Storage", "console"] }
+getrandom = { version = "0.2", optional = true, features = ["js"] }
 ```
+
+### WASM Compatibility Challenges & Solutions
+
+**Challenge 1: NEAR SDK C Dependencies**
+
+The official NEAR SDK crates (near-primitives, near-crypto, etc.) depend on native C libraries:
+- `zstd-sys` - Compression library (C code)
+- `secp256k1-sys` - Cryptographic primitives (C code)
+- `ed25519-dalek` with native features
+
+**Solution:**
+- Made all NEAR crates **optional** dependencies
+- Use conditional compilation `#[cfg(feature = "native")]` throughout codebase
+- Created web-compatible stub implementations for formatters:
+  ```rust
+  // src/util_text.rs
+  #[cfg(feature = "near-gas")]
+  use near_gas::NearGas;
+
+  pub fn format_gas(gas: u64) -> String {
+      #[cfg(feature = "near-gas")]
+      {
+          format!("{}", NearGas::from_gas(gas))
+      }
+      #[cfg(not(feature = "near-gas"))]
+      {
+          // Fallback formatter for web
+          const TERA: u64 = 1_000_000_000_000;
+          if gas >= TERA {
+              format!("{} TGas", gas / TERA)
+          } else {
+              format!("{} Gas", gas)
+          }
+      }
+  }
+  ```
+
+**Challenge 2: Tokio Runtime**
+
+Tokio's default features include `net` which uses `mio` (not WASM-compatible).
+
+**Solution:**
+- Target-specific tokio configuration:
+  ```toml
+  [target.'cfg(target_arch = "wasm32")'.dependencies]
+  tokio = { version = "1", default-features = false, features = ["sync", "macros", "time"] }
+  ```
+- WASM builds get minimal tokio with only async primitives
+
+**Challenge 3: Platform-Specific Features**
+
+Features like clipboard, SQLite, file watching are native-only.
+
+**Solution:**
+- Platform abstraction layer (`src/platform/`)
+- Separate implementations:
+  - `platform/native.rs` - Uses copypasta for clipboard, rusqlite for storage
+  - `platform/web.rs` - WASM-bindgen bridge to JavaScript clipboard facade (`web/platform.js`)
+  - `web/platform.js` - 4-tier fallback: Tauri plugin → Extension relay → Navigator API → execCommand
+- Conditional module selection in lib.rs:
+  ```rust
+  #[cfg(feature = "native")]
+  pub mod history;  // Full SQLite implementation
+
+  #[cfg(not(feature = "native"))]
+  pub mod history;  // Stub with empty methods
+  ```
 
 ## Performance Characteristics
 
@@ -599,18 +1189,43 @@ notify = "6.1"  # Credentials file watcher
 
 **High CPU usage**:
 ```bash
-RENDER_FPS=20 KEEP_BLOCKS=50 cargo run
+RENDER_FPS=20 KEEP_BLOCKS=50 cargo run --bin ratacat --features native
 ```
 
 **RPC timeouts**:
 ```bash
-RPC_TIMEOUT_MS=15000 POLL_CHUNK_CONCURRENCY=2 cargo run
+RPC_TIMEOUT_MS=15000 POLL_CHUNK_CONCURRENCY=2 cargo run --bin ratacat --features native
 ```
 
 **Search not finding results**:
 - Ensure SQLite history has been populated (run for a few minutes first)
 - Check query syntax matches filter grammar
 
----
+**Web build errors**:
 
-Built with ❤️ using Ratatui, Tokio, and Rust. Designed for NEAR Protocol monitoring.
+1. **Build fails with zstd-sys/secp256k1-sys errors**:
+   - **Cause**: Default features include native NEAR SDK crates
+   - **Fix**: Use `--no-default-features --features web` flags
+
+2. **Runtime panic: "time not implemented on this platform"**:
+   - **Cause**: Some `std::time` usage not WASM-compatible
+   - **Status**: Known issue, active development
+   - **Workaround**: Affects specific time-based features
+   - **Fix planned**: v0.4.0 will use wasm-compatible time crates
+
+3. **Connection refused errors in browser console**:
+   - **Cause**: Web app trying to connect to localhost proxy
+   - **Fix**: Configure RPC endpoint via URL parameters:
+     ```
+     http://localhost:8080?rpc=https://rpc.mainnet.fastnear.com
+     ```
+
+## Known Limitations (Web Mode)
+
+- ⚠️ **Time-based features**: Some chrono usage not fully WASM-compatible
+- ⚠️ **No SQLite**: History and marks are in-memory only
+- ⚠️ **RPC only**: WebSocket mode not available
+- ⚠️ **No file access**: Credential watching disabled
+- ✅ **Core functionality**: Block viewing, filtering, and navigation work perfectly
+
+---

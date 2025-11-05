@@ -1,0 +1,39 @@
+{
+  "$schema": "../gen/schemas/tauri-schema.json",
+  "productName": "Ratacat",
+  "version": "0.4.0",
+  "identifier": "com.ratacat.fast",
+  "build": {
+    "frontendDist": "../assets"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Ratacat Deep Link Handler",
+        "width": 900,
+        "height": 700,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "devtools": true
+      }
+    ],
+    "security": {
+      "capabilities": ["deep-link-capability"]
+    }
+  },
+  "bundle": {
+    "resources": [
+      "../../native-host/target/release/ratacat-native-host"
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["near"]
+      }
+    }
+  }
+}

@@ -1,24 +1,19 @@
 # Rust
-/target/
-**/*.rs.bk
-*.pdb
-
-# Cargo
-Cargo.lock
+/target
+**/target
 
 # Environment
 .env
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+# Wasm/Web
+/dist
+/dist-egui
+*.wasm
 
-# OS
+# IDE / OS
+.idea/
+*.iml
 .DS_Store
-Thumbs.db
 
 # Application data
 ratacat_history.db
@@ -28,5 +23,41 @@ ratacat_history.db-wal
 # Results and artifacts
 /results/
 
-# Debug logs
+# Logs / runtime
+*.log
 ratacat_debug.log
+
+# Web build artifacts (Trunk)
+/dist/
+**/dist/
+
+# Session notes and summaries (Claude Code artifacts)
+*_SUMMARY.md
+*_STATUS.md
+*_FIX*.md
+*_SETUP.md
+*_IMPLEMENTATION.md
+*_COMPARISON.md
+*_QUICK_TEST.md
+*_QUICK_START.md
+SESSION_*.md
+PE_PASS_*.md
+
+# Vendored extras we don't ship
+vendor/soft_ratatui/examples/
+vendor/soft_ratatui/scratch/
+
+# Results cache
+results/
+
+# Archives
+*.zip
+
+# Font files (development artifacts)
+Fira_Code/
+assets/fonts/
+
+# Archived documentation
+docs/archive/
+
+.claude

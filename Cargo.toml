@@ -4,56 +4,170 @@ version = "0.3.0"
 edition = "2021"
 default-run = "ratacat"
 
+[lib]
+name = "ratacat"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ratacat"
+path = "src/bin/ratacat.rs"
+required-features = ["native"]
+
+[[bin]]
+name = "ratacat-proxy"
+path = "src/bin/ratacat-proxy.rs"
+required-features = ["proxy"]
+
+[[bin]]
+name = "ratacat-egui-web"
+path = "src/bin/ratacat-egui-web.rs"
+required-features = ["egui-web"]
+
 [workspace]
+resolver = "2"
 members = [
-    ".",
-    # Plugins temporarily disabled - has lifetime compilation issues
-    # "ratacat-plugin-core",
-    # "plugins/validator-monitor",
-    # "plugins/tx-analyzer",
+  ".",                       # ratacat root
+  "plugins/tx-analyzer",
+  "plugins/validator-monitor"
+]
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+url = "2"
+log = "0.4"
+tauri-plugin-deep-link = "2.4"
+tauri-plugin-single-instance = "2.0"
+
+[features]
+default = []
+native = [
+    "dep:crossterm",
+    "dep:copypasta",
+    "dep:rusqlite",
+    "dep:notify",
+    "dep:tokio-tungstenite",
+    "dep:tungstenite",
+    "dep:futures-util",
+    "dep:near-primitives",
+    "dep:near-crypto",
+    "dep:near-jsonrpc-client",
+    "dep:near-jsonrpc-primitives",
+    "dep:near-account-id",
+    "dep:near-gas",
+    "dep:near-token",
+    "tokio/rt-multi-thread",
+    "tokio/macros",
+    "tokio/time",
+    "tokio/signal",
+    "tokio/fs",
+    "tokio/io-util",
+]
+near-gas = ["dep:near-gas"]
+near-token = ["dep:near-token"]
+proxy = [
+    "dep:axum",
+    "dep:tower-http",
+    "dep:near-primitives",
+    "dep:near-crypto",
+    "dep:near-jsonrpc-client",
+    "dep:near-jsonrpc-primitives",
+    "dep:near-account-id",
+    "dep:near-gas",
+    "dep:near-token",
+    "tokio/full",
+    "tokio/rt-multi-thread",
+]
+
+egui-web = [
+    "dep:egui",
+    "dep:eframe",
+    "dep:egui_ratatui",
+    "dep:soft_ratatui",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:js-sys",
+    "dep:web-sys",
+    "dep:getrandom",
 ]
 
 [dependencies]
+# Core dependencies (both platforms)
 anyhow = "1"
-crossterm = "0.27"
-ratatui = { version = "0.26", default-features = false, features = ["crossterm"] }
-chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-dotenv = "0.15"
+toml = "0.8"
 clap = { version = "4.5", features = ["derive", "env"] }
-
-# Plugin system (temporarily disabled)
-# ratacat-plugin-core = { path = "./ratacat-plugin-core" }
-tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 log = "0.4"
 env_logger = "0.10"
-
-# Blockchain data sources
-tokio-tungstenite = "0.21"
-tungstenite = "0.21"
-futures-util = "0.3"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 base64 = "0.22"
 once_cell = "1"
+cfg-if = "1"
+
+# Ratatui (with conditional backend)
+ratatui = { version = "0.29", default-features = false }
+
+# Chrono with conditional WASM support
+chrono = { version = "0.4", features = ["serde", "wasmbind"] }
+
+# HTTP client (shared, with rustls for both platforms)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Futures for async stream utilities (WASM needs for buffer_unordered)
+futures = { version = "0.3", default-features = false, features = ["async-await", "std"] }
 
 # NEAR Protocol crates
-near-primitives = "0.27.0"
-near-crypto = "0.27.0"
-near-jsonrpc-client = { version = "0.15.0", features = ["any"] }
-near-jsonrpc-primitives = "0.27.0"
-near-account-id = "1.0.0"
+# Note: All near-* crates are optional because they have C dependencies or depend on crates with C dependencies
+near-primitives = { version = "0.27.0", optional = true }
+near-crypto = { version = "0.27.0", optional = true }
+near-jsonrpc-client = { version = "0.15.0", features = ["any"], optional = true }
+near-jsonrpc-primitives = { version = "0.27.0", optional = true }
+near-account-id = { version = "1.0.0", optional = true }
+near-gas = { version = "0.2", features = ["serde", "borsh"], optional = true }
+near-token = { version = "0.2", features = ["serde", "borsh"], optional = true }
 
-# NEAR utility crates for formatting
-near-gas = { version = "0.2", features = ["serde", "borsh"] }
-near-token = { version = "0.2", features = ["serde", "borsh"] }
+# Tokio (with different features per platform)
+tokio = { version = "1", default-features = false }
 
-# Clipboard support
+# Native-only dependencies (optional)
+crossterm = { version = "0.27", optional = true }
+copypasta = { version = "0.10", optional = true }
+rusqlite = { version = "0.31", features = ["bundled"], optional = true }
+notify = { version = "6.1", optional = true }
+tokio-tungstenite = { version = "0.21", optional = true }
+tungstenite = { version = "0.21", optional = true }
+futures-util = { version = "0.3", optional = true }
+
+# Web-only dependencies
+egui = { version = "0.32", optional = true }
+eframe = { version = "0.32", optional = true, default-features = false, features = ["glow", "default_fonts"] }
+egui_ratatui = { path = "vendor/egui_ratatui", optional = true }
+soft_ratatui = { path = "vendor/soft_ratatui", optional = true, features = ["embedded-graphics", "unicodefonts"] }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true, features = [
+    "Window", "Navigator", "Clipboard", "Storage", "console", "Location", "Url", "UrlSearchParams",
+    "Document", "HtmlElement", "HtmlCanvasElement", "Element", "EventTarget",
+    "KeyboardEvent", "MouseEvent", "WheelEvent", "FocusEvent",
+    "DomRect", "CssStyleDeclaration",
+    "FontFaceSet", "FontFaceSetLoadStatus", "ResizeObserver", "ResizeObserverEntry"
+] }
+getrandom = { version = "0.2", optional = true, features = ["js"] }
+
+# Proxy-only dependencies (backend server)
+axum = { version = "0.7", optional = true }
+tower-http = { version = "0.6", optional = true, features = ["cors"] }
+
+# Target-specific dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1", default-features = false, features = ["sync", "macros", "time", "rt"] }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Navigator", "Clipboard", "Performance", "console"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
 copypasta = "0.10"
-
-# SQLite history
-rusqlite = { version = "0.31", features = ["bundled"] }
-
-# File watching for credentials
-notify = "6.1"

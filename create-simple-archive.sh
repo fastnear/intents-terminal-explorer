@@ -23,7 +23,19 @@ zip -r "${ARCHIVE_NAME}" . \
     -x "__pycache__/*" \
     -x "*.pyc" \
     -x ".git/*" \
-    -x ".gitignore"
+    -x ".gitignore" \
+    -x "extension/*" \
+    -x "native-host/*" \
+    -x "tauri-workspace/*" \
+    -x "dist/*" \
+    -x "Trunk.toml" \
+    -x "index.html" \
+    -x "debug.log" \
+    -x "*.db" \
+    -x "*.db-shm" \
+    -x "*.db-wal" \
+    -x "BROWSER_EXTENSION_SETUP.md" \
+    -x "IMPLEMENTATION_SUMMARY.md"
 
 # Display archive info
 if [ -f "${ARCHIVE_NAME}" ]; then
