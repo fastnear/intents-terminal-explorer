@@ -2,23 +2,32 @@
 
 use anyhow::{Context, Result};
 use crossterm::{
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute,
-    terminal::{enable_raw_mode, disable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers, KeyEventKind},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
-use std::{io, time::{Duration, Instant}, path::PathBuf, collections::HashSet};
+use std::{
+    collections::HashSet,
+    io,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::task::JoinHandle;
 
 use ratacat::{
-    config::{load, Source},
-    types::AppEvent,
     app::{App, InputMode},
-    source_ws, source_rpc, archival_fetch, credentials,
-    ui, marks::JumpMarks,
+    archival_fetch,
+    config::{load, Source},
+    constants::messages,
+    credentials,
     history::History,
+    marks::JumpMarks,
     platform::{BlockPersist, TxPersist},
+    source_rpc, source_ws,
+    types::AppEvent,
+    ui,
 };
 
 fn load_env_file() {
@@ -104,16 +113,25 @@ async fn main() -> Result<()> {
         cfg.render_fps_choices.clone(),
         cfg.keep_blocks,
         cfg.default_filter.clone(),
-        if cfg.archival_rpc_url.is_some() { Some(archival_tx) } else { None },
+        if cfg.archival_rpc_url.is_some() {
+            Some(archival_tx)
+        } else {
+            None
+        },
         cfg.theme.colors(),
+        cfg.network.clone(),
     );
 
     // source task
     let cfg_clone = cfg.clone();
     let history_clone_tx = tx.clone();
     let source_task: JoinHandle<Result<()>> = match cfg.source {
-        Source::Ws => tokio::spawn(async move { source_ws::run_ws(&cfg_clone, history_clone_tx).await }),
-        Source::Rpc => tokio::spawn(async move { source_rpc::run_rpc(&cfg_clone, history_clone_tx).await }),
+        Source::Ws => {
+            tokio::spawn(async move { source_ws::run_ws(&cfg_clone, history_clone_tx).await })
+        },
+        Source::Rpc => {
+            tokio::spawn(async move { source_rpc::run_rpc(&cfg_clone, history_clone_tx).await })
+        },
     };
 
     // jump marks
@@ -134,12 +152,12 @@ async fn main() -> Result<()> {
 }
 
 async fn run_loop(
-    app:&mut App,
-    terminal:&mut Terminal<CrosstermBackend<io::Stdout>>,
-    mut rx:UnboundedReceiver<AppEvent>,
+    app: &mut App,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    mut rx: UnboundedReceiver<AppEvent>,
     history: History,
     mut jump_marks: JumpMarks,
-    mut creds_rx: UnboundedReceiver<HashSet<String>>
+    mut creds_rx: UnboundedReceiver<HashSet<String>>,
 ) -> Result<()> {
     let mut last_frame = Instant::now();
     loop {
@@ -163,14 +181,21 @@ async fn run_loop(
                     height: block.height,
                     hash: block.hash.clone(),
                     ts_ms: block.timestamp as i64,
-                    txs: block.transactions.iter().map(|tx| TxPersist {
-                        hash: tx.hash.clone(),
-                        height: block.height,
-                        signer: None,
-                        receiver: None,
-                        actions_json: None,
-                        raw_json: Some(serde_json::to_string(&serde_json::json!({"hash": tx.hash})).unwrap_or_default()),
-                    }).collect(),
+                    txs: block
+                        .transactions
+                        .iter()
+                        .map(|tx| TxPersist {
+                            hash: tx.hash.clone(),
+                            height: block.height,
+                            signer: None,
+                            receiver: None,
+                            actions_json: None,
+                            raw_json: Some(
+                                serde_json::to_string(&serde_json::json!({"hash": tx.hash}))
+                                    .unwrap_or_default(),
+                            ),
+                        })
+                        .collect(),
                 };
                 history.persist_block(persist);
             }
@@ -186,13 +211,35 @@ async fn run_loop(
             let marks_list = jump_marks.list();
             terminal.draw(|f| ui::draw(f, app, &marks_list))?;
             last_frame = Instant::now();
+
+            // Check for "filter hides all" scenario - show info toast once per check
+            let total = app.blocks().len();
+            let (filtered_list, _, _) = app.filtered_blocks();
+            if total > 0
+                && filtered_list.is_empty()
+                && !app.filter_query().is_empty()
+                && app.toast_message().is_none()
+            {
+                app.show_info_toast("Filter hides all blocks — Press Esc to clear".to_string());
+            }
         }
-        if app.quit_flag() { break; }
+        if app.quit_flag() {
+            break;
+        }
     }
     Ok(())
 }
 
-async fn handle_key(app:&mut App, k:KeyEvent, history:&History, jump_marks:&mut JumpMarks) {
+async fn handle_key(app: &mut App, k: KeyEvent, history: &History, jump_marks: &mut JumpMarks) {
+    // Handle help overlay (not a mode, just a flag)
+    if app.help_visible() {
+        match k.code {
+            KeyCode::Esc | KeyCode::Char('?') => app.toggle_help_overlay(),
+            _ => {},
+        }
+        return;
+    }
+
     // Handle filter input mode separately
     if app.input_mode() == InputMode::Filter {
         match k.code {
@@ -200,7 +247,7 @@ async fn handle_key(app:&mut App, k:KeyEvent, history:&History, jump_marks:&mut 
             KeyCode::Backspace => app.filter_backspace(),
             KeyCode::Enter => app.apply_filter(),
             KeyCode::Esc => app.clear_filter(),
-            _ => {}
+            _ => {},
         }
         return;
     }
@@ -224,11 +271,11 @@ async fn handle_key(app:&mut App, k:KeyEvent, history:&History, jump_marks:&mut 
                     let results = history.search(query, 200).await;
                     app.set_search_results(results);
                 }
-            }
+            },
             KeyCode::Up => app.search_up(),
             KeyCode::Down => app.search_down(),
             KeyCode::Esc => app.close_search(),
-            _ => {}
+            _ => {},
         }
         return;
     }
@@ -244,7 +291,7 @@ async fn handle_key(app:&mut App, k:KeyEvent, history:&History, jump_marks:&mut 
                     app.jump_to_mark(&mark);
                     app.close_marks();
                 }
-            }
+            },
             KeyCode::Char('d') => {
                 // Delete selected mark
                 if let Some(mark) = app.get_selected_mark() {
@@ -254,9 +301,9 @@ async fn handle_key(app:&mut App, k:KeyEvent, history:&History, jump_marks:&mut 
                     let marks_list = jump_marks.list();
                     app.open_marks(marks_list);
                 }
-            }
+            },
             KeyCode::Esc => app.close_marks(),
-            _ => {}
+            _ => {},
         }
         return;
     }
@@ -277,29 +324,31 @@ async fn handle_key(app:&mut App, k:KeyEvent, history:&History, jump_marks:&mut 
     // Focus pattern: Tab/Shift+Tab switch between panes (0=Blocks, 1=Txs, 2=Details)
     // Arrow keys only affect the currently focused pane
     match (k.code, k.modifiers) {
-        (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => { app.on_event(AppEvent::Quit); }
+        (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+            app.on_event(AppEvent::Quit);
+        },
 
         // Pane focus switching (circular navigation)
         (KeyCode::Tab, _) => {
             app.log_debug(format!("KEY: Tab pressed, pane={}", app.pane()));
             app.next_pane();
-        }
+        },
         (KeyCode::BackTab, _) => {
             app.log_debug(format!("KEY: BackTab pressed, pane={}", app.pane()));
             app.prev_pane();
-        }
+        },
 
         // Navigation within focused pane
         (KeyCode::Up, _) => {
             app.log_debug(format!("KEY: Up pressed, pane={}", app.pane()));
             app.up();
-        }
+        },
         (KeyCode::Down, _) => {
             app.log_debug(format!("KEY: Down pressed, pane={}", app.pane()));
             app.down();
-        }
-        (KeyCode::Left, _) => app.left(),               // Jump to top of current list
-        (KeyCode::Right, _) => app.right(),             // Paginate down 12 items
+        },
+        (KeyCode::Left, _) => app.left(), // Jump to top of current list
+        (KeyCode::Right, _) => app.right(), // Paginate down 12 items
         (KeyCode::PageUp, _) => app.page_up(20),
         (KeyCode::PageDown, _) => app.page_down(20),
         (KeyCode::Home, _) => {
@@ -310,25 +359,25 @@ async fn handle_key(app:&mut App, k:KeyEvent, history:&History, jump_marks:&mut 
             } else {
                 app.home();
             }
-        }
+        },
         (KeyCode::End, _) => app.end(),
         (KeyCode::Enter, _) => app.select_tx(),
-        (KeyCode::Char(' '), _) => app.toggle_details_fullscreen(),  // Spacebar to toggle fullscreen
+        (KeyCode::Char(' '), _) => app.toggle_details_fullscreen(), // Spacebar to toggle fullscreen
         (KeyCode::Char('o'), KeyModifiers::CONTROL) => app.cycle_fps(),
         (KeyCode::Char('c'), _) => {
             let content = ratacat::copy_api::get_copy_content(&app);
             if ratacat::platform::copy_to_clipboard(&content) {
                 let msg = match app.pane() {
-                    0 => "Copied block JSON",
-                    1 => "Copied transaction JSON",
-                    2 => "Copied details JSON",
-                    _ => "Copied",
+                    0 => messages::COPY_BLOCK,
+                    1 => messages::COPY_TX,
+                    2 => messages::COPY_DETAILS,
+                    _ => messages::COPY_GENERIC,
                 };
                 app.show_toast(msg.to_string());
             } else {
-                app.show_toast("Copy failed".to_string());
+                app.show_toast(messages::COPY_FAILED.to_string());
             }
-        }
+        },
         (KeyCode::Char('f'), KeyModifiers::CONTROL) => app.start_search(),
         (KeyCode::Char('/'), _) | (KeyCode::Char('f'), _) => app.start_filter(),
         (KeyCode::Esc, _) => app.clear_filter(),
@@ -337,8 +386,10 @@ async fn handle_key(app:&mut App, k:KeyEvent, history:&History, jump_marks:&mut 
             // Set mark with auto-label
             let label = jump_marks.next_auto_label();
             let (pane, height, tx_hash) = app.current_context();
-            jump_marks.add_or_replace(label, pane, height, tx_hash).await;
-        }
+            jump_marks
+                .add_or_replace(label, pane, height, tx_hash)
+                .await;
+        },
         (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
             // Pin/unpin current context
             let (pane, height, tx_hash) = app.current_context();
@@ -350,39 +401,45 @@ async fn handle_key(app:&mut App, k:KeyEvent, history:&History, jump_marks:&mut 
             } else {
                 // Create new auto-labeled mark and pin it
                 let label = jump_marks.next_auto_label();
-                jump_marks.add_or_replace(label.clone(), pane, height, tx_hash).await;
+                jump_marks
+                    .add_or_replace(label.clone(), pane, height, tx_hash)
+                    .await;
                 jump_marks.set_pinned(&label, true).await;
             }
-        }
+        },
         (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
             // Toggle owned-only filter
             app.toggle_owned_filter();
-        }
+        },
         (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
             // Toggle debug panel visibility
             app.toggle_debug_panel();
-        }
+        },
+        (KeyCode::Char('?'), _) => {
+            // Toggle help overlay
+            app.toggle_help_overlay();
+        },
         (KeyCode::Char('M'), KeyModifiers::SHIFT) => {
             // Open marks overlay
             let marks_list = jump_marks.list();
             app.open_marks(marks_list);
-        }
+        },
         (KeyCode::Char('\''), _) => {
             // Enter jump-pending mode (wait for label)
             app.start_jump_pending();
-        }
+        },
         (KeyCode::Char('['), _) => {
             // Jump to previous mark
             if let Some(mark) = jump_marks.prev() {
                 app.jump_to_mark(&mark);
             }
-        }
+        },
         (KeyCode::Char(']'), _) => {
             // Jump to next mark
             if let Some(mark) = jump_marks.next() {
                 app.jump_to_mark(&mark);
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }

@@ -22,11 +22,22 @@ cfg_if! {
         use ratacat::{
             App, InputMode,
             config::{Config, Source},
+            constants::messages,
             types::AppEvent,
             source_rpc,
             theme::Theme,
             platform,
+            webshim,
         };
+
+        // ---------------------------
+        // Grid Dimensions
+        // ---------------------------
+
+        /// Grid width in columns (matches soft_backend initialization)
+        const GRID_COLS: u16 = 85;
+        /// Grid height in rows (matches soft_backend initialization)
+        const GRID_ROWS: u16 = 30;
 
         // ---------------------------
         // Egui Application
@@ -36,6 +47,7 @@ cfg_if! {
             terminal: Terminal<RataguiBackend<EmbeddedGraphics>>,
             app: Rc<RefCell<App>>,
             event_rx: Rc<RefCell<tokio::sync::mpsc::UnboundedReceiver<AppEvent>>>,
+            prefs_bootstrap_done: bool,
         }
 
         impl RatacatApp {
@@ -48,25 +60,27 @@ cfg_if! {
                     config.default_filter.clone(),
                     None, // No archival fetch for web
                     config.theme.colors(),
+                    config.network.clone(),
                 );
                 log::info!("✅ App created successfully");
 
                 // Create egui_ratatui backend with soft renderer
-                // Use pixel-perfect bitmap font atlases (8x13) for crisp rendering
-                // No TTF rasterization = no antialiasing blur
+                // Use pixel-perfect bitmap font atlases (9x15) for crisp rendering on retina displays
+                // Bitmap fonts ensure sharp rendering without antialiasing blur
                 use soft_ratatui::embedded_graphics_unicodefonts::{
-                    mono_8x13_atlas,
-                    mono_8x13_bold_atlas,
-                    mono_8x13_italic_atlas,
+                    mono_9x15_atlas,
+                    mono_9x15_bold_atlas,
+                    // Note: 9x15 doesn't have italic, fallback to regular
+                    mono_9x15_atlas as mono_9x15_italic_atlas,
                 };
 
-                let font_regular = mono_8x13_atlas();
-                let font_bold = Some(mono_8x13_bold_atlas());
-                let font_italic = Some(mono_8x13_italic_atlas());
+                let font_regular = mono_9x15_atlas();
+                let font_bold = Some(mono_9x15_bold_atlas());
+                let font_italic = Some(mono_9x15_italic_atlas());
 
                 let soft_backend = SoftBackend::<EmbeddedGraphics>::new(
-                    85,            // width in columns (8x13 bitmap font)
-                    30,            // height in rows (maintains aspect ratio)
+                    GRID_COLS,     // width in columns (9x15 bitmap font)
+                    GRID_ROWS,     // height in rows (maintains aspect ratio)
                     font_regular,
                     font_bold,
                     font_italic,
@@ -78,6 +92,7 @@ cfg_if! {
                     terminal,
                     app: Rc::new(RefCell::new(app)),
                     event_rx: Rc::new(RefCell::new(event_rx)),
+                    prefs_bootstrap_done: false,
                 }
             }
 
@@ -91,6 +106,16 @@ cfg_if! {
                             }
 
                             let mut app = self.app.borrow_mut();
+
+                            // Handle help overlay (not a mode, just a flag)
+                            if app.help_visible() {
+                                match key {
+                                    egui::Key::Escape => app.toggle_help_overlay(),
+                                    egui::Key::Slash if modifiers.shift => app.toggle_help_overlay(),
+                                    _ => {}
+                                }
+                                continue;
+                            }
 
                             // Handle filter mode
                             if app.input_mode() == InputMode::Filter {
@@ -131,8 +156,8 @@ cfg_if! {
                                     log::info!("Quit requested (close tab)");
                                     app.show_toast("Press Ctrl+W to close tab".to_string());
                                 }
-                                (egui::Key::Tab, false) if modifiers.shift => app.prev_pane(),
-                                (egui::Key::Tab, false) => app.next_pane(),
+                                (egui::Key::Tab, false) if modifiers.shift && !ctx.wants_keyboard_input() => app.prev_pane(),
+                                (egui::Key::Tab, false) if !ctx.wants_keyboard_input() => app.next_pane(),
                                 (egui::Key::ArrowUp, false) => app.up(),
                                 (egui::Key::ArrowDown, false) => app.down(),
                                 (egui::Key::ArrowLeft, false) => app.left(),
@@ -148,20 +173,25 @@ cfg_if! {
                                 }
                                 (egui::Key::End, false) => app.end(),
                                 (egui::Key::Enter, false) => app.select_tx(),
+                                (egui::Key::Space, false) => app.toggle_details_fullscreen(),
                                 (egui::Key::O, true) => app.cycle_fps(),
                                 (egui::Key::D, true) => app.toggle_debug_panel(),
+                                (egui::Key::Slash, false) if modifiers.shift => app.toggle_help_overlay(),
                                 (egui::Key::F, true) => app.start_search(),
                                 (egui::Key::U, true) => app.toggle_owned_filter(),
-                                (egui::Key::C, false) => {
+                                (egui::Key::C, false) if !modifiers.command && !modifiers.ctrl => {
                                     let payload = ratacat::copy_api::get_copy_content(&app);
-                                    let _ok = ratacat::platform::copy_to_clipboard(&payload);
-                                    let msg = match app.pane() {
-                                        0 => "Copied block JSON",
-                                        1 => "Copied transaction JSON",
-                                        2 => "Copied details JSON",
-                                        _ => "Copied",
-                                    };
-                                    app.show_toast(msg.to_string());
+                                    if ratacat::platform::copy_to_clipboard(&payload) {
+                                        let msg = match app.pane() {
+                                            0 => messages::COPY_BLOCK,
+                                            1 => messages::COPY_TX,
+                                            2 => messages::COPY_DETAILS,
+                                            _ => messages::COPY_GENERIC,
+                                        };
+                                        app.show_toast(msg.to_string());
+                                    } else {
+                                        app.show_toast(messages::COPY_FAILED.to_string());
+                                    }
                                 }
                                 (egui::Key::Slash, false) => app.start_filter(),
                                 (egui::Key::F, false) if !modifiers.ctrl => app.start_filter(),
@@ -226,6 +256,20 @@ cfg_if! {
         impl eframe::App for RatacatApp {
             fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
                 // ═══════════════════════════════════════════════════════════════
+                // ONE-TIME: Restore saved filter from Store plugin or localStorage
+                // ═══════════════════════════════════════════════════════════════
+                if !self.prefs_bootstrap_done {
+                    self.prefs_bootstrap_done = true;
+                    let app_rc = self.app.clone();
+                    webshim::bootstrap_filter(move |saved_query| {
+                        if !saved_query.is_empty() {
+                            log::info!("💾 Restored filter from prefs: '{}'", saved_query);
+                            app_rc.borrow_mut().set_filter_query(&saved_query);
+                        }
+                    });
+                }
+
+                // ═══════════════════════════════════════════════════════════════
                 // TIME-BUDGETED EVENT DRAIN: Process events with 3ms budget
                 // ═══════════════════════════════════════════════════════════════
                 // This prevents UI stutter during initial catch-up by limiting
@@ -283,7 +327,84 @@ cfg_if! {
                 // Handle keyboard input
                 self.handle_input(ctx);
 
-                // Render the terminal using egui_ratatui
+                // Check for Ctrl/Cmd+F to focus filter
+                let want_focus_filter = ctx.input(|i|
+                    i.key_pressed(egui::Key::F) && (i.modifiers.command || i.modifiers.ctrl)
+                );
+
+                // ----- Filter Bar -----
+                egui::TopBottomPanel::top("rc_filter_bar")
+                    .frame(egui::Frame::default().fill(egui::Color32::from_rgb(12, 16, 24)))
+                    .show(ctx, |ui| {
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Filter").monospace());
+
+                            let (mut query, mut owned_only) = {
+                                let app = self.app.borrow();
+                                (app.filter_query().to_string(), app.owned_only_filter())
+                            };
+
+                            let available = ui.available_width() - 420.0;
+                            let text_edit = egui::TextEdit::singleline(&mut query)
+                                .hint_text("e.g. signer:alice.near method:transfer type:functioncall height>=100  (Ctrl+F)")
+                                .desired_width(available.max(200.0));
+
+                            let resp = ui.add(text_edit);
+                            if want_focus_filter {
+                                resp.request_focus();
+                            }
+
+                            if resp.changed() {
+                                self.app.borrow_mut().set_filter_query(&query);
+                                webshim::persist_filter(&query);
+                            }
+
+                            if ui.button("Clear").clicked() {
+                                self.app.borrow_mut().clear_filter();
+                                webshim::persist_filter("");
+                            }
+
+                            let owned_resp = ui.checkbox(&mut owned_only, "Owned only");
+                            if owned_resp.changed() {
+                                let mut app = self.app.borrow_mut();
+                                app.set_owned_only_filter(owned_only);
+                                app.on_filter_changed();
+                            }
+
+                            // Show "Filter hides all" warning if no blocks match but blocks exist
+                            let (total_blocks, filtered_blocks_count) = {
+                                let app = self.app.borrow();
+                                let (filtered_list, _, _) = app.filtered_blocks();
+                                (app.blocks().len(), filtered_list.len())
+                            };
+
+                            if total_blocks > 0 && filtered_blocks_count == 0 && !query.is_empty() {
+                                ui.colored_label(egui::Color32::from_rgb(220, 80, 80), "⚠ Filter hides all");
+                                if ui.small_button("Clear").clicked() {
+                                    self.app.borrow_mut().clear_filter();
+                                    webshim::persist_filter("");
+                                }
+                            }
+
+                            ui.separator();
+
+                            // Quick chips (append tokens)
+                            for chip in ["type:transfer", "type:functioncall", "method:transfer"] {
+                                if ui.button(chip).clicked() {
+                                    let mut q = query.clone();
+                                    if !q.is_empty() && !q.ends_with(' ') {
+                                        q.push(' ');
+                                    }
+                                    q.push_str(chip);
+                                    self.app.borrow_mut().set_filter_query(&q);
+                                }
+                            }
+                        });
+                        ui.add_space(2.0);
+                    });
+
+                // ----- Main Terminal -----
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
                     .show(ctx, |ui| {
@@ -295,7 +416,32 @@ cfg_if! {
                         }).ok();
 
                         // Render the terminal as an egui widget
-                        ui.add(self.terminal.backend_mut());
+                        let resp = ui.add(self.terminal.backend_mut());
+
+                        // Handle mouse click selection
+                        if resp.hovered() && ui.input(|i| i.pointer.primary_clicked()) {
+                            if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                                let rect = resp.rect;
+                                let (w, h) = (rect.width().max(1.0), rect.height().max(1.0));
+
+                                // Get grid size from app's captured layout
+                                let (cols, rows) = {
+                                    let app = self.app.borrow();
+                                    app.pane_layout()
+                                        .map(|pl| (pl.grid_cols as f32, pl.grid_rows as f32))
+                                        .unwrap_or((GRID_COLS as f32, GRID_ROWS as f32)) // Fallback to soft_backend dimensions
+                                };
+
+                                // Map screen coords to cell grid
+                                let cell_w = w / cols;
+                                let cell_h = h / rows;
+                                let col = ((pos.x - rect.min.x) / cell_w).floor().clamp(0.0, cols - 1.0) as u16;
+                                let row = ((pos.y - rect.min.y) / cell_h).floor().clamp(0.0, rows - 1.0) as u16;
+
+                                // Update app selection based on clicked cell
+                                self.app.borrow_mut().point_select(col, row);
+                            }
+                        }
                     });
 
                 // Request continuous repaint (60 FPS)
@@ -333,11 +479,21 @@ cfg_if! {
                 (None, "none")
             };
 
-            let filter = search_params
-                .as_ref()
-                .and_then(|p| p.get("filter"))
-                .or_else(|| local_storage.as_ref().and_then(|ls| ls.get_item("DEFAULT_FILTER").ok().flatten()))
-                .unwrap_or_else(|| "".to_string()); // Empty = show all blocks
+            // Watch accounts priority: ?watch param > ?filter param > localStorage > default
+            let filter = if let Some(watch_accounts) = search_params.as_ref().and_then(|p| p.get("watch")) {
+                // Convert comma-separated account list to filter syntax
+                watch_accounts
+                    .split(',')
+                    .map(|acc| format!("acct:{}", acc.trim()))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                search_params
+                    .as_ref()
+                    .and_then(|p| p.get("filter"))
+                    .or_else(|| local_storage.as_ref().and_then(|ls| ls.get_item("DEFAULT_FILTER").ok().flatten()))
+                    .unwrap_or_else(|| "acct:intents.near".to_string()) // Default to intents.near
+            };
 
             // Theme priority: ?theme param > localStorage > default (Nord)
             let theme = search_params
@@ -347,9 +503,18 @@ cfg_if! {
                 .and_then(|s| Theme::from_str(&s).ok())
                 .unwrap_or_default();
 
+            // Display watch accounts if specified
+            let filter_display = if let Some(watch) = search_params.as_ref().and_then(|p| p.get("watch")) {
+                format!("Watching: {}", watch)
+            } else if filter.is_empty() {
+                "(showing all blocks)".to_string()
+            } else {
+                format!("Filter: '{}'", filter)
+            };
+
             log::info!("🚀 Ratacat egui-web starting");
             log::info!("RPC: {}", rpc_url);
-            log::info!("Filter: {}", if filter.is_empty() { "(empty - showing all blocks)".to_string() } else { format!("'{}'", filter) });
+            log::info!("{}", filter_display);
             log::info!("Theme: {:?}", theme);
             log::info!("Token: {} (from {})",
                 auth_token.as_ref().map(|t| format!("{}...", &t.chars().take(8).collect::<String>())).unwrap_or_else(|| "❌ NONE".to_string()),
@@ -361,9 +526,16 @@ cfg_if! {
                 let _ = js_sys::Reflect::get(&window, &"updateStatus".into())
                     .and_then(|f| {
                         let func = js_sys::Function::from(f);
-                        func.call2(&window, &format!("RPC: {} | Filter: {}", rpc_url, filter).into(), &"loading".into())
+                        func.call2(&window, &format!("RPC: {} | {}", rpc_url, filter_display).into(), &"loading".into())
                     });
             }
+
+            // Determine network from RPC URL or default to mainnet
+            let network = if rpc_url.contains("testnet") {
+                "testnet".to_string()
+            } else {
+                "mainnet".to_string()
+            };
 
             Config {
                 source: Source::Rpc,
@@ -383,6 +555,7 @@ cfg_if! {
                 keep_blocks: 100,
                 default_filter: filter,
                 theme,
+                network,
             }
         }
 
@@ -407,7 +580,7 @@ cfg_if! {
             log::info!("📋 Startup Diagnostics:");
             log::info!("  • WASM binary: ratacat-egui-web");
             log::info!("  • UI framework: egui + egui_ratatui + soft_ratatui");
-            log::info!("  • Font backend: EmbeddedGraphics (8x13 monospace)");
+            log::info!("  • Font backend: EmbeddedGraphics (9x15 monospace)");
             log::info!("  • Async runtime: tokio (wasm-compatible subset)");
             log::info!("  • Log level: Debug (all RPC activity visible)");
 
@@ -430,7 +603,7 @@ cfg_if! {
             log::info!("  • Filter: '{}'", config_for_rpc.default_filter);
             log::info!("  • Strategy: RPC runs DURING UI load (parallel!)");
 
-            wasm_bindgen_futures::spawn_local(async move {
+            ratacat::spawn::spawn(async move {
                 log::info!("╔═══════════════════════════════════════════════════════════╗");
                 log::info!("║  ✅ RPC TASK SPAWNED - WILL RUN DURING UI INIT         ║");
                 log::info!("╚═══════════════════════════════════════════════════════════╝");

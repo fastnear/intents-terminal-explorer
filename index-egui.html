@@ -163,7 +163,7 @@
         //   ?token=<token>      - FastNEAR auth token (overrides localStorage)
         //   ?filter=<account>   - Default account filter
         //
-        // Example: http://localhost:8080?token=YOUR_TOKEN&rpc=https://rpc.mainnet.fastnear.com/
+        // Example: http://localhost:8181?token=YOUR_TOKEN&rpc=https://rpc.mainnet.fastnear.com/
         //
         // ═══════════════════════════════════════════════════════════════
 
@@ -206,6 +206,9 @@
     <!-- Clipboard bridge (works in web, Tauri, and extension contexts) -->
     <link data-trunk rel="copy-file" href="web/platform.js" />
     <script src="platform.js"></script>
+
+    <!-- Overlay container (initially hidden) -->
+    <div id="rc-select-overlay" hidden></div>
 
     <!-- Trunk will inject the WASM loader script here -->
     <link data-trunk rel="rust" data-bin="ratacat-egui-web" data-cargo-features="egui-web" />
