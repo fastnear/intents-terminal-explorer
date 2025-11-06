@@ -106,6 +106,7 @@ egui-web = [
     "dep:eframe",
     "dep:egui_ratatui",
     "dep:soft_ratatui",
+    "dep:embedded-graphics-unicodefonts",
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
     "dep:js-sys",
@@ -168,7 +169,8 @@ ratzilla = { version = "0.2", optional = true }
 egui = { version = "0.32", optional = true }
 eframe = { version = "0.32", optional = true, default-features = false, features = ["glow", "default_fonts"] }
 egui_ratatui = { version = "2.0", optional = true }
-soft_ratatui = { version = "0.1", optional = true }
+soft_ratatui = { version = "0.1", features = ["embedded-graphics", "unicodefonts"], optional = true }
+embedded-graphics-unicodefonts = { version = "0.2", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 js-sys = { version = "0.3", optional = true }

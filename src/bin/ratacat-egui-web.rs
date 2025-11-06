@@ -14,7 +14,10 @@ cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
         use std::{cell::RefCell, rc::Rc};
         use egui_ratatui::RataguiBackend;
-        use soft_ratatui::SoftBackend;
+        use embedded_graphics_unicodefonts::{
+            mono_8x13_atlas, mono_8x13_bold_atlas, mono_8x13_italic_atlas,
+        };
+        use soft_ratatui::{EmbeddedGraphics, SoftBackend};
         use ratatui::Terminal;
         use wasm_bindgen::prelude::*;
         use eframe::wasm_bindgen;
@@ -31,7 +34,7 @@ cfg_if! {
         // ---------------------------
 
         struct RatacatApp {
-            backend: RataguiBackend<SoftBackend>,
+            terminal: Terminal<RataguiBackend<EmbeddedGraphics>>,
             app: Rc<RefCell<App>>,
             event_rx: Rc<RefCell<tokio::sync::mpsc::UnboundedReceiver<AppEvent>>>,
         }
@@ -46,12 +49,23 @@ cfg_if! {
                     None, // No archival fetch for web
                 );
 
-                // Create egui_ratatui backend with soft renderer
-                let soft_backend = SoftBackend::new(80, 24); // Initial size
+                // Create egui_ratatui backend with soft renderer and bitmap fonts
+                let font_regular = mono_8x13_atlas();
+                let font_bold = Some(mono_8x13_bold_atlas());
+                let font_italic = Some(mono_8x13_italic_atlas());
+
+                let soft_backend = SoftBackend::<EmbeddedGraphics>::new(
+                    80,   // width in columns (web-optimized, smaller than Tauri's 120)
+                    24,   // height in rows (web-optimized, smaller than Tauri's 40)
+                    font_regular,
+                    font_bold,
+                    font_italic,
+                );
                 let backend = RataguiBackend::new("ratacat", soft_backend);
+                let terminal = Terminal::new(backend).expect("Failed to create terminal");
 
                 Self {
-                    backend,
+                    terminal,
                     app: Rc::new(RefCell::new(app)),
                     event_rx: Rc::new(RefCell::new(event_rx)),
                 }
@@ -225,18 +239,15 @@ cfg_if! {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
                     .show(ctx, |ui| {
-                        // Create terminal with our backend
-                        let mut terminal = Terminal::new(&mut self.backend).expect("terminal");
-
                         // Draw ratatui UI
                         let app_ref = self.app.clone();
-                        terminal.draw(|f| {
+                        let _ = self.terminal.draw(|f| {
                             let mut app = app_ref.borrow_mut();
                             ratacat::ui::draw(f, &mut app, &[]); // Empty marks list for web
-                        }).ok();
+                        });
 
-                        // Render the terminal in egui
-                        self.backend.show(ui);
+                        // Render the terminal as egui widget
+                        ui.add(self.terminal.backend_mut());
                     });
 
                 // Request continuous repaint (60 FPS)

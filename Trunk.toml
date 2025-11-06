@@ -15,10 +15,10 @@ public_url = "/"
 [build.rust]
 # Features to enable for the web build
 default-features = false
-features = ["web"]
+features = ["egui-web"]
 
-# Binary to build (ratacat-web)
-bin = "ratacat-web"
+# Binary to build (ratacat-egui-web - modern egui version)
+bin = "ratacat-egui-web"
 
 [watch]
 # Paths to watch for changes during development
