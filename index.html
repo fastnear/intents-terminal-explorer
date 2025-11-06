@@ -177,6 +177,36 @@
 
         // Note: Resize handling is now done in WASM code
         // (install_event_listeners function)
+
+        // Start the app after DOM is ready and WASM is loaded
+        document.addEventListener('DOMContentLoaded', async () => {
+            console.log('DOM ready, waiting for WASM module...');
+            updateStatus('Starting app...');
+
+            // Wait for WASM module to be available (Trunk injects it)
+            // The module name will be wasm_bindgen
+            if (typeof wasm_bindgen === 'undefined') {
+                // Wait a bit for Trunk's injected script to load
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            try {
+                // Initialize WASM and start the app
+                await wasm_bindgen();
+                console.log('WASM initialized, starting app...');
+
+                // Call the start_app function from Rust
+                await wasm_bindgen.start_app();
+
+                // Hide loading screen on success
+                window.hideLoading();
+                console.log('✅ App started successfully');
+            } catch (err) {
+                console.error('Failed to start app:', err);
+                updateStatus(`Error: ${err}`);
+                // Keep loading screen visible to show error
+            }
+        });
     </script>
 </body>
 </html>

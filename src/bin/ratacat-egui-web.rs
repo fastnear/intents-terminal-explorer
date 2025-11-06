@@ -20,6 +20,7 @@ cfg_if! {
         use soft_ratatui::{EmbeddedGraphics, SoftBackend};
         use ratatui::Terminal;
         use wasm_bindgen::prelude::*;
+        use wasm_bindgen::JsValue;
         use eframe::wasm_bindgen;
 
         use ratacat::{
@@ -319,14 +320,18 @@ cfg_if! {
         // Main Entry Point
         // ---------------------------
 
-        /// WASM entry point
+        /// Initialize panic hook and logging (runs immediately on WASM load)
         #[wasm_bindgen(start)]
-        pub async fn main() {
-            // Setup panic hook and logging
+        pub fn setup() {
             console_error_panic_hook::set_once();
             wasm_logger::init(wasm_logger::Config::new(log::Level::Info));
+            log::info!("🦀 Ratacat WASM module loaded, waiting for DOM...");
+        }
 
-            log::info!("🦀 Ratacat egui-web initializing...");
+        /// Main entry point - called from JavaScript after DOMContentLoaded
+        #[wasm_bindgen]
+        pub async fn start_app() -> Result<(), JsValue> {
+            log::info!("🚀 Starting Ratacat egui-web...");
 
             // Load configuration
             let config = Rc::new(load_web_config());
@@ -345,14 +350,16 @@ cfg_if! {
             // Create egui app
             let app = RatacatApp::new((*config).clone(), event_rx);
 
-            // Get canvas element from DOM
-            let window = web_sys::window().expect("no window");
-            let document = window.document().expect("no document");
+            // Get canvas element from DOM (should be ready now)
+            let window = web_sys::window().ok_or("no window")?;
+            let document = window.document().ok_or("no document")?;
             let canvas = document
                 .get_element_by_id("canvas")
-                .expect("no canvas element")
+                .ok_or("no canvas element")?
                 .dyn_into::<web_sys::HtmlCanvasElement>()
-                .expect("canvas is not HtmlCanvasElement");
+                .map_err(|_| "canvas is not HtmlCanvasElement")?;
+
+            log::info!("📦 Canvas element found, starting eframe...");
 
             // Start eframe web runner
             let web_options = eframe::WebOptions::default();
@@ -364,9 +371,10 @@ cfg_if! {
                     Box::new(|_cc| Ok(Box::new(app))),
                 )
                 .await
-                .expect("failed to start eframe");
+                .map_err(|e| JsValue::from_str(&format!("eframe start failed: {:?}", e)))?;
 
             log::info!("✅ Ratacat egui-web running!");
+            Ok(())
         }
     }
 }
