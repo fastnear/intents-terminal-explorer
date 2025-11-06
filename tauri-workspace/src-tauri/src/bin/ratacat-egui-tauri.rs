@@ -16,7 +16,7 @@ use egui_ratatui::RataguiBackend;
 use ratacat::{App, AppEvent};
 use ratatui::Terminal;
 use embedded_graphics_unicodefonts::{
-    mono_9x15_atlas, mono_9x15_bold_atlas,
+    mono_9x18_atlas, mono_9x18_bold_atlas,
 };
 use soft_ratatui::{EmbeddedGraphics, SoftBackend};
 use std::sync::{Arc, Mutex};
@@ -90,10 +90,10 @@ impl RatacatEguiApp {
     #[allow(dead_code)]
     fn new(_cc: &eframe::CreationContext<'_>, state: AppState) -> Self {
         // Create software-rendered ratatui backend using SoftBackend + EmbeddedGraphics
-        let font_regular = mono_9x15_atlas();
-        let font_bold = Some(mono_9x15_bold_atlas());
-        // Note: 9x15 lacks italic variant, using regular as fallback
-        let font_italic = Some(mono_9x15_atlas());
+        let font_regular = mono_9x18_atlas();
+        let font_bold = Some(mono_9x18_bold_atlas());
+        // Note: 9x18 lacks italic variant, using regular as fallback for retina-optimized rendering
+        let font_italic = Some(mono_9x18_atlas());
 
         let soft_backend = SoftBackend::<EmbeddedGraphics>::new(
             120,  // width in columns (desktop-optimized, larger than web's 85)
