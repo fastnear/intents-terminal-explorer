@@ -178,20 +178,34 @@
         // Note: Resize handling is now done in WASM code
         // (install_event_listeners function)
 
-        // Start the app after DOM is ready and WASM is loaded
-        document.addEventListener('DOMContentLoaded', async () => {
-            console.log('DOM ready, waiting for WASM module...');
-            updateStatus('Starting app...');
-
-            // Wait for WASM module to be available (Trunk injects it)
-            // The module name will be wasm_bindgen
-            if (typeof wasm_bindgen === 'undefined') {
-                // Wait a bit for Trunk's injected script to load
+        // Wait for WASM module to be available
+        async function waitForWasm() {
+            // Poll for wasm_bindgen to be defined
+            for (let i = 0; i < 50; i++) {  // 5 seconds max
+                if (typeof wasm_bindgen !== 'undefined') {
+                    return true;
+                }
                 await new Promise(resolve => setTimeout(resolve, 100));
             }
+            return false;
+        }
+
+        // Start the app after both DOM and WASM are ready
+        window.addEventListener('load', async () => {
+            console.log('Page loaded, waiting for WASM module...');
+            updateStatus('Loading WASM...');
 
             try {
-                // Initialize WASM and start the app
+                // Wait for WASM module to be available
+                const wasmReady = await waitForWasm();
+                if (!wasmReady) {
+                    throw new Error('WASM module failed to load');
+                }
+
+                console.log('WASM module found, initializing...');
+                updateStatus('Initializing...');
+
+                // Initialize WASM (loads the .wasm file)
                 await wasm_bindgen();
                 console.log('WASM initialized, starting app...');
 
@@ -203,7 +217,7 @@
                 console.log('✅ App started successfully');
             } catch (err) {
                 console.error('Failed to start app:', err);
-                updateStatus(`Error: ${err}`);
+                updateStatus(`Error: ${err.message || err}`);
                 // Keep loading screen visible to show error
             }
         });
