@@ -1,4 +1,7 @@
-#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
 
 mod deeplink;
 
@@ -14,9 +17,15 @@ use tauri::path::BaseDirectory;
 static READY: OnceLock<Mutex<bool>> = OnceLock::new();
 static QUEUE: OnceLock<Mutex<Vec<DeepLinkEvent>>> = OnceLock::new();
 
-fn ready_get() -> bool { *READY.get_or_init(|| Mutex::new(false)).lock().unwrap() }
-fn ready_set(v: bool)   { *READY.get_or_init(|| Mutex::new(false)).lock().unwrap() = v; }
-fn queue() -> &'static Mutex<Vec<DeepLinkEvent>> { QUEUE.get_or_init(|| Mutex::new(Vec::new())) }
+fn ready_get() -> bool {
+    *READY.get_or_init(|| Mutex::new(false)).lock().unwrap()
+}
+fn ready_set(v: bool) {
+    *READY.get_or_init(|| Mutex::new(false)).lock().unwrap() = v;
+}
+fn queue() -> &'static Mutex<Vec<DeepLinkEvent>> {
+    QUEUE.get_or_init(|| Mutex::new(Vec::new()))
+}
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -24,13 +33,16 @@ pub struct DeepLinkEvent {
     pub url: String,
     pub scheme: String,
     pub host: String,
-    pub path: Vec<String>,              // slug segments
+    pub path: Vec<String>,               // slug segments
     pub query: BTreeMap<String, String>, // ?k=v
 }
 
 #[tauri::command]
 fn deeplink_frontend_ready() -> Vec<DeepLinkEvent> {
-    log::info!("Frontend ready - draining {} queued deep links", queue().lock().unwrap().len());
+    log::info!(
+        "Frontend ready - draining {} queued deep links",
+        queue().lock().unwrap().len()
+    );
     ready_set(true);
     queue().lock().unwrap().drain(..).collect()
 }
@@ -59,16 +71,24 @@ fn normalize(raw: &str) -> Option<String> {
         return None;
     }
 
-    // Accept: near://..., near:..., web+near:...
-    let mut s = s.replacen("web+near:", "near://", 1);
-    log::info!("🔵 [NORMALIZE] After web+near replacement: {s:?}");
+    // Accept: nearx://..., nearx:..., web+nearx:..., near:... (legacy)
+    let mut s = s.replacen("web+nearx:", "nearx://", 1);
+    s = s.replacen("web+near:", "nearx://", 1); // Legacy support
+    log::info!("🔵 [NORMALIZE] After web+ replacement: {s:?}");
 
-    // near:tx/abc  -> near://tx/abc
+    // nearx:tx/abc  -> nearx://tx/abc
+    // near:tx/abc   -> nearx://tx/abc (legacy)
     if let Some((sch, rest)) = s.split_once(':') {
         log::info!("🔵 [NORMALIZE] Split scheme: {sch:?}, rest: {rest:?}");
-        if sch.eq_ignore_ascii_case("near") && !rest.starts_with("//") {
-            s = format!("near://{rest}");
+        if (sch.eq_ignore_ascii_case("nearx") || sch.eq_ignore_ascii_case("near"))
+            && !rest.starts_with("//")
+        {
+            s = format!("nearx://{rest}");
             log::info!("🔵 [NORMALIZE] Added slashes: {s:?}");
+        } else if sch.eq_ignore_ascii_case("near") && rest.starts_with("//") {
+            // Legacy: near:// -> nearx://
+            s = format!("nearx://{rest}");
+            log::info!("🔵 [NORMALIZE] Converted legacy near:// to nearx://: {s:?}");
         }
     }
 
@@ -108,8 +128,11 @@ fn parse_event(s: &str) -> Option<DeepLinkEvent> {
         }
     };
 
-    if url.scheme() != "near" {
-        log::warn!("🟣 [PARSE-EVENT] Wrong scheme: {:?} (expected 'near') - returning None", url.scheme());
+    if url.scheme() != "nearx" {
+        log::warn!(
+            "🟣 [PARSE-EVENT] Wrong scheme: {:?} (expected 'nearx') - returning None",
+            url.scheme()
+        );
         log::info!("🟣 [PARSE-EVENT] ==================== END ====================");
         return None;
     }
@@ -122,7 +145,10 @@ fn parse_event(s: &str) -> Option<DeepLinkEvent> {
     let path: Vec<String> = url
         .path_segments()
         .map(|segs| {
-            let segments: Vec<String> = segs.filter(|p| !p.is_empty()).map(|p| p.to_string()).collect();
+            let segments: Vec<String> = segs
+                .filter(|p| !p.is_empty())
+                .map(|p| p.to_string())
+                .collect();
             log::info!("🟣 [PARSE-EVENT] Extracted path segments: {segments:?}");
             segments
         })
@@ -138,7 +164,7 @@ fn parse_event(s: &str) -> Option<DeepLinkEvent> {
 
     let event = DeepLinkEvent {
         url: url.to_string(),
-        scheme: "near".into(),
+        scheme: "nearx".into(),
         host: host.clone(),
         path: path.clone(),
         query: query.clone(),
@@ -165,21 +191,35 @@ fn emit_or_queue<R: Runtime>(app: &tauri::AppHandle<R>, evs: Vec<DeepLinkEvent>)
     }
 
     for (i, ev) in evs.iter().enumerate() {
-        log::info!("🟤 [EMIT-OR-QUEUE] Event[{}]: url={:?}, host={:?}, path={:?}, query={:?}",
-                   i, ev.url, ev.host, ev.path, ev.query);
+        log::info!(
+            "🟤 [EMIT-OR-QUEUE] Event[{}]: url={:?}, host={:?}, path={:?}, query={:?}",
+            i,
+            ev.url,
+            ev.host,
+            ev.path,
+            ev.query
+        );
     }
 
     let is_ready = ready_get();
     log::info!("🟤 [EMIT-OR-QUEUE] Frontend ready state: {is_ready}");
 
     if is_ready {
-        log::info!("🟤 [EMIT-OR-QUEUE] ✅ Frontend ready - emitting {} deep link(s) immediately", evs.len());
+        log::info!(
+            "🟤 [EMIT-OR-QUEUE] ✅ Frontend ready - emitting {} deep link(s) immediately",
+            evs.len()
+        );
         match app.emit("deep-link", &evs) {
-            Ok(_) => log::info!("🟤 [EMIT-OR-QUEUE] ✅ Successfully emitted 'deep-link' event to frontend"),
+            Ok(_) => log::info!(
+                "🟤 [EMIT-OR-QUEUE] ✅ Successfully emitted 'deep-link' event to frontend"
+            ),
             Err(e) => log::error!("🟤 [EMIT-OR-QUEUE] ❌ Failed to emit event: {e}"),
         }
     } else {
-        log::info!("🟤 [EMIT-OR-QUEUE] ⏳ Frontend not ready - queueing {} deep link(s)", evs.len());
+        log::info!(
+            "🟤 [EMIT-OR-QUEUE] ⏳ Frontend not ready - queueing {} deep link(s)",
+            evs.len()
+        );
         let mut q = queue().lock().unwrap();
         let prev_len = q.len();
         q.extend(evs);
@@ -228,10 +268,18 @@ fn handle_urls<R: Runtime>(app: &tauri::AppHandle<R>, raws: &[String]) {
             log::info!("🟢 [HANDLE-URLS] Normalized[{i}] = {n:?}");
             log::info!("🟢 [HANDLE-URLS] Calling parse_event()...");
             if let Some(ev) = parse_event(&n) {
-                log::info!("🟢 [HANDLE-URLS] Parsed event[{}]: host={}, path={:?}, query={:?}", i, ev.host, ev.path, ev.query);
-                // Optional: special-case near://ratacat to open a secondary window
+                log::info!(
+                    "🟢 [HANDLE-URLS] Parsed event[{}]: host={}, path={:?}, query={:?}",
+                    i,
+                    ev.host,
+                    ev.path,
+                    ev.query
+                );
+                // Optional: special-case nearx://ratacat to open a secondary window
                 if ev.host == "ratacat" {
-                    log::info!("🟢 [HANDLE-URLS] Ratacat deep link - opening native TUI (not yet implemented)");
+                    log::info!(
+                        "[HANDLE-URLS] NEARx deep link - opening native TUI (not yet implemented)"
+                    );
                     // TODO: open/focus your second window here if you have one
                 } else {
                     log::info!("🟢 [HANDLE-URLS] Adding event to output queue");
@@ -247,8 +295,19 @@ fn handle_urls<R: Runtime>(app: &tauri::AppHandle<R>, raws: &[String]) {
 
     log::info!("🟢 [HANDLE-URLS] Total events to emit/queue: {}", out.len());
     log::info!("🟢 [HANDLE-URLS] Calling emit_or_queue()...");
-    log::info!("🟢 [HANDLE-URLS] ==================== END ====================");
     emit_or_queue(app, out);
+
+    // Also emit raw URLs for JavaScript bridge to handle
+    // The JS bridge (web/deep_link.js) listens for "nearx://open" and updates location.hash
+    for raw_url in raws {
+        let _ = app.emit("nearx://open", raw_url);
+        log::info!(
+            "🟢 [HANDLE-URLS] Emitted 'nearx://open' event with URL: {}",
+            raw_url
+        );
+    }
+
+    log::info!("🟢 [HANDLE-URLS] ==================== END ====================");
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -266,7 +325,10 @@ pub fn run() {
                 log::info!("🔴 [SINGLE-INSTANCE] argv[{i}] = {arg:?}");
             }
             let urls: Vec<String> = argv.into_iter().collect();
-            log::info!("🔴 [SINGLE-INSTANCE] Converted to {} URL(s) for processing", urls.len());
+            log::info!(
+                "🔴 [SINGLE-INSTANCE] Converted to {} URL(s) for processing",
+                urls.len()
+            );
             log::info!("🔴 [SINGLE-INSTANCE] ==================== END ====================");
             handle_urls(app.app_handle(), &urls);
         }));
@@ -281,7 +343,7 @@ pub fn run() {
             close_devtools
         ])
         .setup(|app| {
-            log::info!("🚀 Ratacat Tauri starting...");
+            log::info!("NEARx Tauri starting");
 
             // Auto-open DevTools in debug builds
             #[cfg(debug_assertions)]
@@ -305,9 +367,9 @@ pub fn run() {
 
             #[cfg(all(target_os = "macos", debug_assertions))]
             {
-                log::warn!("⚠️  macOS dev mode: Deep links require installing the built .app!");
+                log::warn!("macOS dev mode: Deep links require installing the built .app");
                 log::warn!("   Run: cargo tauri build");
-                log::warn!("   Then: open target/release/bundle/macos/Ratacat.app");
+                log::warn!("   Then: open target/release/bundle/macos/NEARx.app");
             }
 
             // Were we launched by a deep link?
@@ -338,7 +400,8 @@ pub fn run() {
                     for (i, url) in event_urls.iter().enumerate() {
                         log::info!("🟡 [ON-OPEN-URL] URL[{}] = {:?}", i, url.as_str());
                     }
-                    let urls: Vec<String> = event_urls.iter().map(|u| u.as_str().to_string()).collect();
+                    let urls: Vec<String> =
+                        event_urls.iter().map(|u| u.as_str().to_string()).collect();
                     log::info!("🟡 [ON-OPEN-URL] Converted to Vec<String>: {urls:?}");
                     log::info!("🟡 [ON-OPEN-URL] Calling handle_urls()...");
                     log::info!("🟡 [ON-OPEN-URL] ==================== END ====================");
@@ -346,7 +409,7 @@ pub fn run() {
                 }
             });
 
-            log::info!("✅ Ratacat Tauri setup complete");
+            log::info!("NEARx Tauri setup complete");
             Ok(())
         });
 

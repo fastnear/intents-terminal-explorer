@@ -5,11 +5,11 @@
 #![cfg(feature = "native")]
 
 use anyhow::Result;
-use notify::{Watcher, RecursiveMode, Event, EventKind, Error as NotifyError};
-use tokio::sync::mpsc::UnboundedSender;
+use notify::{Error as NotifyError, Event, EventKind, RecursiveMode, Watcher};
+use serde_json::Value;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use serde_json::Value;
+use tokio::sync::mpsc::UnboundedSender;
 
 /// Start watching credentials directory for NEAR account files
 /// Scans initially and watches for changes, emitting account_id set via channel

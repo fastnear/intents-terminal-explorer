@@ -3,7 +3,10 @@ use clap::Parser;
 use std::env;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Source { Ws, Rpc }
+pub enum Source {
+    Ws,
+    Rpc,
+}
 
 impl std::str::FromStr for Source {
     type Err = anyhow::Error;
@@ -116,7 +119,7 @@ pub struct Config {
     pub poll_chunk_concurrency: usize,
     pub keep_blocks: usize,
     pub near_node_url: String,
-    pub near_node_url_explicit: bool,  // true if set via env var or CLI
+    pub near_node_url_explicit: bool, // true if set via env var or CLI
     pub archival_rpc_url: Option<String>,
     pub rpc_timeout_ms: u64,
     #[allow(dead_code)]
@@ -155,81 +158,110 @@ pub fn load() -> Result<Config> {
         env::var("SOURCE")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(Source::Ws)
+            .unwrap_or(Source::Rpc) // Default to RPC for simplicity
     });
 
     // NEAR Node URL (check if explicitly set)
     let near_node_url_explicit = args.near_node_url.is_some() || env::var("NEAR_NODE_URL").is_ok();
-    let near_node_url = args.near_node_url
+    let near_node_url = args
+        .near_node_url
         .or_else(|| env::var("NEAR_NODE_URL").ok())
-        .unwrap_or_else(|| "https://rpc.testnet.fastnear.com/".to_string());
+        .unwrap_or_else(|| "https://rpc.mainnet.fastnear.com/".to_string()); // Default to mainnet
 
     // Validate URLs
     validate_url(&near_node_url, "NEAR_NODE_URL")?;
 
     // Archival RPC URL (optional, validate if provided)
-    let archival_rpc_url = args.archival_rpc_url
+    let archival_rpc_url = args
+        .archival_rpc_url
         .or_else(|| env::var("ARCHIVAL_RPC_URL").ok());
     if let Some(ref url) = archival_rpc_url {
         validate_url(url, "ARCHIVAL_RPC_URL")?;
     }
 
-    let ws_url = args.ws_url
+    let ws_url = args
+        .ws_url
         .or_else(|| env::var("WS_URL").ok())
         .unwrap_or_else(|| "ws://127.0.0.1:63736".to_string());
     validate_url(&ws_url, "WS_URL")?;
 
     // FPS choices with validation
-    let render_fps_choices = args.render_fps_choices
+    let render_fps_choices = args
+        .render_fps_choices
         .or_else(|| env::var("RENDER_FPS_CHOICES").ok())
         .map(|s| parse_fps_list(&s))
         .unwrap_or_else(|| vec![20, 30, 60]);
 
     // Ensure render_fps_choices is not empty
     if render_fps_choices.is_empty() {
-        return Err(anyhow!("RENDER_FPS_CHOICES must contain at least one valid value (1-120)"));
+        return Err(anyhow!(
+            "RENDER_FPS_CHOICES must contain at least one valid value (1-120)"
+        ));
     }
 
     // Render FPS (default to first choice if not specified)
     let default_fps = *render_fps_choices.first().unwrap();
-    let render_fps = args.render_fps
+    let render_fps = args
+        .render_fps
         .or_else(|| env::var("RENDER_FPS").ok().and_then(|s| s.parse().ok()))
         .unwrap_or(default_fps);
     let render_fps = validate_in_range(render_fps, 1, 120, "RENDER_FPS")?;
 
     // Parse and validate RPC settings
-    let poll_interval_ms = args.poll_interval_ms
-        .or_else(|| env::var("POLL_INTERVAL_MS").ok().and_then(|s| s.parse().ok()))
+    let poll_interval_ms = args
+        .poll_interval_ms
+        .or_else(|| {
+            env::var("POLL_INTERVAL_MS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+        })
         .unwrap_or(1000);
     let poll_interval_ms = validate_in_range(poll_interval_ms, 100, 10000, "POLL_INTERVAL_MS")?;
 
-    let poll_max_catchup = args.poll_max_catchup
-        .or_else(|| env::var("POLL_MAX_CATCHUP").ok().and_then(|s| s.parse().ok()))
+    let poll_max_catchup = args
+        .poll_max_catchup
+        .or_else(|| {
+            env::var("POLL_MAX_CATCHUP")
+                .ok()
+                .and_then(|s| s.parse().ok())
+        })
         .unwrap_or(5);
     let poll_max_catchup = validate_in_range(poll_max_catchup, 1, 100, "POLL_MAX_CATCHUP")?;
 
-    let poll_chunk_concurrency = args.poll_chunk_concurrency
-        .or_else(|| env::var("POLL_CHUNK_CONCURRENCY").ok().and_then(|s| s.parse().ok()))
+    let poll_chunk_concurrency = args
+        .poll_chunk_concurrency
+        .or_else(|| {
+            env::var("POLL_CHUNK_CONCURRENCY")
+                .ok()
+                .and_then(|s| s.parse().ok())
+        })
         .unwrap_or(4);
-    let poll_chunk_concurrency = validate_in_range(poll_chunk_concurrency, 1, 16, "POLL_CHUNK_CONCURRENCY")?;
+    let poll_chunk_concurrency =
+        validate_in_range(poll_chunk_concurrency, 1, 16, "POLL_CHUNK_CONCURRENCY")?;
 
-    let rpc_timeout_ms = args.rpc_timeout_ms
+    let rpc_timeout_ms = args
+        .rpc_timeout_ms
         .or_else(|| env::var("RPC_TIMEOUT_MS").ok().and_then(|s| s.parse().ok()))
         .unwrap_or(8000);
     let rpc_timeout_ms = validate_in_range(rpc_timeout_ms, 1000, 60000, "RPC_TIMEOUT_MS")?;
 
-    let rpc_retries = args.rpc_retries
+    let rpc_retries = args
+        .rpc_retries
         .or_else(|| env::var("RPC_RETRIES").ok().and_then(|s| s.parse().ok()))
         .unwrap_or(2);
     let rpc_retries = validate_in_range(rpc_retries, 0, 10, "RPC_RETRIES")?;
 
-    let keep_blocks = args.keep_blocks
+    let keep_blocks = args
+        .keep_blocks
         .or_else(|| env::var("KEEP_BLOCKS").ok().and_then(|s| s.parse().ok()))
         .unwrap_or(100);
     let keep_blocks = validate_in_range(keep_blocks, 10, 10000, "KEEP_BLOCKS")?;
 
     // Build default filter with priority: WATCH_ACCOUNTS > DEFAULT_FILTER > default
-    let default_filter = if let Some(watch_accounts) = args.watch_accounts.or_else(|| env::var("WATCH_ACCOUNTS").ok()) {
+    let default_filter = if let Some(watch_accounts) = args
+        .watch_accounts
+        .or_else(|| env::var("WATCH_ACCOUNTS").ok())
+    {
         // Parse comma-separated account list and build filter
         if watch_accounts.is_empty() {
             String::new()
@@ -252,8 +284,13 @@ pub fn load() -> Result<Config> {
     Ok(Config {
         source,
         ws_url,
-        ws_fetch_blocks: args.ws_fetch_blocks
-            .or_else(|| env::var("WS_FETCH_BLOCKS").ok().map(|s| s.to_lowercase() == "true"))
+        ws_fetch_blocks: args
+            .ws_fetch_blocks
+            .or_else(|| {
+                env::var("WS_FETCH_BLOCKS")
+                    .ok()
+                    .map(|s| s.to_lowercase() == "true")
+            })
             .unwrap_or(true),
         render_fps,
         render_fps_choices,
@@ -266,7 +303,8 @@ pub fn load() -> Result<Config> {
         archival_rpc_url,
         rpc_timeout_ms,
         rpc_retries,
-        fastnear_auth_token: args.fastnear_auth_token
+        fastnear_auth_token: args
+            .fastnear_auth_token
             .or_else(|| env::var("FASTNEAR_AUTH_TOKEN").ok()),
         default_filter,
     })
@@ -279,11 +317,16 @@ fn validate_url(url: &str, name: &str) -> Result<()> {
     }
 
     // Basic scheme validation
-    if url.starts_with("ws://") || url.starts_with("wss://")
-        || url.starts_with("http://") || url.starts_with("https://") {
+    if url.starts_with("ws://")
+        || url.starts_with("wss://")
+        || url.starts_with("http://")
+        || url.starts_with("https://")
+    {
         Ok(())
     } else {
-        Err(anyhow!("{name} must start with ws://, wss://, http://, or https://"))
+        Err(anyhow!(
+            "{name} must start with ws://, wss://, http://, or https://"
+        ))
     }
 }
 

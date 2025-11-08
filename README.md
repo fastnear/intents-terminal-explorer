@@ -1,365 +1,227 @@
 # Ratacat - NEAR Blockchain Transaction Viewer
 
-**Version 0.4.0** - High-performance **quad-mode** application for monitoring NEAR Protocol blockchain transactions. Runs as native terminal app, web browser app, Tauri desktop app, or browser extension integration. Built in Rust with [Ratatui](https://ratatui.rs).
+High-performance terminal UI for monitoring NEAR Protocol transactions in real-time. Runs as native terminal app, web browser app, Tauri desktop app, or browser extension integration.
+
+Built with [Ratatui](https://ratatui.rs) and Rust.
+
+---
 
 ## Quick Start
 
-### Fastest Way to Run (Native Terminal - Recommended)
+### Native Terminal (Recommended)
 
 ```bash
 # Clone and build
 git clone <repo>
 cd ratacat
-cargo build --bin ratacat --features native --release
+cargo build --release --features native
 
-# Run with RPC (production-ready)
-SOURCE=rpc NEAR_NODE_URL=https://rpc.mainnet.fastnear.com/ ./target/release/ratacat
+# Run (defaults: mainnet RPC, filters to intents.near)
+./target/release/nearx
 
-# Or monitor specific accounts
-SOURCE=rpc NEAR_NODE_URL=https://rpc.mainnet.fastnear.com/ \
-  WATCH_ACCOUNTS=intents.near,alice.near \
-  ./target/release/ratacat
+# With authentication (recommended to avoid rate limits)
+FASTNEAR_AUTH_TOKEN=your_token ./target/release/nearx
+
+# Monitor different accounts
+WATCH_ACCOUNTS=alice.near,bob.near ./target/release/nearx
+
+# Or disable filtering entirely
+DEFAULT_FILTER= ./target/release/nearx
+
+# Use testnet
+NEAR_NODE_URL=https://rpc.testnet.fastnear.com/ ./target/release/nearx
 ```
 
-### Other Build Targets
+### Web Browser
 
 ```bash
-# Web Browser (egui + WebGL)
+# One-time setup
 cargo install --locked trunk
 rustup target add wasm32-unknown-unknown
-trunk serve  # Opens at http://127.0.0.1:8080
 
-# Tauri Desktop App (deep links support)
-cd tauri-workspace
-cargo tauri dev
+# Run locally
+trunk serve  # Opens at http://127.0.0.1:8083
 
-# Ref Finance Arbitrage Scanner
-cargo run -p ref-arb-scanner --release
+# Build for deployment
+trunk build --release  # Output in dist-egui/
 ```
 
-## Features
+### Tauri Desktop App
+
+```bash
+cd tauri-workspace
+cargo tauri dev
+# or: cargo tauri build    # packages (DMG/EXE/AppImage) with signing if configured
+```
+
+### Keyboard & Mouse
+
+See **[docs/KEYMAP.md](docs/KEYMAP.md)** for standardized shortcuts across TUI / Web / Tauri:
+- Tab/Shift+Tab, Space, c-copy, scrolling
+- Mouse row select (Web/Tauri default ON, TUI Ctrl+M toggle)
+- Mouse wheel scrolling (Web/Tauri) - scroll through Blocks/Tx/Details
+- Double-click details (Web/Tauri only)
+
+---
+
+## Screenshots
 
 ### 3-Pane Dashboard
 ![Ratacat showing the full 3-pane layout - blocks list, transaction hashes, and detailed transaction view while monitoring intents.near on NEAR mainnet](static/selection.png)
 
-The main interface shows blocks on the left (with transaction counts and filtering), transaction hashes in the middle, and full transaction details on the right. The filter bar at the top shows `acct:intents.near` actively filtering the transaction stream.
+Main interface: blocks on the left, transaction hashes in the middle, full transaction details on the right. Filter bar shows active filtering.
 
-### Fullscreen Details View
+### Fullscreen Details
 ![Ratacat in fullscreen mode showing detailed JSON transaction data for intents.near on NEAR mainnet](static/full-screen.png)
 
-Press `Spacebar` to toggle fullscreen mode for the details pane, giving maximum vertical space to inspect complex transaction payloads. The filter remains visible at the top for context.
+Press `Spacebar` to toggle fullscreen mode for maximum vertical space to inspect transaction payloads.
 
-### Core Capabilities
+---
+
+## Features
+
+### Core
 - **3-Pane Dashboard**: Blocks → Transaction Hashes → Transaction Details
-- **Dual Data Sources**:
-  - WebSocket: Real-time updates from your Node breakout server
-  - RPC Polling: Direct NEAR RPC with smart catch-up limits
-- **Fullscreen Details**: Toggle fullscreen view with `Spacebar` for maximum transaction inspection space
-- **Smooth Scrolling**: Navigate large transaction details with arrow keys, PgUp/PgDn, Home/End
-- **FPS Control**: Runtime FPS adjustment with Ctrl+O (default 30 FPS)
-- **Clipboard Integration**: Copy transaction details with `c`
+- **Real-time Monitoring**: WebSocket (development) or RPC polling (production)
+- **Smart Filtering**: Filter by account, action type, method name, or free text
+- **Fullscreen Details**: Toggle with `Spacebar` for maximum inspection area
+- **Archival Navigation**: Explore unlimited blockchain history (with `ARCHIVAL_RPC_URL`)
 
-### New in v0.3.0
-- **Function Call Args Decoding**: Three-tier decoding strategy (JSON → Text → Binary) with auto-parsing of nested JSON strings
-- **Smart Block Filtering**: Blocks panel automatically shows only blocks with matching transactions when filter is active
-  - Shows filtered count: "Blocks (12 / 100)" - 12 have matches out of 100 total
-  - Transactions panel shows: "Txs (0 / 5)" when filter hides some transactions
-  - Navigation (Up/Down arrows) follows filtered list for stable, predictable selection
-  - Clear visual feedback prevents confusion about missing transactions
-- **Auto-Lock to Matching Blocks**: First block with matching transactions automatically locks for stable viewing
-  - Block stays highlighted and stable - won't jump to newer arrivals while you're viewing
-  - Navigate with Up/Down arrows - immediate response, no lag
-  - Press `Home` in blocks pane to return to auto-follow mode (tracks newest matching block)
-- **Archival RPC Support**: Navigate unlimited blocks backward through blockchain history
-  - Configure `ARCHIVAL_RPC_URL` to enable on-demand historical block fetching
-  - Loading state shows "⏳ Loading block #..." during 1-2 second fetch
-  - Fetched blocks cached automatically for seamless navigation
-  - Works with FastNEAR archival endpoints
-- **Context-Aware Block Caching**: Navigate ±12 blocks around selection even after aging out of 100-block buffer
-  - Gray visual indicator for unavailable blocks
-  - "Blocks (cached)" title when viewing aged-out blocks
-  - Left arrow (←) returns to recent blocks
-- **Filter Bar**: Filter transactions by account, action type, method name, or free text
-- **SQLite History**: Non-blocking persistence of blocks and transactions to SQLite (off main thread)
-- **Owned Accounts Awareness**: Automatically detect your NEAR accounts from credentials files
-  - Star badges on blocks showing owned transaction count
-  - Bold yellow highlighting of owned transactions
-  - `Ctrl+U` to filter for owned-only transactions
-  - Zero overhead when no credentials present
-- **Jump Marks**: Bookmark important blocks/transactions with `m`, pin with `Ctrl+P`, jump with `'`
-- **History Search**: Full-text search across all persisted transactions with `Ctrl+F`
-- **70/30 Layout Split**: Details pane gets 70% of vertical space (up from 50%) for better readability
-- **Smart Scroll Clamping**: Scrolling stops at actual content end instead of continuing indefinitely
-- **Toast Notifications**: 2-second visual feedback when copying content ("Copied block info", "Copied tx hash", "Copied details")
+### Data & Search
+- **Function Call Decoding**: Three-tier decoding (JSON → Text → Binary) with auto-parsing of nested JSON
+- **SQLite History**: Non-blocking persistence for all transactions (native only)
+- **Jump Marks**: Bookmark important blocks/transactions (`m` to set, `'` to jump)
+- **History Search**: Full-text search with `Ctrl+F`
+- **Owned Account Tracking**: Auto-detect your NEAR accounts from credentials, filter with `Ctrl+U`
 
 ### Performance
-- **Coalesced Rendering**: FPS-capped to prevent UI thrashing
+- **FPS Control**: Runtime adjustable (default 30 FPS, toggle with `Ctrl+O`)
+- **Smart Caching**: ±12 blocks preserved around selection after aging out
 - **Non-blocking I/O**: Async data fetching keeps UI responsive
-- **Catch-up Limits**: Prevents cascade failures during network delays
-- **Soft-wrapped Tokens**: Long base58/base64 strings wrapped cleanly
+- **Clipboard Integration**: Copy transaction details with `c`
 
-## Installation & Quick Start
-
-Ratacat runs in **four modes**: native terminal (recommended), Tauri desktop app, web browser (experimental), and browser extension.
-
-### Native Terminal Mode (Recommended)
-
-```bash
-# Build and run (requires native feature flag)
-cargo build --bin ratacat --features native --release
-./target/release/ratacat
-
-# Or run directly with cargo
-cargo run --bin ratacat --features native --release
-```
-
-**WebSocket Mode** (for development):
-```bash
-# Terminal 1: Start your Node server with WebSocket breakout
-cd ../node
-npm run dev
-
-# Terminal 2: Run Ratacat
-SOURCE=ws cargo run --bin ratacat --features native
-```
-
-**RPC Mode** (for production):
-```bash
-# Testnet
-SOURCE=rpc NEAR_NODE_URL=https://rpc.testnet.fastnear.com/ \
-  cargo run --bin ratacat --features native --release
-
-# Mainnet
-SOURCE=rpc NEAR_NODE_URL=https://rpc.mainnet.near.org/ \
-  cargo run --bin ratacat --features native --release
-```
-
-### Tauri Desktop App Mode
-
-Native desktop application with deep link support for `near://` protocol URLs.
-
-**Quick Start**:
-```bash
-cd tauri-workspace
-cargo tauri dev
-```
-
-**Build for Distribution**:
-```bash
-cd tauri-workspace
-cargo tauri build
-
-# Manual workaround for bundler bug:
-mkdir -p target/release/bundle/macos/Ratacat.app/Contents/MacOS
-cp target/release/explorer-tauri target/release/bundle/macos/Ratacat.app/Contents/MacOS/
-```
-
-**Key Features**:
-- **Deep Link Handler**: Opens `near://tx/HASH?network=mainnet` URLs from browser
-- **Single Instance**: Prevents multiple app windows
-- **Native Performance**: Full desktop integration
-- **DevTools**: Press `Cmd+Option+I` (macOS) or `F12` (Windows/Linux)
-- **Debug Logging**: Comprehensive waterfall logs at `~/Library/Logs/com.ratacat.fast/Ratacat.log` (macOS)
-
-**Testing Deep Links**:
-```bash
-# Open app with deep link
-open 'near://tx/ABC123?network=mainnet'
-
-# View logs
-tail -f ~/Library/Logs/com.ratacat.fast/Ratacat.log
-```
-
-**Configuration**:
-- Bundle ID: `com.ratacat.fast`
-- URL Scheme: `near://`
-- Log Location: `~/Library/Logs/com.ratacat.fast/` (macOS)
-
-**Known Issues**:
-- Tauri bundler bug requires manual binary copy (see build steps above)
-- DevTools button requires `devtools` Cargo feature (already enabled)
-- macOS only for now (Windows/Linux testing pending)
-
-For detailed technical documentation, see `CLAUDE.md` § Tauri Desktop App Mode.
-
-### Web Browser Mode (Experimental) 🚀
-
-Run Ratacat in your browser with the same terminal UI experience using **egui + WebGL**!
-
-```bash
-# Install web build tools (one-time setup)
-cargo install --locked trunk
-rustup target add wasm32-unknown-unknown
-
-# Build and serve locally (uses egui + egui_ratatui)
-trunk serve
-# Opens at http://127.0.0.1:8080
-
-# Build for deployment
-trunk build --release
-# Output in dist/ directory - deploy to any static host!
-```
-
-**Technical Details:**
-- Uses **eframe** (egui's app framework) with WebGL rendering
-- **egui_ratatui** bridges ratatui TUI widgets into egui
-- `--no-default-features --features egui-web` configured in `Trunk.toml`
-- Immediate-mode WebGL Canvas rendering for superior performance
-
-**Web Features:**
-- ✅ Same 3-pane TUI interface in browser
-- ✅ All keyboard shortcuts work identically
-- ✅ RPC polling with real-time updates
-- ✅ Filtering, search, and FPS control
-- ✅ Web-native clipboard support
-- ✅ Deploy to GitHub Pages, Vercel, Netlify, etc.
-- ⚠️ No SQLite history (in-memory only)
-- ⚠️ No WebSocket mode (RPC only)
-- ⚠️ No jump marks persistence (in-memory only)
-
-**Try it now:** Visit `http://localhost:8080?rpc=https://rpc.mainnet.fastnear.com&filter=intents.near` after running `trunk serve`
-
-**Authentication Configuration:**
-
-The web version supports FastNEAR API authentication via three methods (priority order):
-
-1. **URL Parameter** (runtime, per-session):
-   ```
-   http://127.0.0.1:8080?token=your_token_here
-   ```
-
-2. **Browser localStorage** (persistent across sessions):
-   ```javascript
-   // Open browser console and run:
-   localStorage.setItem('RPC_BEARER', 'your_token_here');
-   ```
-
-3. **Compile-time environment variable** (baked into WASM binary):
-   ```bash
-   FASTNEAR_AUTH_TOKEN=your_token_here trunk build --release
-   ```
-
-**Important:** WASM cannot access runtime environment variables, so `FASTNEAR_AUTH_TOKEN` must be set when **building** (not when serving). For development, use URL parameters or localStorage instead.
-
-**Technical Notes:**
-- Web build isolates NEAR SDK crates (near-primitives, near-crypto, etc.) which have C dependencies incompatible with WASM
-- Uses platform abstraction layer for clipboard (web-sys), storage (in-memory), and runtime (wasm-bindgen)
-- Ratatui 0.29+ required for egui_ratatui compatibility
+---
 
 ## Keyboard Shortcuts
 
 ### Navigation
-- `Tab` / `Shift+Tab` - Switch between panes
-- `↑ / ↓` - Navigate lists or scroll details (immediate response, no lag)
-- `← / →` - Left: jump to top of current list; Right: paginate down 12 items
-- `PgUp / PgDn` - Page up/down in details pane
-- `Home` - In blocks pane: return to auto-follow mode (track newest matching block); Other panes: jump to top
-- `End` - Jump to bottom in details pane
-- `Enter` - Select transaction and view details
+- `Tab` / `Shift+Tab` - Switch panes
+- `↑ / ↓` - Navigate lists or scroll details
+- `← / →` - Jump to top / paginate down 12 items
+- `PgUp / PgDn` - Page scroll
+- `Home` - Return to auto-follow mode (blocks pane) / jump to top (other panes)
+- `End` - Jump to bottom
+- `Enter` - Select transaction
 
 ### View Controls
-- `Spacebar` - Toggle fullscreen details view (maximizes transaction inspection area)
+- `Spacebar` - Toggle fullscreen details
 - `Ctrl+O` - Cycle FPS (20 → 30 → 60)
-- `c` - Copy current details to clipboard (shows toast notification)
-- `Ctrl+D` - Toggle debug panel visibility
+- `c` - Copy current details to clipboard
+- `Ctrl+D` - Toggle debug panel
 - `q` or `Ctrl+C` - Quit
 
-### Filter Controls
+### Filter & Search
 - `/` or `f` - Enter filter mode
-- Type to filter transactions
-- `Enter` - Apply filter
-- `Esc` - Clear filter and exit filter mode
-- `Ctrl+U` - Toggle owned-only filter (show only your transactions)
+- `Ctrl+U` - Toggle owned-only filter
+- `Ctrl+F` - Open history search
+- `Esc` - Close details overlay (if open), clear filter, or exit mode
+- `m` - Set mark at current location
+- `Ctrl+P` - Pin/unpin mark
+- `M` - Open marks overlay
+- `'` - Jump to mark
 
-### Jump Marks & Search
-- `m` - Set mark at current location (auto-labeled)
-- `Ctrl+P` - Pin/unpin mark at current location
-- `M` (Shift+M) - Open marks overlay
-- `'` (apostrophe) - Jump to mark (type label)
-- `[` / `]` - Jump to previous/next mark
-- `d` (in marks overlay) - Delete selected mark
-- `Ctrl+F` - Open history search overlay
+---
 
 ## Configuration
 
-All configuration is via environment variables. See `.env.example` for full options.
+All configuration via environment variables. See `.env.example` for full options.
 
-### Data Source
+### Essential Settings
+
+**Defaults (no configuration required):**
+- Network: `mainnet` (https://rpc.mainnet.fastnear.com/)
+- Source: `rpc` (direct NEAR RPC polling)
+- Filter: `intents.near` (to see all transactions, set `DEFAULT_FILTER=`)
+
+**Common customizations:**
+
 ```bash
-SOURCE=ws                                    # Use WebSocket (default)
-SOURCE=rpc                                   # Use NEAR RPC polling
-WS_URL=ws://127.0.0.1:63736                 # WebSocket endpoint
-WS_FETCH_BLOCKS=true                        # Hybrid mode: fetch full block data via RPC (default: true)
-```
+# Authentication (recommended to avoid rate limits)
+FASTNEAR_AUTH_TOKEN=your_token_here
 
-**WebSocket Modes:**
-- `WS_FETCH_BLOCKS=true` (default): **Hybrid mode** - WS notifications trigger RPC fetches for complete block data with transactions
-- `WS_FETCH_BLOCKS=false`: **Legacy mode** - WS only updates details pane, blocks show "0 txs"
+# Watch different accounts
+WATCH_ACCOUNTS=alice.near,bob.near
 
-Hybrid mode gives the best of both worlds: real-time push notifications + complete transaction data.
+# Disable default filtering (see all transactions)
+DEFAULT_FILTER=
 
-**Network Auto-Detection:**
-If `NEAR_NODE_URL` is not explicitly set, Ratacat automatically detects the network (mainnet vs testnet) from block heights:
-- Block heights > 100M → mainnet (uses `https://rpc.mainnet.near.org`)
-- Block heights < 100M → testnet (uses `https://rpc.testnet.fastnear.com`)
-
-This prevents mainnet/testnet mismatches when using WebSocket mode.
-
-### RPC Configuration
-```bash
+# Use testnet
 NEAR_NODE_URL=https://rpc.testnet.fastnear.com/
-FASTNEAR_AUTH_TOKEN=xxx                     # Bearer token for authenticated fastnear API access (recommended)
-ARCHIVAL_RPC_URL=https://archival-rpc.mainnet.fastnear.com  # Archival endpoint for historical blocks (optional)
-POLL_INTERVAL_MS=1000                        # Poll frequency (default 1s)
-POLL_MAX_CATCHUP=5                          # Max blocks per poll (prevents cascade)
-POLL_CHUNK_CONCURRENCY=4                    # Parallel chunk fetches
-RPC_TIMEOUT_MS=8000                         # Request timeout
-RPC_RETRIES=2                               # Retry attempts
+
+# Enable unlimited history navigation
+ARCHIVAL_RPC_URL=https://archival-rpc.mainnet.fastnear.com/
 ```
 
-**FastNEAR Authentication**: To avoid rate limiting (429 errors), get an API token from [fastnear.com](https://fastnear.com) and set `FASTNEAR_AUTH_TOKEN`. Authenticated requests have significantly higher rate limits.
-
-**Archival RPC**: Set `ARCHIVAL_RPC_URL` to enable unlimited backward navigation through blockchain history. When you navigate beyond the rolling 100-block buffer and ±12 block cache, Ratacat automatically fetches historical blocks from the archival endpoint. Requires `FASTNEAR_AUTH_TOKEN` for best performance.
-
-### UI Configuration
+**Advanced settings** (rarely needed):
 ```bash
-RENDER_FPS=30                               # Target FPS (1-120)
-RENDER_FPS_CHOICES=20,30,60                 # Ctrl+O cycle options
-KEEP_BLOCKS=100                             # In-memory block limit
+SOURCE=rpc                    # Data source: rpc (default) or ws
+RENDER_FPS=30                 # Target FPS (1-120, default: 30)
+KEEP_BLOCKS=100               # In-memory block limit (default: 100)
+DEFAULT_FILTER=acct:alice.near method:swap  # Advanced filter syntax
 ```
 
-### History Configuration
-```bash
-SQLITE_DB_PATH=./ratacat_history.db         # SQLite database path for persistence
+### Filter Syntax
+
+```
+acct:alice.near              # Match signer OR receiver
+signer:bob.near              # Match signer only
+receiver:contract.near       # Match receiver only
+action:FunctionCall          # Match action type
+method:ft_transfer           # Match method name
+raw:some_text                # Search in raw JSON
 ```
 
-### Owned Accounts Configuration
-```bash
-NEAR_CREDENTIALS_DIR=~/.near-credentials    # Path to NEAR CLI credentials directory (default: ~/.near-credentials)
-NEAR_NETWORK=mainnet                        # Network to watch: mainnet or testnet (default: mainnet)
-```
+Combined example: `acct:alice.near action:Transfer` (Alice sending tokens)
 
-Ratacat automatically watches your NEAR CLI credentials directory for account files. When detected, it:
-- Shows star badges on blocks with your transactions (e.g., "5 txs (3 owned)")
-- Highlights your transactions in **bold yellow**
-- Enables `Ctrl+U` to filter for owned-only view
-- Updates in real-time when you add/remove credentials
+Filters use AND logic (all conditions must match). Within each field type, OR logic applies.
 
-**No setup required** - works automatically if you have NEAR CLI credentials at `~/.near-credentials/<network>/*.json`
-
-### Account Filtering Configuration
-```bash
-WATCH_ACCOUNTS=intents.near,alice.near      # Comma-separated list of accounts to watch (simple filtering)
-DEFAULT_FILTER=acct:alice.near method:swap  # Advanced filter syntax (only used if WATCH_ACCOUNTS not set)
-```
-
-**Simple filtering with WATCH_ACCOUNTS**: Just list account names separated by commas. Ratacat will automatically filter to show only transactions to/from these accounts. Takes precedence over `DEFAULT_FILTER`.
-
-**Advanced filtering with DEFAULT_FILTER**: Use full filter syntax for complex queries (e.g., `signer:alice.near receiver:bob.near action:FunctionCall`). See Filter Syntax section below for details.
+---
 
 ## Architecture
 
+### Quad-Mode Deployment
+
+```
+┌───────────────────────────────────────────────────┐
+│              Ratacat Application                  │
+├───────────────────────────────────────────────────┤
+│                                                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────┐│
+│  │   Terminal   │  │  Web Browser │  │Tauri App ││
+│  │ (Crossterm)  │  │ (egui-web)   │  │(Desktop) ││
+│  └──────┬───────┘  └──────┬───────┘  └────┬─────┘│
+│         │                 │                │      │
+│         └─────────────────┼────────────────┘      │
+│                           ▼                       │
+│              ┌────────────────────────────┐       │
+│              │   Shared Core (Rust)       │       │
+│              │ • App state & UI rendering │       │
+│              │ • RPC client & polling     │       │
+│              │ • Filter & search logic    │       │
+│              └────────────────────────────┘       │
+│                                                   │
+│  Platform Abstraction:                            │
+│  • Clipboard: copypasta / web-sys / tauri        │
+│  • Storage: SQLite / in-memory                   │
+│  • Runtime: tokio (full/wasm/tauri)              │
+│                                                   │
+└───────────────────────────────────────────────────┘
+```
+
+**Write once, run everywhere** - Same Rust code compiles to native terminal, WASM for browser, and Tauri for desktop.
+
 ### Data Flow
+
 ```
 ┌─────────────────────────────────────────────────┐
 │           NEAR Blockchain Data                  │
@@ -367,7 +229,6 @@ DEFAULT_FILTER=acct:alice.near method:swap  # Advanced filter syntax (only used 
 │  │  WebSocket   │  OR  │   RPC Polling    │     │
 │  │ (Node side)  │      │  (Direct NEAR)   │     │
 │  └──────┬───────┘      └────────┬─────────┘     │
-│         │                       │               │
 │         └───────────┬───────────┘               │
 │                     ▼                           │
 │            ┌─────────────────┐                  │
@@ -389,178 +250,25 @@ DEFAULT_FILTER=acct:alice.near method:swap  # Advanced filter syntax (only used 
 ```
 
 ### Key Components
+
 - **`source_ws.rs`**: WebSocket client for Node breakout server
 - **`source_rpc.rs`**: NEAR RPC poller with catch-up logic
-- **`archival_fetch.rs`**: Background archival RPC fetcher for historical blocks
+- **`archival_fetch.rs`**: Background archival RPC fetcher
 - **`app.rs`**: State management and event handling
-- **`ui.rs`**: Ratatui rendering with 3-pane layout
-- **`config.rs`**: Environment-based configuration
-- **`types.rs`**: Blockchain data models
+- **`ui.rs`**: Ratatui rendering (70/30 layout split)
 - **`filter.rs`**: Query parser and transaction matcher
 - **`history.rs`**: SQLite persistence and search
-- **`marks.rs`**: Jump marks system
 
-## Design Principles
-
-1. **FPS-Capped Rendering**: Coalesced draws prevent UI thrashing
-2. **Non-Overlapping Polls**: RPC mode uses catch-up limits to prevent cascades
-3. **Soft-Wrapped Tokens**: ZWSP insertion for clean line breaking
-4. **Human-Readable JSON**: Formatted transaction details with ANSI colors for quick scanning
-5. **Async Everything**: Tokio-based async I/O keeps UI responsive
-
-## Tips
-
-1. **Use WebSocket mode during development** - connects to your existing Node server
-2. **Use RPC mode for production monitoring** - direct NEAR connection, no middleman
-3. **Press `Spacebar` for fullscreen** - maximize vertical space for inspecting complex transactions
-4. **Adjust FPS with Ctrl+O** - lower FPS if CPU-constrained
-5. **Copy with `c`** - paste transaction details anywhere (shows toast confirmation)
-6. **Stable block selection** - First matching block automatically locks for stable viewing
-   - Block stays highlighted and won't jump to newer arrivals
-   - Tab to details pane, scroll around - block remains stable
-   - Press `Home` in blocks pane to return to auto-follow mode
-7. **Filter transactions** - Press `/` and use syntax like `acct:alice.near action:FunctionCall method:transfer`
-   - Blocks panel automatically shows only blocks with matching transactions
-   - Shows count like "Blocks (5 / 100)" - 5 blocks match your filter
-8. **Track your accounts** - Owned transactions show in **bold yellow** with star badges on blocks
-9. **Quick owned-only view** - Press `Ctrl+U` to see only your transactions
-10. **Bookmark important moments** - Use `m` to set marks, `Ctrl+P` to pin them permanently
-11. **Search history** - Press `Ctrl+F` to search all persisted transactions by account, method, or hash
-12. **Navigate through history** - Enable `ARCHIVAL_RPC_URL` to explore unlimited blocks backward
-    - Navigate beyond cache and Ratacat fetches historical blocks automatically
-    - Loading state shows progress during 1-2 second fetch
-13. **Details pane gets 70% height** - Optimized layout gives more space to transaction details
-
-## Filter Syntax
-
-The filter bar supports powerful query syntax:
-
-### Field Filters
-```
-acct:alice.near              # Match signer OR receiver
-signer:bob.near              # Match signer only
-receiver:contract.near       # Match receiver only
-action:FunctionCall          # Match action type
-method:ft_transfer           # Match FunctionCall method name
-raw:some_text                # Search in raw JSON
-```
-
-### Free Text
-```
-alice                        # Match anywhere in signer/receiver/hash/methods
-```
-
-### Combined Filters
-```
-acct:alice.near action:Transfer                    # Alice sending tokens
-signer:bob.near method:ft_transfer                 # Bob calling ft_transfer
-action:FunctionCall method:transfer alice          # Function calls with "transfer" and "alice"
-```
-
-Filters use AND logic (all conditions must match). Within each field type, OR logic applies (any value matches).
-
-## Known Limitations
-
-### Plugin System (Disabled)
-The plugin system is temporarily disabled due to lifetime compilation issues. Once fixed, it will enable:
-- Validator monitoring
-- Transaction pattern analysis
-- Custom alerts and filters
-- External tool integrations
-
-### Copy Functionality
-Current implementation copies pane content as-is. Future enhancement planned for csli-dashboard parity:
-- **Pane 0 (Blocks)**: Export all transactions in block with network/height/hash metadata
-- **Pane 1 (Tx Hashes)**: Dual format with raw chain data + human-readable decoded version
-- **Pane 2 (Details)**: Current implementation (human-readable only)
-- **Display vs Copy**: Show truncated data in UI, copy full data (complete hashes, full base64)
-
-## Built on Official NEAR Infrastructure
-
-Ratacat uses official NEAR Protocol crates from the nearcore repository, ensuring compatibility and future-proofing:
-
-- **`near-primitives`** (0.27.0) - Core blockchain data structures (Block, Transaction, Receipt, etc.)
-- **`near-jsonrpc-client`** (0.15.0) - Official RPC client with built-in retry logic and proper error handling
-- **`near-jsonrpc-primitives`** (0.27.0) - RPC request/response types that match the NEAR RPC specification
-- **`near-crypto`** (0.27.0) - Cryptographic primitives for signature verification and key handling
-- **`near-account-id`** (1.0.0) - Validated account ID types with proper parsing rules
-- **`near-gas`** (0.2) - Gas amount formatting and display utilities
-- **`near-token`** (0.2) - NEAR token amount formatting with proper decimal handling
-
-By leveraging these official crates, Ratacat:
-- **Stays synchronized** with NEAR protocol changes and upgrades
-- **Avoids reimplementation** of complex blockchain logic
-- **Maintains compatibility** with NEAR RPC endpoints across networks (mainnet, testnet)
-- **Benefits from upstream improvements** in performance, security, and correctness
-
-This approach ensures that transaction parsing, block structure handling, and RPC communication remain accurate as the NEAR Protocol evolves.
-
-## Quad-Mode Architecture
-
-Ratacat v0.4.0 features a **quad-mode architecture** - write once, run everywhere:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  Ratacat Application                        │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │   Terminal   │  │  Web Browser │  │  Tauri App   │     │
-│  │ (Crossterm)  │  │ (egui-web)   │  │(Deep Links)  │     │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘     │
-│         │                 │                 │              │
-│         └─────────────────┼─────────────────┘              │
-│                           ▼                                │
-│              ┌────────────────────────────┐                │
-│              │   Shared Core (Rust)       │                │
-│              │ • App state & UI rendering │                │
-│              │ • RPC client & polling     │                │
-│              │ • Filter & search logic    │                │
-│              │ • Types & JSON formatting  │                │
-│              └────────────────────────────┘                │
-│                                                             │
-│  Platform Abstraction:                                      │
-│  • Clipboard: copypasta / web-sys / tauri                  │
-│  • Storage: SQLite / in-memory                             │
-│  • Runtime: tokio (full/wasm/tauri)                        │
-│  • Deep Links: native messaging / tauri plugin             │
-│                                                             │
-│  ┌──────────────────────────────────────────────────┐      │
-│  │  Browser Extension (Native Messaging)            │      │
-│  │  • Chrome/Firefox/Edge integration               │      │
-│  │  • "Open in Ratacat" button on tx pages         │      │
-│  │  • Sends near:// deep links to Tauri app        │      │
-│  └──────────────────────────────────────────────────┘      │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Key Benefits:**
-- ✨ **Write once, deploy everywhere** - Terminal, browser, AND desktop from same code
-- 🎨 **True terminal UI everywhere** - Not a simulation, actual ratatui rendering
-- ⚡ **Zero JavaScript core** - Pure Rust compiled to native/WASM
-- 🚀 **Fast & lightweight** - 30+ FPS, native performance
-- 🔧 **Platform-specific optimizations** - SQLite on native, web APIs in browser, native messaging for extensions
-- 🔗 **Deep link integration** - Browser → Desktop app flow via `near://` protocol
+---
 
 ## Building from Source
 
-This repository contains multiple build targets across 3 workspaces. All builds are warning-free! ✅
+### Main Application
 
-### Main Ratacat Application
-
-**Native Terminal (TUI):**
+**Native Terminal:**
 ```bash
-git clone <repo>
-cd ratacat
-cargo build --bin ratacat --features native --release
-./target/release/ratacat
-```
-
-**Proxy Server (optional):**
-```bash
-cargo build --bin ratacat-proxy --features proxy --release
-./target/release/ratacat-proxy
+cargo build --release --features native
+./target/release/nearx
 ```
 
 **Web (egui + WebGL):**
@@ -569,143 +277,255 @@ cargo build --bin ratacat-proxy --features proxy --release
 cargo install --locked trunk
 rustup target add wasm32-unknown-unknown
 
-# Build for deployment (uses egui)
+# Build for deployment
 trunk build --release
-
-# Or serve locally for development
-trunk serve
+# Output: dist-egui/index-egui.html, dist-egui/*.wasm, dist-egui/*.js
 ```
 
-**Understanding the Build Stack:**
-
-The web build uses **eframe** (egui's app framework) with **egui_ratatui** to render terminal UI in the browser:
-
-- `--no-default-features`: Disables the default `native` feature, which includes:
-  - crossterm, copypasta, rusqlite, notify (native-only UI/IO)
-  - near-primitives, near-crypto, near-jsonrpc-client (C dependencies)
-  - Full tokio runtime (incompatible with WASM)
-
-- `--features egui-web`: Enables egui web dependencies:
-  - eframe (egui app framework with WebGL)
-  - egui_ratatui + soft_ratatui (bridges ratatui into egui)
-  - wasm-bindgen, wasm-bindgen-futures (Rust↔JavaScript bridge)
-  - web-sys (Web APIs for clipboard, storage)
-  - getrandom with "js" feature (WASM-compatible RNG)
-  - console_error_panic_hook, wasm-logger (debugging)
-
-**Trunk Configuration:**
-
-The `Trunk.toml` file is pre-configured with these flags:
-```toml
-[build.rust]
-default-features = false
-features = ["egui-web"]
-bin = "ratacat-egui-web"
-```
-
-The `index-egui.html` specifies which binary to build:
-```html
-<link data-trunk rel="rust" data-bin="ratacat-egui-web" />
-```
-
-### Workspace Members
-
-The repository includes additional independent workspace members:
-
-**Ref Finance Arbitrage Scanner:**
+**Tauri Desktop:**
 ```bash
-# Build the scanner
-cargo build -p ref-arb-scanner --release
-
-# Run it
-cargo run -p ref-arb-scanner --release
-
-# Or run the binary directly
-./target/release/ref-arb-scanner
-```
-
-The ref-arb-scanner is a separate workspace member for arbitrage detection on Ref Finance DEX. See `ref-arb-scanner/` directory and `REF_ARB_SCANNER_REVERSAL.md` for details.
-
-**Tauri Desktop App:**
-```bash
-cargo build --release --manifest-path tauri-workspace/src-tauri/Cargo.toml
-# Or use: cd tauri-workspace && cargo tauri build
-```
-
-**Native Messaging Host (Browser Extension):**
-```bash
-cargo build --release --manifest-path native-host/Cargo.toml
+cd tauri-workspace
+cargo tauri build
 ```
 
 ### Build Verification
 
-To verify all targets build without warnings:
-
 ```bash
-# Main workspace binaries
-cargo build --bin ratacat --features native --release
-cargo build --bin ratacat-proxy --features proxy --release
-cargo build --bin ratacat-egui-web --target wasm32-unknown-unknown --no-default-features --features egui-web --release
+# Native terminal
+cargo build --release --features native
 
-# Workspace members
-cargo build -p ref-arb-scanner --release
-cargo build --release --manifest-path tauri-workspace/src-tauri/Cargo.toml
-cargo build --release --manifest-path native-host/Cargo.toml
+# Web browser
+trunk build --release
+
+# Tauri desktop
+cd tauri-workspace && cargo tauri build
 ```
-
-All 6 build targets should complete with ✅ **0 warnings, 0 errors**.
-
-## Troubleshooting
-
-### "Connection refused" with SOURCE=ws
-- Ensure your Node WebSocket server is running on port 63736
-- Check WS_URL matches your Node configuration
-
-### High CPU usage
-- Lower FPS: `RENDER_FPS=20 cargo run --bin ratacat --features native`
-- Reduce block history: `KEEP_BLOCKS=50 cargo run --bin ratacat --features native`
-
-### RPC timeouts
-- Increase timeout: `RPC_TIMEOUT_MS=15000 cargo run --bin ratacat --features native`
-- Reduce concurrency: `POLL_CHUNK_CONCURRENCY=2 cargo run --bin ratacat --features native`
-
-### Web build errors
-
-**Error: `zstd-sys` or `secp256k1-sys` compilation failed**
-- Ensure you're using `--no-default-features --features web` flags
-- Check `Trunk.toml` has `default-features = false`
-
-**Runtime error: "time not implemented on this platform"**
-- Known issue: Some time-related code not yet fully WASM-compatible
-- Workaround: Use direct RPC endpoints instead of proxy
-- Status: Active development, fix planned for v0.4.0
-
-**Connection refused to localhost:3030**
-- Web version expects RPC proxy or direct RPC endpoint
-- Configure via URL parameters: `?rpc=https://rpc.mainnet.fastnear.com`
-- Or set default in `load_web_config()` function
-
-## Version History
-
-- **v0.3.0** (Current)
-  - Function call args decoding with three-tier fallback (JSON → Text → Binary)
-  - Auto-parsing of nested JSON-serialized strings
-  - Smart block filtering: blocks panel shows only blocks with matching transactions when filter active
-  - Auto-lock to matching blocks: first matching block locks automatically for stable viewing
-  - Immediate navigation response: Up/Down arrows navigate instantly without lag
-  - Archival RPC support for unlimited backward navigation through blockchain history
-  - Context-aware block caching: ±12 blocks preserved around selection after aging out
-  - Filter bar with powerful query syntax
-  - SQLite history persistence and search
-  - Jump marks system for bookmarking transactions
-  - Owned accounts awareness with credential file watching
-  - 70/30 layout split for better details visibility
-  - Smart scroll clamping and toast notifications
-  - Dynamic UI chrome (collapsible filter bar and debug panel)
-  - Filtered count display: "Blocks (12 / 100)" and "Txs (0 / 5)" formats
-- **v0.2.0** - Blockchain viewer with WebSocket + RPC sources, view modes, scrolling
-- **v0.1.0** - Initial todo list prototype (pre-pivot)
 
 ---
 
-Built using Ratatui, Tokio, and Rust. Designed for NEAR Protocol monitoring.
+## Web Build Technical Details
+
+The web build uses **eframe** (egui's app framework) with **egui_ratatui** to render terminal UI in browser via WebGL.
+
+**Key Configuration:**
+
+`Trunk.toml` is pre-configured:
+```toml
+[build.rust]
+no_default_features = true
+features = ["egui-web"]
+bin = "nearx-web"
+```
+
+`index-egui.html` specifies the binary and disables default features:
+```html
+<link data-trunk rel="rust" data-bin="nearx-web" data-cargo-no-default-features data-cargo-features="egui-web" />
+```
+
+**Why `--no-default-features`:**
+- Disables native-only dependencies (crossterm, copypasta, rusqlite)
+- Disables NEAR SDK crates with C dependencies (near-primitives, near-crypto)
+- Disables full tokio runtime (incompatible with WASM)
+
+**Web Authentication:**
+
+Three methods (priority order):
+1. **URL Parameter**: `http://127.0.0.1:8080?token=your_token`
+2. **localStorage**: `localStorage.setItem('RPC_BEARER', 'your_token')`
+3. **Compile-time**: `FASTNEAR_AUTH_TOKEN=xxx trunk build --release`
+
+**Note:** WASM cannot access runtime environment variables - token must be set when **building** for compile-time method.
+
+---
+
+## Tauri Desktop App
+
+Native desktop application with deep link support for `near://` protocol URLs.
+
+### Development Modes
+
+**For General Development (UI, features, logic):**
+```bash
+cd tauri-workspace
+cargo tauri dev
+```
+- Fast hot-reload
+- Debug logging enabled
+- DevTools: `Cmd+Option+I` (macOS) or `F12` (Windows/Linux)
+- **Note:** Deep links won't work in dev mode (see below)
+
+**For Deep Link Testing:**
+
+macOS caches URL scheme registrations, so `cargo tauri dev` often runs old code when opened via deep links. Use the helper script instead:
+
+```bash
+cd tauri-workspace
+
+# Build debug bundle and register for deep links
+./dev-deep-links.sh
+
+# Or build, register, AND test with sample URL
+./dev-deep-links.sh test
+
+# Clean up old registrations only
+./dev-deep-links.sh clean
+```
+
+**What the script does:**
+1. Kills old app instances
+2. Builds fresh debug bundle with `cargo tauri build --debug`
+3. Clears macOS Launch Services cache
+4. Registers the new bundle for `near://` URLs
+5. Optionally tests with a sample deep link
+
+**Manual Deep Link Testing:**
+```bash
+# After running dev-deep-links.sh, test with:
+open 'near://tx/ABC123?network=mainnet'
+
+# Monitor logs:
+tail -f ~/Library/Logs/com.ratacat.fast/Ratacat.log
+```
+
+### Key Features
+- Deep link handler for `near://tx/HASH?network=mainnet` URLs
+- Single-instance enforcement (prevents duplicate launches)
+- Native performance with desktop integration
+- Comprehensive debug logging waterfall for deep link tracing
+
+### Configuration
+- **Bundle ID:** `com.ratacat.fast`
+- **URL Scheme:** `near://`
+- **Log Location:** `~/Library/Logs/com.ratacat.fast/` (macOS)
+- **Dev Bundle:** `target/debug/bundle/macos/Ratacat.app`
+- **Release Bundle:** `target/release/bundle/macos/Ratacat.app`
+
+---
+
+## Troubleshooting
+
+### Connection Issues
+
+**"Connection refused" with SOURCE=ws:**
+- Ensure Node WebSocket server is running on port 63736
+- Check `WS_URL` matches your configuration
+
+**RPC timeouts:**
+```bash
+RPC_TIMEOUT_MS=15000 POLL_CHUNK_CONCURRENCY=2 cargo run --release
+```
+
+### Performance
+
+**High CPU usage:**
+```bash
+RENDER_FPS=20 KEEP_BLOCKS=50 cargo run --release
+```
+
+### Web Build Errors
+
+**`zstd-sys` or `secp256k1-sys` compilation failed:**
+- Ensure `Trunk.toml` has `no_default_features = true`
+- Verify `index-egui.html` has `data-cargo-no-default-features` attribute
+
+**Connection refused to localhost:**
+- Configure RPC endpoint via URL: `?rpc=https://rpc.mainnet.fastnear.com`
+
+### macOS Deep Link Issues
+
+**Problem: Deep links open old version of the app**
+
+This is a common macOS issue where Launch Services caches URL scheme registrations and doesn't update when you rebuild.
+
+**Symptoms:**
+- `cargo tauri dev` runs, but deep links open a different (old) instance
+- Deep links work but execute old code
+- Multiple app icons in dock when opening deep links
+
+**Solution 1: Use the helper script (recommended)**
+```bash
+cd tauri-workspace
+./dev-deep-links.sh test
+```
+
+**Solution 2: Manual cleanup**
+```bash
+# Kill all instances
+killall nearx-tauri
+killall NEARx
+
+# Find old app locations
+mdfind "kMDItemCFBundleIdentifier == 'com.ratacat.fast'"
+
+# Clear Launch Services cache
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -kill -r -domain local -domain system -domain user
+
+# Remove old bundles from /Applications if present
+rm -rf /Applications/Ratacat.app
+
+# Build and register fresh debug bundle
+cd tauri-workspace
+cargo tauri build --debug
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f target/debug/bundle/macos/Ratacat.app
+
+# Wait a few seconds for cache to rebuild
+sleep 3
+
+# Test
+open 'near://tx/ABC123?network=mainnet'
+```
+
+**Why this happens:**
+- macOS caches app→URL associations for performance
+- `cargo tauri dev` creates temporary builds that aren't stable locations
+- Launch Services prefers the first registered app for a URL scheme
+- The cache doesn't auto-update when you rebuild
+
+**Best practices:**
+- Use `cargo tauri dev` for general development (no deep links needed)
+- Use `./dev-deep-links.sh` when working on deep link features
+- Run `./dev-deep-links.sh clean` if you see stale registrations
+- Production bundles in `/Applications` are most stable for deep links
+
+**Verify current registration:**
+```bash
+# Show all apps registered for com.ratacat.fast
+mdfind "kMDItemCFBundleIdentifier == 'com.ratacat.fast'"
+
+# Check which app will handle near:// URLs
+# (Look for "near" in the output)
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump | grep -A 3 "near:"
+```
+
+---
+
+## Tips
+
+1. **Use WebSocket mode during development** - connects to your Node server for real-time updates
+2. **Use RPC mode for production** - direct NEAR connection, more reliable
+3. **Press `Spacebar` for fullscreen** - maximize space for complex transaction inspection
+4. **Filter with `/`** - syntax like `acct:alice.near action:FunctionCall`
+5. **Owned-only view with `Ctrl+U`** - see only your transactions (auto-detected from `~/.near-credentials`)
+6. **Bookmark with `m`** - use `Ctrl+P` to pin important marks permanently
+7. **Enable archival RPC** - explore unlimited blockchain history with `ARCHIVAL_RPC_URL`
+8. **Adjust FPS with `Ctrl+O`** - lower FPS on CPU-constrained systems
+9. **Copy with `c`** - paste transaction details anywhere
+
+---
+
+## Built with Official NEAR Infrastructure
+
+Uses official NEAR Protocol crates:
+- **`near-primitives`** (0.27.0) - Core blockchain data structures
+- **`near-jsonrpc-client`** (0.15.0) - Official RPC client
+- **`near-crypto`** (0.27.0) - Cryptographic primitives
+- **`near-gas`** (0.2) - Gas formatting utilities
+- **`near-token`** (0.2) - NEAR token formatting
+
+This ensures compatibility with NEAR protocol changes and benefits from upstream improvements.
+
+---
+
+Built with [Ratatui](https://ratatui.rs), [Tokio](https://tokio.rs), and Rust. Designed for NEAR Protocol monitoring.
+
+For detailed technical documentation, see `CLAUDE.md` and `COLLABORATION.md`.

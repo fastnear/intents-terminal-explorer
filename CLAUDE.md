@@ -4,6 +4,8 @@
 
 **🆕 October 2025 Update**: Production-ready browser integration with auto-installing Native Messaging host supporting Chrome, Edge, Chromium, and **Firefox**.
 
+**🔧 November 2025 Stabilization**: UI feature toggles system (`UiFlags`) provides opt-in/opt-out control for enhanced Web/Tauri behaviors with safe defaults.
+
 ## Quad-Mode Architecture Overview
 
 Ratacat v0.4.0 features a revolutionary **quad-deployment architecture** - write once, run everywhere:
@@ -30,7 +32,6 @@ Ratacat v0.4.0 features a revolutionary **quad-deployment architecture** - write
 │              │  • UI rendering (ratatui)           │                    │
 │              │  • RPC client & polling             │                    │
 │              │  • Filter & search (SQLite/memory)  │                    │
-│              │  • Arbitrage engine (native-only)   │                    │
 │              └──────────┬──────────────────────────┘                    │
 │                         ▼                                               │
 │              ┌─────────────────────────────────────┐                    │
@@ -64,6 +65,70 @@ Ratacat v0.4.0 features a revolutionary **quad-deployment architecture** - write
 3. **Catch-Up Limits** - RPC mode limits blocks per poll to prevent cascade failures
 4. **Async Everything** - Tokio-based async runtime keeps UI responsive
 5. **Soft-Wrapped Tokens** - ZWSP insertion for clean line breaking of long hashes
+6. **Feature Toggles** - UI enhancements gated by runtime flags for easy rollback if needed
+
+## UI Feature Toggles (`UiFlags`)
+
+Ratacat uses a feature flag system to control enhanced UI behaviors introduced for Web/Tauri targets. This allows quick disable of new features without code surgery.
+
+### Available Flags
+
+```rust
+pub struct UiFlags {
+    /// Consume Tab/Shift+Tab after cycling panes (prevents egui focus hijack)
+    /// Default: true (stable, tested)
+    pub consume_tab: bool,
+
+    /// Snap egui pixels_per_point to devicePixelRatio (crisp Hi-DPI rendering)
+    /// Default: true (stable, tested)
+    pub dpr_snap: bool,
+
+    /// Mouse/trackpad click mapping to pane focus + row select
+    /// Default: false (not yet implemented)
+    pub mouse_map: bool,
+
+    /// Double-click in Details toggles fullscreen overlay
+    /// Default: false (not yet implemented)
+    pub dblclick_details: bool,
+}
+```
+
+### Usage Examples
+
+**Default behavior (production-safe):**
+```rust
+let app = App::new(fps, fps_choices, keep_blocks, filter, archival_tx);
+// consume_tab=true, dpr_snap=true, others=false
+```
+
+**Disable all enhancements (maximum stability):**
+```rust
+let mut app = App::new(fps, fps_choices, keep_blocks, filter, archival_tx);
+app.set_ui_flags(UiFlags::all_disabled());
+```
+
+**Enable only keyboard features:**
+```rust
+let mut app = App::new(fps, fps_choices, keep_blocks, filter, archival_tx);
+app.set_ui_flags(UiFlags::keyboard_only());
+```
+
+**Custom configuration:**
+```rust
+let mut app = App::new(fps, fps_choices, keep_blocks, filter, archival_tx);
+let mut flags = app.ui_flags();
+flags.consume_tab = false;  // Let egui handle Tab normally
+flags.dpr_snap = true;      // Keep crisp rendering
+app.set_ui_flags(flags);
+```
+
+### Implementation Details
+
+- **Location**: `src/flags.rs` (module), `src/app.rs` (App field)
+- **Gating**: Web binary (`src/bin/nearx-web.rs`) checks flags before applying behaviors
+- **Runtime Toggleable**: Can be changed via `app.set_ui_flags()` at any time
+- **Zero Cost**: Flags are copied on each use (cheap), no performance impact
+- **Native Unaffected**: Feature flags exist on native builds but aren't used (TUI has no egui)
 
 ## Core Components
 
@@ -371,8 +436,14 @@ For complete documentation of all options, see `.env.example`.
 ### Filtering & Search
 - `/` or `f` - Enter filter mode (real-time filtering)
 - `Ctrl+F` - Open history search (SQLite-backed)
-- `Esc` - Clear filter/search or exit mode
+- `Esc` - Close details overlay (if open), clear filter, or exit mode (priority order)
 - `Ctrl+U` - Toggle owned-only filter (shows only txs from your accounts)
+
+### Mouse Navigation (Web/Tauri)
+- **Click** - Focus pane and select row (Blocks/Tx) or focus Details
+- **Double-click Details** - Toggle fullscreen overlay (when `dblclick_details` flag enabled)
+- **Wheel scroll** - Navigate through focused pane (Blocks/Tx lists or Details scrolling)
+- **Wheel mapping**: ~3 lines per scroll notch (40px scroll delta)
 
 ### Bookmarks (Jump Marks)
 - `m` - Set mark at current position (auto-labeled)
@@ -513,8 +584,8 @@ trunk build --release
 **Critical Build Details:**
 - `--no-default-features` - **REQUIRED** - Configured in `Trunk.toml` to prevent NEAR SDK crates (C dependencies)
 - `--features egui-web` - Enables eframe, egui_ratatui, soft_ratatui, wasm-bindgen, web-sys
-- Binary: `ratacat-egui-web` (specified in `Trunk.toml`)
-- HTML: `index-egui.html` (specifies `data-bin="ratacat-egui-web"`)
+- Binary: `nearx-web` (specified in `Trunk.toml`)
+- HTML: `index-egui.html` (specifies `data-bin="nearx-web"`)
 
 **Common Build Errors & Solutions:**
 
@@ -528,7 +599,7 @@ trunk build --release
 
 3. **Error: Entry symbol `main` declared multiple times**
    - **Cause:** WASM binaries need `#![no_main]` attribute
-   - **Fix:** Already in `src/bin/ratacat-egui-web.rs`:
+   - **Fix:** Already in `src/bin/nearx-web.rs`:
      ```rust
      #![cfg_attr(target_arch = "wasm32", no_main)]
      ```
@@ -537,7 +608,7 @@ trunk build --release
    - **Cause:** Trunk doesn't know which binary to build
    - **Fix:** Already in `index-egui.html`:
      ```html
-     <link data-trunk rel="rust" data-bin="ratacat-egui-web" />
+     <link data-trunk rel="rust" data-bin="nearx-web" />
      ```
 
 **Verifying the Build:**
@@ -698,6 +769,19 @@ open 'near://account/alice.near/history?from=100'
 tail -f ~/Library/Logs/com.ratacat.fast/Ratacat.log
 ```
 
+**DevTools Verification** (for Tauri builds):
+
+Open Chrome DevTools (Cmd+Option+I or F12) and run:
+```javascript
+// 1. Verify WASM loaded correctly (no-modules target)
+typeof wasm_bindgen === 'function' && 'nearx:// bridge ready'
+// Should return: "nearx:// bridge ready"
+
+// 2. Test deep link warm start (app running)
+window.__TAURI__?.event.emit('nearx://open', 'nearx://v1/tx/ABC123')
+// Should update location.hash and trigger router
+```
+
 **Expected Behavior**:
 1. App launches if not running (single-instance prevents duplicates)
 2. Deep link received via `get_current()` (first launch) or `on_open_url()` (already running)
@@ -718,8 +802,8 @@ tail -f ~/Library/Logs/com.ratacat.fast/Ratacat.log
 ```
 
 **Reset Deep Link Association** (if pointing to old app):
-1. Kill all instances: `killall explorer-tauri`
-2. Remove old app: `rm -rf /Applications/Ratacat.app`
+1. Kill all instances: `killall nearx-tauri`
+2. Remove old app: `rm -rf /Applications/NEARx.app`
 3. Copy fresh build: `cp -r target/release/bundle/macos/Ratacat.app /Applications/`
 4. Re-register: Run `lsregister -f` command above
 
@@ -742,7 +826,7 @@ tauri-workspace/
             └── Contents/
                 ├── Info.plist       # Auto-generated, includes CFBundleURLTypes
                 └── MacOS/
-                    └── explorer-tauri  # Binary executable
+                    └── nearx-tauri  # Binary executable
 ```
 
 #### Deep Link Event Structure
@@ -770,7 +854,7 @@ pub struct DeepLinkEvent {
 #### Known Issues & Workarounds
 
 **Issue 1**: Tauri bundler tries to copy `.rs` files instead of binaries
-- **Error**: `Failed to copy binary from "target/release/ratacat-egui-tauri.rs"`
+- **Error**: `Failed to copy binary from "target/release/nearx-tauri.rs"`
 - **Workaround**: Manual binary copy (see Build Process above)
 - **Prevention**: Keep `src/bin/` clean, move unused binaries to `.bak`
 
@@ -824,8 +908,8 @@ ratacat/
 ├── src/
 │   ├── lib.rs           # Library exports (shared core)
 │   ├── bin/
-│   │   ├── ratacat.rs   # Native terminal binary
-│   │   ├── ratacat-egui-web.rs # Web browser binary (WASM + egui)
+│   │   ├── nearx.rs     # Native terminal binary
+│   │   ├── nearx-web.rs # Web browser binary (WASM + egui)
 │   │   └── ratacat-proxy.rs    # RPC proxy server (development)
 │   ├── platform/        # Platform abstraction layer
 │   │   ├── mod.rs       # Platform dispatch
@@ -856,7 +940,7 @@ ratacat/
 │       │   ├── lib.rs   # Core logic + clipboard command
 │       │   ├── main.rs  # Entry point
 │       │   └── bin/
-│       │       └── ratacat-egui-tauri.rs # Tauri + egui integration
+│       │       └── nearx-tauri.rs # Tauri + egui integration
 │       └── tauri.conf.json # Tauri configuration
 ├── vendor/
 │   ├── egui_ratatui/    # egui + ratatui bridge (local patches)
@@ -885,7 +969,7 @@ ratacat/
     3. Navigator Clipboard API (modern browsers, HTTPS/localhost only)
     4. Legacy execCommand fallback (older browsers/WebViews)
   - `tauri-plugin-clipboard-manager`: Official Tauri v2 clipboard plugin
-  - Removed code duplication from `ratacat-egui-web.rs` and `ratacat-egui-tauri.rs`
+  - Removed code duplication from `nearx-web.rs` and `nearx-tauri.rs`
   - All binaries now use `ratacat::platform::copy_to_clipboard()` abstraction
 - **Benefits**:
   - Maximum compatibility across all environments (web, Tauri, extension, legacy)
@@ -960,6 +1044,15 @@ ratacat/
 ### UI Optimizations
 - **70/30 layout split**: Details pane gets 70% of vertical space (was 50%), matching csli-dashboard
 - **No left border on details pane**: Makes it easy to click-and-drag with mouse to copy JSON
+- **Mouse wheel scrolling** (v0.4.1): Pane-aware scroll navigation for Web/Tauri targets
+  - Maps scroll events to line-based navigation (~3 lines per notch)
+  - Works with Blocks/Tx list navigation and Details scrolling
+  - Fully instrumented with debug logging (`[mouse] wheel dy=... -> lines=...`)
+- **Smart Esc handling** (v0.4.1): Priority-based UX for Web/Tauri
+  - **Priority 1**: Close details fullscreen if open
+  - **Priority 2**: Clear filter if non-empty
+  - **Priority 3**: No-op (prevents annoying behavior)
+  - Debug logging tracks which path was taken
 - **Dynamic chrome**: Filter bar and debug panel collapse when not in use, maximizing vertical space
 - **Ratio-based layouts**: Eliminates rounding gaps from percentage-based constraints
 - **Smart scroll clamping**: Details pane scrolling stops at actual content end (not u16::MAX)
@@ -1236,319 +1329,26 @@ RPC_TIMEOUT_MS=15000 POLL_CHUNK_CONCURRENCY=2 cargo run --bin ratacat --features
 
 ---
 
-## Arbitrage Engine (v0.3.1+)
+## Arbitrage Engine (Moved)
 
-**NEW**: Ultra-low-latency arbitrage detection for Ref Finance DEX pools on NEAR
+**Note**: The arbitrage scanning engine has been moved to a separate workspace.
 
-### Overview
+The `ref-arb-scanner` crate is now an independent workspace member located in the `ref-arb-scanner/` directory. This allows it to be developed, tested, and versioned independently from the main Ratacat TUI application.
 
-Ratacat now includes a standalone arbitrage scanning engine that monitors Ref Finance v2 pools in real-time and detects profitable trading opportunities using:
-
-1. **2-Hop Arbitrage**: Same token pair across different pools
-2. **Triangle Arbitrage**: Three-pool cycles (A→B→C→A)
-3. **Tick-Level Moving Averages**: 50-tick ring buffer for anomaly detection
-4. **Sub-10μs Detection**: Ultra-fast opportunity scanning
-
-### Quick Start
+**To use the arbitrage scanner:**
 
 ```bash
-# Build the arbitrage scanner (now a workspace member!)
-cargo build -p ref-arb-scanner --release
+# Navigate to the scanner directory
+cd ref-arb-scanner
 
-# Run with mainnet
-NEAR_NODE_URL=https://rpc.mainnet.fastnear.com/ \
-FASTNEAR_AUTH_TOKEN=your_token_here \
-cargo run -p ref-arb-scanner --release
-
-# Run with testnet
-NEAR_NODE_URL=https://rpc.testnet.fastnear.com/ \
-cargo run -p ref-arb-scanner --release
-
-# Or run the binary directly
-./target/release/ref-arb-scanner
+# Build and run (see ref-arb-scanner/README.md for full documentation)
+cargo run --release
 ```
 
-**Note**: As of recent updates, ref-arb-scanner has been moved to a separate workspace member at `ref-arb-scanner/`. This makes it independently buildable and easy to revert if needed. See `REF_ARB_SCANNER_REVERSAL.md` for details on bringing it back into the main codebase.
-
-### Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│           Ultra-Fast Arbitrage Detection Engine             │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │            RefFinanceClient (RPC Polling)            │  │
-│  │  • Pool discovery (auto-finds NEAR pairs)           │  │
-│  │  • Concurrent fetching (4 pools in parallel)        │  │
-│  │  • 1-second polling interval (configurable)         │  │
-│  └────────────────────┬────────────────────────────────┘  │
-│                       ▼                                    │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │          LightningArbEngine (Detection)              │  │
-│  │  • PoolTracker (per-pool state + MA)                │  │
-│  │  • 2-hop path scanner (same pair arbitrage)         │  │
-│  │  • Triangle path scanner (3-pool cycles)            │  │
-│  │  • Anomaly detection (spread > 2x MA)               │  │
-│  │  • Kelly criterion position sizing                  │  │
-│  └────────────────────┬────────────────────────────────┘  │
-│                       ▼                                    │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │         ArbOpportunity (Output)                      │  │
-│  │  • Type: TwoHop or Triangle                         │  │
-│  │  • Spread & MA comparison                           │  │
-│  │  • Estimated profit (after fees)                    │  │
-│  │  • Optimal trade size                               │  │
-│  │  • Confidence score (0.0 - 1.0)                     │  │
-│  └─────────────────────────────────────────────────────┘  │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Core Components
-
-#### 1. TickMA (Moving Average Tracker)
-
-```rust
-pub struct TickMA {
-    window_size: usize,        // 50 ticks
-    values: Vec<f64>,          // Ring buffer
-    sum: f64,                  // Running sum
-}
-
-impl TickMA {
-    #[inline(always)]
-    pub fn update(&mut self, new_price: f64) -> f64 {
-        // O(1) moving average update
-        if let Some(old) = self.values.push(new_price) {
-            self.sum = self.sum - old + new_price;
-        }
-        self.sum / self.values.len() as f64
-    }
-}
-```
-
-**Benefits:**
-- No allocations after initialization
-- Constant-time updates
-- Cache-friendly sequential access
-
-#### 2. Pool State Tracker
-
-```rust
-pub struct PoolTracker {
-    pub pool_id: u64,
-    pub token_pair: (String, String),
-    pub current_price: f64,
-    pub current_liquidity: f64,
-    pub ma_50: TickMA,           // 50-tick moving average
-    pub update_count: u64,
-}
-```
-
-Tracks every pool's:
-- Current price (token1 / token0)
-- Liquidity depth (USD estimate)
-- 50-tick moving average
-- Update sequence number
-
-#### 3. Arbitrage Path Discovery
-
-**2-Hop Paths:**
-```rust
-// Discover pools with same token pair
-for (pool_id, tracker) in &self.pools {
-    if tracker.token_pair == target_pair {
-        self.two_hop_paths.push((pool_a, pool_b));
-    }
-}
-```
-
-**Triangle Paths:**
-```rust
-// Discover 3-pool cycles: A→B→C→A
-1. Index all pools by token pair (both directions)
-2. For each pool A→B:
-   - Find pools B→C (various C)
-   - Find pools C→A
-   - Create triangle: (pool_ab, pool_bc, pool_ca)
-```
-
-**Example Triangle:**
-- Pool 1238: hak.tkn.near → nearkat.tkn.near
-- Pool 1226: nearkat.tkn.near → wrap.near
-- Pool 22: wrap.near → hak.tkn.near
-- **Compound Rate**: 1.0034x (0.34% profit!)
-
-#### 4. Opportunity Detection
-
-**2-Hop Logic:**
-```rust
-let spread = (price_a - price_b).abs() / price_a.min(price_b);
-let ma_spread = (ma_a - ma_b).abs() / ma_a.min(ma_b);
-
-// Anomaly: current spread > 2x historical MA spread
-let is_anomaly = spread > ma_spread * 2.0;
-
-// Profitable after 2 swaps (2 * 0.25% = 0.5% fees)
-let profit_pct = spread - (0.0025 * 2.0);
-```
-
-**Triangle Logic:**
-```rust
-// Start with 1 unit of token A
-let compound_rate = price_ab * price_bc * price_ca;
-let spread = (compound_rate - 1.0).abs();
-
-// Profitable after 3 swaps (3 * 0.25% = 0.75% fees)
-let profit_pct = spread - (0.0025 * 3.0);
-```
-
-### Live Test Results (Mainnet)
-
-```
-🚀 Starting Ref Finance Arbitrage Scanner
-📡 Connecting to RPC: https://rpc.mainnet.fastnear.com/
-🔍 Discovering NEAR pools with >$1k liquidity...
-✅ Found 183 pools to monitor
-
-🎯 Monitoring 183 pools | 15 2-hop paths | 47 triangle paths
-⚡ Starting real-time monitoring...
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 ARBITRAGE OPPORTUNITY #1
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 Type: Triangle Arbitrage
-🔺 Pools: 1238 → 1226 → 22
-💰 Compound Rate: 1.0034x (spread: 0.34%)
-📈 Prices: 0.003557 → 0.091682 → 3.089123
-💧 Liquidity: $2,147 / $45,891 / $1,582
-🎲 Confidence: 45.3%
-💵 Estimated Profit: 0.26% ($0.56 on $215 trade)
-⏱️  Detected at: +12.3s
-```
-
-**Performance Metrics:**
-- **Pool Discovery**: ~4 seconds for 6000+ pools
-- **Initial Fetch**: ~10 seconds for 183 pools
-- **Detection Latency**: < 10 microseconds average
-- **Path Discovery**: 47 triangle cycles found automatically
-- **Memory**: Minimal (ring buffers + HashMaps)
-
-### Integration Points
-
-The arbitrage engine is designed as a **standalone module** that can be:
-
-1. **Run independently** (current: `ref-arb-scanner` binary)
-2. **Integrated into Ratacat UI** (future: live dashboard pane)
-3. **Used as a library** (public API for custom strategies)
-
-### Next Steps
-
-**Immediate Enhancements:**
-- [ ] Slippage simulation (constant product formula)
-- [ ] Sub-second polling (100ms intervals)
-- [ ] Transaction execution (swap building + signing)
-- [ ] Multi-DEX support (Trisolaris, Jumbo, etc.)
-
-**Ratacat UI Integration:**
-- [ ] New pane: Live arbitrage dashboard
-- [ ] Real-time opportunity stream
-- [ ] Historical profit tracking
-- [ ] One-click execution
-
-### File Structure
-
-**New Location**: Separate workspace member at `ref-arb-scanner/`
-
-```
-ref-arb-scanner/              # Workspace member (independent crate)
-├── Cargo.toml                # Independent package config
-├── src/
-│   ├── lib.rs                # Library re-exports
-│   ├── main.rs               # Binary entry point (was bin/ref-arb-scanner.rs)
-│   ├── arb_engine.rs         # Core detection logic (623 lines)
-│   │   ├── TickMA            # Moving average ring buffer
-│   │   ├── PoolTracker       # Per-pool state + MA
-│   │   ├── LightningArbEngine  # Main detection engine
-│   │   ├── ArbOpportunity    # Output struct
-│   │   └── TrianglePath      # 3-pool cycle definition
-│   │
-│   ├── ref_finance_client.rs # RPC client (268 lines)
-│   │   ├── RefFinanceClient  # Pool data fetcher
-│   │   ├── View functions    # get_pools(), get_pool()
-│   │   └── Auto-discovery    # NEAR pair finder
-│   │
-│   ├── arb_config.rs         # Configuration (317 lines)
-│   ├── price_discovery.rs    # USD price graph (225 lines)
-│   ├── risk_manager.rs       # Position sizing (300 lines)
-│   ├── execution_engine.rs   # Display/Simulate/Execute (212 lines)
-│   └── slippage.rs           # Constant product formula (157 lines)
-│
-└── (Total: ~2,313 lines across 8 files)
-```
-
-**Reversal**: See `REF_ARB_SCANNER_REVERSAL.md` for step-by-step instructions to move it back into the main codebase (takes ~5 minutes).
-
-### Configuration
-
-Environment variables for the arbitrage scanner:
-
-```bash
-# RPC endpoint (required)
-NEAR_NODE_URL=https://rpc.mainnet.fastnear.com/
-
-# FastNEAR API token (recommended for rate limits)
-FASTNEAR_AUTH_TOKEN=your_token_here
-
-# Polling interval in milliseconds (default: 1000)
-POLL_INTERVAL_MS=500
-
-# Logging level (default: info)
-RUST_LOG=debug
-```
-
-### API Example
-
-```rust
-use ref_arb_scanner::arb_engine::{LightningArbEngine, ArbType};
-use ref_arb_scanner::ref_finance_client::RefFinanceClient;
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    let client = RefFinanceClient::new(
-        "https://rpc.mainnet.fastnear.com/".to_string()
-    );
-
-    let mut engine = LightningArbEngine::new();
-
-    // Discover and register pools
-    let pools = client.get_pools(0, 100).await?;
-    for pool in pools {
-        engine.register_pool(&pool);
-    }
-
-    // Monitor for opportunities
-    loop {
-        for pool_id in 0..100 {
-            if let Ok(pool) = client.get_pool(pool_id).await {
-                if let Some(opp) = engine.on_pool_update(&pool) {
-                    match opp.arb_type {
-                        ArbType::TwoHop => {
-                            println!("2-Hop: {:.2}% profit", opp.estimated_profit_pct * 100.0);
-                        }
-                        ArbType::Triangle => {
-                            println!("Triangle: {:.2}% profit", opp.estimated_profit_pct * 100.0);
-                        }
-                    }
-                }
-            }
-        }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-}
-```
+For complete documentation, see:
+- `ref-arb-scanner/README.md` - Full usage guide
+- `REF_ARB_SCANNER_REVERSAL.md` - Instructions for re-integrating if needed
 
 ---
 
-Built with ❤️ using Ratatui, Tokio, and Rust. Designed for NEAR Protocol monitoring and DeFi arbitrage.
+Built with ❤️ using Ratatui, Tokio, and Rust. Designed for NEAR Protocol monitoring.

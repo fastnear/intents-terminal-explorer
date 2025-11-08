@@ -1,5 +1,9 @@
+use crate::{
+    config::Config,
+    rpc_utils::{fetch_block_with_txs, get_latest_block},
+    types::AppEvent,
+};
 use anyhow::Result;
-use crate::{types::AppEvent, config::Config, rpc_utils::{get_latest_block, fetch_block_with_txs}};
 use tokio::sync::mpsc::UnboundedSender;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -14,15 +18,24 @@ async fn sleep(duration: Duration) {
     gloo_timers::future::sleep(std::time::Duration::from_millis(duration.as_millis() as u64)).await;
 }
 
-pub async fn run_rpc(cfg:&Config, tx: UnboundedSender<AppEvent>) -> Result<()> {
+pub async fn run_rpc(cfg: &Config, tx: UnboundedSender<AppEvent>) -> Result<()> {
     let mut last_height: u64 = 0;
-    log::info!("🚀 RPC polling loop started - endpoint: {}", cfg.near_node_url);
+    log::info!(
+        "🚀 RPC polling loop started - endpoint: {}",
+        cfg.near_node_url
+    );
 
     loop {
         log::debug!("📡 RPC loop tick - polling for latest block...");
 
         // non-overlapping loop, catch-up limited (guide's pattern).
-        match get_latest_block(&cfg.near_node_url, cfg.rpc_timeout_ms, cfg.fastnear_auth_token.as_deref()).await {
+        match get_latest_block(
+            &cfg.near_node_url,
+            cfg.rpc_timeout_ms,
+            cfg.fastnear_auth_token.as_deref(),
+        )
+        .await
+        {
             Ok(latest) => {
                 let latest_h = latest["header"]["height"].as_u64().unwrap_or(0);
                 log::debug!("✅ Got latest block height: {latest_h}");
@@ -35,7 +48,12 @@ pub async fn run_rpc(cfg:&Config, tx: UnboundedSender<AppEvent>) -> Result<()> {
                 if latest_h > last_height {
                     let start = last_height + 1;
                     let end = (start + cfg.poll_max_catchup - 1).min(latest_h);
-                    log::info!("📦 Fetching blocks {} to {} ({} blocks)", start, end, end - start + 1);
+                    log::info!(
+                        "📦 Fetching blocks {} to {} ({} blocks)",
+                        start,
+                        end,
+                        end - start + 1
+                    );
 
                     for h in start..=end {
                         if let Ok(row) = fetch_block_with_txs(
@@ -43,9 +61,15 @@ pub async fn run_rpc(cfg:&Config, tx: UnboundedSender<AppEvent>) -> Result<()> {
                             h,
                             cfg.rpc_timeout_ms,
                             cfg.poll_chunk_concurrency,
-                            cfg.fastnear_auth_token.as_deref()
-                        ).await {
-                            log::info!("🔔 Sending NewBlock event - height: {}, txs: {}", h, row.tx_count);
+                            cfg.fastnear_auth_token.as_deref(),
+                        )
+                        .await
+                        {
+                            log::info!(
+                                "🔔 Sending NewBlock event - height: {}, txs: {}",
+                                h,
+                                row.tx_count
+                            );
                             let _ = tx.send(AppEvent::NewBlock(row));
                             last_height = h;
                         } else {

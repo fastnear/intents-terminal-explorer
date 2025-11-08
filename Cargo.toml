@@ -1,16 +1,16 @@
 [package]
-name = "ratacat"
+name = "nearx"
 version = "0.3.0"
 edition = "2021"
-default-run = "ratacat"
+default-run = "nearx"
 
 [lib]
-name = "ratacat"
+name = "nearx"
 path = "src/lib.rs"
 
 [[bin]]
-name = "ratacat"
-path = "src/bin/ratacat.rs"
+name = "nearx"
+path = "src/bin/nearx.rs"
 required-features = ["native"]
 
 [[bin]]
@@ -24,14 +24,9 @@ path = "src/bin/ratacat-proxy.rs"
 required-features = ["proxy"]
 
 [[bin]]
-name = "ratacat-egui-web"
-path = "src/bin/ratacat-egui-web.rs"
+name = "nearx-web"
+path = "src/bin/nearx-web.rs"
 required-features = ["egui-web"]
-
-[[bin]]
-name = "ref-arb-scanner"
-path = "src/bin/ref-arb-scanner.rs"
-required-features = ["native"]
 
 [workspace]
 resolver = "2"
@@ -49,7 +44,7 @@ tauri-plugin-deep-link = "2.4"
 tauri-plugin-single-instance = "2.0"
 
 [features]
-default = []
+default = ["native"]
 native = [
     "dep:crossterm",
     "dep:copypasta",

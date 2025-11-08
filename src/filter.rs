@@ -33,8 +33,7 @@ pub fn compile_filter(q: &str) -> CompiledFilter {
 /// Detect if token looks like a NEAR transaction hash
 /// NEAR tx hashes are base58 encoded, typically 43-44 characters
 fn is_likely_hash(tok: &str) -> bool {
-    (tok.len() >= 43 && tok.len() <= 44) &&
-    tok.chars().all(|c| c.is_ascii_alphanumeric())
+    (tok.len() >= 43 && tok.len() <= 44) && tok.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 /// Detect if token looks like a NEAR account
@@ -46,16 +45,24 @@ fn is_likely_account(tok: &str) -> bool {
 }
 
 fn push(f: &mut CompiledFilter, k: &str, v: &str) {
-    let v = v.to_lowercase();
+    // Split comma-separated values (comma = OR logic)
+    let values: Vec<String> = v
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+
     match &*k.to_lowercase() {
-        "acct" | "account" => f.acct.push(v),
-        "signer" => f.signer.push(v),
-        "receiver" | "rcv" => f.receiver.push(v),
-        "action" => f.action.push(v),
-        "method" => f.method.push(v),
-        "raw" => f.raw.push(v),
-        "hash" | "tx" | "txn" | "transaction" => f.hash.push(v),
-        _ => f.free.push(format!("{k}:{v}")),
+        "acct" | "account" => f.acct.extend(values),
+        "signer" => f.signer.extend(values),
+        "receiver" | "rcv" => f.receiver.extend(values),
+        "action" => f.action.extend(values),
+        "method" => f.method.extend(values),
+        "raw" => f.raw.extend(values),
+        "hash" | "tx" | "txn" | "transaction" => f.hash.extend(values),
+        _ => f
+            .free
+            .extend(values.into_iter().map(|v| format!("{k}:{v}"))),
     }
 }
 

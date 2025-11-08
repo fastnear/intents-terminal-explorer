@@ -8,8 +8,8 @@ use crate::history::{History, PersistedMark};
 use crate::types::Mark;
 
 const LABELS: &[&str] = &[
-    "1", "2", "3", "4", "5", "6", "7", "8", "9",
-    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
+    "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
 ];
 
 pub struct JumpMarks {
@@ -66,11 +66,19 @@ impl JumpMarks {
             .unwrap_or_else(|| "a".to_string())
     }
 
-    pub async fn add_or_replace(&mut self, label: String, pane: u8, height: Option<u64>, tx_hash: Option<String>) {
+    pub async fn add_or_replace(
+        &mut self,
+        label: String,
+        pane: u8,
+        height: Option<u64>,
+        tx_hash: Option<String>,
+    ) {
         let now = chrono::Utc::now().timestamp_millis();
 
         // Preserve pinned status if updating existing mark
-        let pinned = self.marks.iter()
+        let pinned = self
+            .marks
+            .iter()
             .find(|m| m.label == label)
             .map(|m| m.pinned)
             .unwrap_or(false);
@@ -137,8 +145,14 @@ impl JumpMarks {
 
     /// Find a mark by context (pane, height, tx_hash)
     /// Used to check if current context already has a mark
-    pub fn find_by_context(&self, pane: u8, height: Option<u64>, tx_hash: Option<&str>) -> Option<String> {
-        self.marks.iter()
+    pub fn find_by_context(
+        &self,
+        pane: u8,
+        height: Option<u64>,
+        tx_hash: Option<&str>,
+    ) -> Option<String> {
+        self.marks
+            .iter()
             .find(|m| {
                 // Match by tx_hash if present (most specific)
                 if let Some(hash) = tx_hash {
@@ -158,7 +172,9 @@ impl JumpMarks {
     pub async fn toggle_pin(&mut self, label: &str) {
         if let Some(mark) = self.marks.iter_mut().find(|m| m.label == label) {
             mark.pinned = !mark.pinned;
-            self.history.set_mark_pinned(label.to_string(), mark.pinned).await;
+            self.history
+                .set_mark_pinned(label.to_string(), mark.pinned)
+                .await;
         }
     }
 
@@ -166,7 +182,9 @@ impl JumpMarks {
     pub async fn set_pinned(&mut self, label: &str, pinned: bool) {
         if let Some(mark) = self.marks.iter_mut().find(|m| m.label == label) {
             mark.pinned = pinned;
-            self.history.set_mark_pinned(label.to_string(), pinned).await;
+            self.history
+                .set_mark_pinned(label.to_string(), pinned)
+                .await;
         }
     }
 }

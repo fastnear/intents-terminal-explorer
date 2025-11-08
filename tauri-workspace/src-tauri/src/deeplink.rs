@@ -39,14 +39,18 @@ impl FromStr for DeepLink {
             if path.is_empty() {
                 return Err(ParseError::Missing);
             }
-            return Ok(DeepLink::Tx { hash: path.to_string() });
+            return Ok(DeepLink::Tx {
+                hash: path.to_string(),
+            });
         }
 
         if host == "account" {
             if path.is_empty() {
                 return Err(ParseError::Missing);
             }
-            return Ok(DeepLink::Account { id: path.to_string() });
+            return Ok(DeepLink::Account {
+                id: path.to_string(),
+            });
         }
 
         if host == "block" {
@@ -63,10 +67,16 @@ impl FromStr for DeepLink {
                 if id.is_empty() {
                     return Err(ParseError::Missing);
                 }
-                let ro = url.query_pairs().any(|(k, v)| k == "readOnly" && (v == "1" || v.eq_ignore_ascii_case("true")));
+                let ro = url
+                    .query_pairs()
+                    .any(|(k, v)| k == "readOnly" && (v == "1" || v.eq_ignore_ascii_case("true")));
                 return Ok(DeepLink::Session { id, read_only: ro });
             }
-            if let Some(p) = url.query_pairs().find(|(k, _)| k == "path").map(|(_, v)| v.to_string()) {
+            if let Some(p) = url
+                .query_pairs()
+                .find(|(k, _)| k == "path")
+                .map(|(_, v)| v.to_string())
+            {
                 if !p.starts_with('/') {
                     return Err(ParseError::Missing);
                 }
@@ -84,27 +94,51 @@ mod tests {
     use super::*;
     #[test]
     fn ok_ratacat() {
-        assert_eq!("near://ratacat".parse::<DeepLink>().unwrap(), DeepLink::Ratacat);
+        assert_eq!(
+            "near://ratacat".parse::<DeepLink>().unwrap(),
+            DeepLink::Ratacat
+        );
     }
     #[test]
     fn ok_tx() {
-        match "near://tx/DEADBEEF".parse::<DeepLink>().unwrap() { DeepLink::Tx{hash} => assert_eq!(hash, "DEADBEEF"), _=>panic!() }
+        match "near://tx/DEADBEEF".parse::<DeepLink>().unwrap() {
+            DeepLink::Tx { hash } => assert_eq!(hash, "DEADBEEF"),
+            _ => panic!(),
+        }
     }
     #[test]
     fn ok_account() {
-        match "near://account/foo.near".parse::<DeepLink>().unwrap() { DeepLink::Account{id} => assert_eq!(id, "foo.near"), _=>panic!() }
+        match "near://account/foo.near".parse::<DeepLink>().unwrap() {
+            DeepLink::Account { id } => assert_eq!(id, "foo.near"),
+            _ => panic!(),
+        }
     }
     #[test]
     fn ok_block() {
-        match "near://block/42".parse::<DeepLink>().unwrap() { DeepLink::Block{height} => assert_eq!(height, 42), _=>panic!() }
+        match "near://block/42".parse::<DeepLink>().unwrap() {
+            DeepLink::Block { height } => assert_eq!(height, 42),
+            _ => panic!(),
+        }
     }
     #[test]
     fn ok_open_path() {
-        match "near://open?path=/tx/abc".parse::<DeepLink>().unwrap() { DeepLink::OpenPath{path} => assert_eq!(path, "/tx/abc"), _=>panic!() }
+        match "near://open?path=/tx/abc".parse::<DeepLink>().unwrap() {
+            DeepLink::OpenPath { path } => assert_eq!(path, "/tx/abc"),
+            _ => panic!(),
+        }
     }
     #[test]
     fn ok_session() {
-        match "near://open/session/123?readOnly=1".parse::<DeepLink>().unwrap() { DeepLink::Session{id, read_only} => { assert_eq!(id, "123"); assert!(read_only); }, _=>panic!() }
+        match "near://open/session/123?readOnly=1"
+            .parse::<DeepLink>()
+            .unwrap()
+        {
+            DeepLink::Session { id, read_only } => {
+                assert_eq!(id, "123");
+                assert!(read_only);
+            }
+            _ => panic!(),
+        }
     }
     #[test]
     fn bad_scheme() {

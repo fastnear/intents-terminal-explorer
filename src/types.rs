@@ -1,12 +1,15 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag="type")]
+#[serde(tag = "type")]
 pub enum WsPayload {
-    #[serde(rename="block")]
+    #[serde(rename = "block")]
     Block { data: u64 },
-    #[serde(rename="tx")]
-    Tx { identifier: Option<String>, data: Option<TxSummary> },
+    #[serde(rename = "tx")]
+    Tx {
+        identifier: Option<String>,
+        data: Option<TxSummary>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,21 +57,45 @@ pub struct TxDetailed {
     #[allow(dead_code)]
     pub public_key: String,
     #[allow(dead_code)]
-    pub raw_transaction: Option<Vec<u8>>,  // For debugging/export
+    pub raw_transaction: Option<Vec<u8>>, // For debugging/export
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ActionSummary {
     CreateAccount,
-    DeployContract { code_len: usize },
-    FunctionCall { method_name: String, _args_base64: String, args_decoded: crate::near_args::DecodedArgs, gas: u64, deposit: u128 },
-    Transfer { deposit: u128 },
-    Stake { stake: u128, public_key: String },
-    AddKey { public_key: String, access_key: String },
-    DeleteKey { public_key: String },
-    DeleteAccount { beneficiary_id: String },
-    Delegate { sender_id: String, receiver_id: String, actions: Vec<ActionSummary> },
+    DeployContract {
+        code_len: usize,
+    },
+    FunctionCall {
+        method_name: String,
+        _args_base64: String,
+        args_decoded: crate::near_args::DecodedArgs,
+        gas: u64,
+        deposit: u128,
+    },
+    Transfer {
+        deposit: u128,
+    },
+    Stake {
+        stake: u128,
+        public_key: String,
+    },
+    AddKey {
+        public_key: String,
+        access_key: String,
+    },
+    DeleteKey {
+        public_key: String,
+    },
+    DeleteAccount {
+        beneficiary_id: String,
+    },
+    Delegate {
+        sender_id: String,
+        receiver_id: String,
+        actions: Vec<ActionSummary>,
+    },
 }
 
 #[derive(Debug, Clone)]

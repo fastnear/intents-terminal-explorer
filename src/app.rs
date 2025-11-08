@@ -7,25 +7,35 @@ use std::time::{Duration, Instant};
 #[cfg(target_arch = "wasm32")]
 use web_time::{Duration, Instant};
 
-use crate::types::{AppEvent, BlockRow, TxLite, WsPayload, ActionSummary};
-use crate::util_text::{format_gas, format_near};
-use crate::json_pretty::pretty;
 use crate::filter::{self, compile_filter, tx_matches_filter, CompiledFilter};
+use crate::flags::UiFlags;
+use crate::json_pretty::pretty;
+use crate::theme::Theme;
+use crate::types::{AppEvent, BlockRow, TxLite, WsPayload};
+
+#[cfg(feature = "native")]
+use crate::theme::rat;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum InputMode { Normal, Filter, Search, Marks, JumpPending }
+pub enum InputMode {
+    Normal,
+    Filter,
+    Search,
+    Marks,
+    JumpPending,
+}
 
 /// Reason for block selection change - determines tx selection behavior
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum BlockChangeReason {
-    AutoFollow,      // New block arrived in auto-follow mode (keep tx index)
-    ManualNav,       // User manually navigated to different block (reset tx)
-    FilterChange,    // Filter was applied/cleared (try to preserve tx)
+    AutoFollow,   // New block arrived in auto-follow mode (keep tx index)
+    ManualNav,    // User manually navigated to different block (reset tx)
+    FilterChange, // Filter was applied/cleared (try to preserve tx)
 }
 
 pub struct App {
     quit: bool,
-    pane: usize,                   // 0 blocks, 1 txs, 2 details
+    pane: usize, // 0 blocks, 1 txs, 2 details
     blocks: Vec<BlockRow>,
     sel_block_height: Option<u64>, // None = auto-follow newest, Some(height) = locked to specific block
     sel_tx: usize,
@@ -37,7 +47,7 @@ pub struct App {
     fps_choices: Vec<u32>,
 
     keep_blocks: usize,
-    manual_block_nav: bool,        // True if user manually navigated (stops auto-selection)
+    follow_blocks_latest: bool, // True = auto-follow newest block, False = locked to selection
 
     // Filter state
     filter_query: String,
@@ -54,101 +64,46 @@ pub struct App {
     marks_selection: usize,
 
     // Owned accounts state
-    owned_accounts: HashSet<String>,     // Lowercase account IDs from ~/.near-credentials
-    owned_only_filter: bool,             // Ctrl+U toggle for owned-only view
-    owned_counts: HashMap<u64, usize>,   // Cached owned tx count per block height
+    owned_accounts: HashSet<String>, // Lowercase account IDs from ~/.near-credentials
+    owned_only_filter: bool,         // Ctrl+U toggle for owned-only view
+    owned_counts: HashMap<u64, usize>, // Cached owned tx count per block height
 
     // Manually-selected blocks cache (preserves blocks after they age out of rolling buffer)
-    cached_blocks: HashMap<u64, BlockRow>,  // height -> block
-    cached_block_order: Vec<u64>,           // LRU tracking for cache eviction
+    cached_blocks: HashMap<u64, BlockRow>, // height -> block
+    cached_block_order: Vec<u64>,          // LRU tracking for cache eviction
 
     // Archival fetch state (for fetching historical blocks beyond cache)
-    loading_block: Option<u64>,                                   // Block height currently being fetched from archival
-    archival_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<u64>>,  // Channel to request archival fetches
+    loading_block: Option<u64>, // Block height currently being fetched from archival
+    archival_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<u64>>, // Channel to request archival fetches
 
     // Debug log (for development)
-    debug_log: Vec<String>,              // Rolling buffer of debug messages
-    debug_visible: bool,                 // Toggle debug panel visibility (Ctrl+D)
+    debug_log: Vec<String>, // Rolling buffer of debug messages
+    debug_visible: bool,    // Toggle debug panel visibility (Ctrl+D)
 
     // Toast notification state
-    toast_message: Option<(String, Instant)>,  // (message, timestamp)
+    toast_message: Option<(String, Instant)>, // (message, timestamp)
 
     // UI layout state
-    details_fullscreen: bool,                  // Spacebar toggle for 100% details view
-    details_viewport_height: u16,              // Actual visible height of details pane (set by UI layer)
-}
+    details_fullscreen: bool,     // Spacebar toggle for 100% details view
+    details_viewport_height: u16, // Actual visible height of details pane (set by UI layer)
 
-/// Recursively format an action for PRETTY view display
-fn format_action(action: &ActionSummary) -> serde_json::Value {
-    match action {
-        ActionSummary::CreateAccount => json!({"type": "CreateAccount"}),
-        ActionSummary::DeployContract { code_len } => {
-            json!({"type": "DeployContract", "code_size": format!("{} bytes", code_len)})
-        }
-        ActionSummary::FunctionCall { method_name, args_decoded, gas, deposit, .. } => {
-            use crate::near_args::DecodedArgs;
+    // Theme (single source of truth for all UI targets)
+    theme: Theme,
 
-            let args_display = match args_decoded {
-                DecodedArgs::Json(v) => {
-                    // Auto-parse nested JSON-serialized strings for better readability
-                    crate::json_auto_parse::auto_parse_nested_json(v.clone(), 5, 0)
-                }
-                DecodedArgs::Text(t) => json!(t),
-                DecodedArgs::Bytes { preview, .. } => json!(format!("[binary: {}]", preview)),
-                DecodedArgs::Empty => json!({}),
-                DecodedArgs::Error(e) => json!(format!("<decode error: {}>", e)),
-            };
+    // Cached ratatui styles (invalidated when theme changes)
+    #[cfg(feature = "native")]
+    rat_styles_cache: Option<rat::Styles>,
 
-            json!({
-                "type": "FunctionCall",
-                "method": method_name,
-                "args": args_display,
-                "gas": format_gas(*gas),
-                "deposit": format_near(*deposit),
-            })
-        }
-        ActionSummary::Transfer { deposit } => {
-            json!({"type": "Transfer", "amount": format_near(*deposit)})
-        }
-        ActionSummary::Stake { stake, public_key } => {
-            json!({"type": "Stake", "amount": format_near(*stake), "public_key": public_key})
-        }
-        ActionSummary::AddKey { public_key, access_key } => {
-            // Parse access_key if it's stringified JSON (same pattern as FunctionCall args)
-            let parsed_access_key = if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(access_key) {
-                crate::json_auto_parse::auto_parse_nested_json(json_val, 5, 0)
-            } else {
-                json!(access_key)  // Fallback to string if not valid JSON
-            };
-            json!({"type": "AddKey", "public_key": public_key, "access_key": parsed_access_key})
-        }
-        ActionSummary::DeleteKey { public_key } => {
-            json!({"type": "DeleteKey", "public_key": public_key})
-        }
-        ActionSummary::DeleteAccount { beneficiary_id } => {
-            json!({"type": "DeleteAccount", "beneficiary": beneficiary_id})
-        }
-        ActionSummary::Delegate { sender_id, receiver_id, actions } => {
-            // Recursively format nested actions
-            let nested_formatted: Vec<serde_json::Value> = actions.iter()
-                .map(format_action)
-                .collect();
-            json!({
-                "type": "Delegate",
-                "sender": sender_id,
-                "receiver": receiver_id,
-                "actions": nested_formatted
-            })
-        }
-    }
+    // UI feature flags (for Web/Tauri enhanced behaviors)
+    ui_flags: UiFlags,
 }
 
 impl App {
     pub fn new(
-        fps:u32,
-        fps_choices:Vec<u32>,
-        keep_blocks:usize,
-        default_filter:String,
+        fps: u32,
+        fps_choices: Vec<u32>,
+        keep_blocks: usize,
+        default_filter: String,
         archival_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<u64>>,
     ) -> Self {
         let filter_compiled = if default_filter.is_empty() {
@@ -158,13 +113,17 @@ impl App {
         };
 
         Self {
-            quit:false, pane:0,
-            blocks:Vec::with_capacity(keep_blocks),
-            sel_block_height:None, sel_tx:0,  // Start in auto-follow mode
-            details:"(No blocks yet)".into(),
-            details_scroll:0,
-            fps, fps_choices, keep_blocks,
-            manual_block_nav: false,
+            quit: false,
+            pane: 0,
+            blocks: Vec::with_capacity(keep_blocks),
+            sel_block_height: None,
+            sel_tx: 0, // Start in auto-follow mode
+            details: "(No blocks yet)".into(),
+            details_scroll: 0,
+            fps,
+            fps_choices,
+            keep_blocks,
+            follow_blocks_latest: true, // Start in auto-follow mode
             filter_query: default_filter,
             filter_compiled,
             input_mode: InputMode::Normal,
@@ -181,20 +140,34 @@ impl App {
             loading_block: None,
             archival_fetch_tx,
             debug_log: Vec::new(),
-            debug_visible: false,  // Hidden by default
+            debug_visible: false, // Hidden by default
             toast_message: None,
-            details_fullscreen: false,  // Normal view by default
-            details_viewport_height: 20,  // Default estimate, will be updated by UI
+            details_fullscreen: false,   // Normal view by default
+            details_viewport_height: 20, // Default estimate, will be updated by UI
+            theme: Theme::default(),     // Single source of truth for UI colors
+            #[cfg(feature = "native")]
+            rat_styles_cache: None, // Computed on first use
+            ui_flags: UiFlags::default(), // Safe defaults for Web/Tauri
         }
     }
 
     // ----- getters -----
-    pub fn fps(&self)->u32{ self.fps }
-    pub fn quit_flag(&self)->bool{ self.quit }
-    pub fn pane(&self)->usize{ self.pane }
-    pub fn is_viewing_cached_block(&self)->bool {
+    pub fn fps(&self) -> u32 {
+        self.fps
+    }
+    pub fn quit_flag(&self) -> bool {
+        self.quit
+    }
+    pub fn pane(&self) -> usize {
+        self.pane
+    }
+    pub fn sel_tx(&self) -> usize {
+        self.sel_tx
+    }
+    pub fn is_viewing_cached_block(&self) -> bool {
         if let Some(height) = self.sel_block_height {
-            self.find_block_index(Some(height)).is_none() && self.cached_blocks.contains_key(&height)
+            self.find_block_index(Some(height)).is_none()
+                && self.cached_blocks.contains_key(&height)
         } else {
             false
         }
@@ -208,14 +181,14 @@ impl App {
         }
 
         match height {
-            None => None,  // Auto-follow mode: return None to trigger auto-follow logic in current_block()
+            None => None, // Auto-follow mode: return None to trigger auto-follow logic in current_block()
             Some(h) => self.blocks.iter().position(|b| b.height == h),
         }
     }
 
     /// Get the currently selected block (fallback to cache if aged out of main buffer)
     /// Filter-aware in auto-follow mode: returns first block with matching transactions
-    fn current_block(&self) -> Option<&BlockRow> {
+    pub fn current_block(&self) -> Option<&BlockRow> {
         if let Some(idx) = self.find_block_index(self.sel_block_height) {
             // Manual mode: return block at specific height
             self.blocks.get(idx)
@@ -240,7 +213,9 @@ impl App {
             return block.transactions.len(); // No filter = all match
         }
 
-        block.transactions.iter()
+        block
+            .transactions
+            .iter()
             .filter(|tx| {
                 // Apply owned-only filter if active
                 if self.owned_only_filter && !self.is_owned_tx(tx) {
@@ -264,20 +239,29 @@ impl App {
 
         if filter::is_empty(&self.filter_compiled) && !self.owned_only_filter {
             // No filter active - return all blocks
-            let idx = self.find_block_index(self.sel_block_height)
-                .or(if !self.blocks.is_empty() { Some(0) } else { None });
+            let idx = self
+                .find_block_index(self.sel_block_height)
+                .or(if !self.blocks.is_empty() {
+                    Some(0)
+                } else {
+                    None
+                });
             let refs: Vec<&BlockRow> = self.blocks.iter().collect();
             return (refs, idx, total);
         }
 
         // Filter blocks with matching transactions
-        let filtered: Vec<&BlockRow> = self.blocks.iter()
+        let filtered: Vec<&BlockRow> = self
+            .blocks
+            .iter()
             .filter(|block| self.count_matching_txs(block) > 0)
             .collect();
 
         // Find selected block index in filtered list
         let sel_idx = if let Some(height) = self.sel_block_height {
-            filtered.iter().position(|b| b.height == height)
+            filtered
+                .iter()
+                .position(|b| b.height == height)
                 .or(if !filtered.is_empty() { Some(0) } else { None })
         } else if !filtered.is_empty() {
             Some(0) // Auto-follow: select first filtered block (newest with matches)
@@ -296,7 +280,8 @@ impl App {
             self.blocks.iter().map(|b| b.height).collect()
         } else {
             // Filter active - navigate only through blocks with matching transactions
-            self.blocks.iter()
+            self.blocks
+                .iter()
                 .filter(|block| self.count_matching_txs(block) > 0)
                 .map(|b| b.height)
                 .collect()
@@ -316,10 +301,12 @@ impl App {
         })
     }
 
-    pub fn txs(&self)->(Vec<TxLite>, usize, usize) {
+    pub fn txs(&self) -> (Vec<TxLite>, usize, usize) {
         if let Some(b) = self.current_block() {
             let total = b.transactions.len();
-            let filtered: Vec<TxLite> = b.transactions.iter()
+            let filtered: Vec<TxLite> = b
+                .transactions
+                .iter()
                 .filter(|tx| {
                     // Apply owned-only filter first (if active)
                     if self.owned_only_filter && !self.is_owned_tx(tx) {
@@ -343,19 +330,74 @@ impl App {
         }
     }
 
-    pub fn details(&self)->&str {
+    pub fn details(&self) -> &str {
         &self.details
     }
-    pub fn details_scroll(&self)->u16 { self.details_scroll }
-    pub fn input_mode(&self)->InputMode { self.input_mode }
-    pub fn filter_query(&self)->&str { &self.filter_query }
-    pub fn owned_only_filter(&self)->bool { self.owned_only_filter }
+    pub fn details_scroll(&self) -> u16 {
+        self.details_scroll
+    }
+    pub fn input_mode(&self) -> InputMode {
+        self.input_mode
+    }
+    pub fn filter_query(&self) -> &str {
+        &self.filter_query
+    }
+    pub fn owned_only_filter(&self) -> bool {
+        self.owned_only_filter
+    }
     #[allow(dead_code)]
-    pub fn owned_accounts(&self)->&HashSet<String> { &self.owned_accounts }
-    pub fn debug_log(&self)->&[String] { &self.debug_log }
-    pub fn debug_visible(&self)->bool { self.debug_visible }
-    pub fn details_fullscreen(&self)->bool { self.details_fullscreen }
-    pub fn loading_block(&self)->Option<u64> { self.loading_block }
+    pub fn owned_accounts(&self) -> &HashSet<String> {
+        &self.owned_accounts
+    }
+    pub fn debug_log(&self) -> &[String] {
+        &self.debug_log
+    }
+    pub fn debug_visible(&self) -> bool {
+        self.debug_visible
+    }
+    pub fn details_fullscreen(&self) -> bool {
+        self.details_fullscreen
+    }
+    pub fn loading_block(&self) -> Option<u64> {
+        self.loading_block
+    }
+
+    /// Get the active theme (single source of truth for UI colors)
+    pub fn theme(&self) -> &Theme {
+        &self.theme
+    }
+
+    /// Set the active theme (for runtime theme switching)
+    pub fn set_theme(&mut self, theme: Theme) {
+        if self.theme != theme {
+            self.theme = theme;
+            #[cfg(feature = "native")]
+            {
+                self.rat_styles_cache = None; // Invalidate cached styles
+            }
+        }
+    }
+
+    /// Get cached ratatui styles for current theme (computed on first use, invalidated on theme change)
+    #[cfg(feature = "native")]
+    pub fn rat_styles(&mut self) -> rat::Styles {
+        if let Some(ref styles) = self.rat_styles_cache {
+            return *styles;
+        }
+        let styles = rat::styles(&self.theme);
+        self.rat_styles_cache = Some(styles);
+        styles
+    }
+
+    /// Get UI feature flags (controls Web/Tauri enhanced behaviors)
+    pub fn ui_flags(&self) -> UiFlags {
+        self.ui_flags
+    }
+
+    /// Set UI feature flags (for runtime toggling or testing)
+    pub fn set_ui_flags(&mut self, flags: UiFlags) {
+        self.ui_flags = flags;
+    }
 
     /// Set the actual viewport height of details pane (called from UI layer)
     pub fn set_details_viewport_height(&mut self, height: u16) {
@@ -380,10 +422,16 @@ impl App {
     }
 
     // ----- knobs -----
-    pub fn cycle_fps(&mut self){
-        if self.fps_choices.is_empty() { return; }
-        let mut idx = self.fps_choices.iter().position(|&v| v==self.fps).unwrap_or(0);
-        idx = (idx+1)%self.fps_choices.len();
+    pub fn cycle_fps(&mut self) {
+        if self.fps_choices.is_empty() {
+            return;
+        }
+        let mut idx = self
+            .fps_choices
+            .iter()
+            .position(|&v| v == self.fps)
+            .unwrap_or(0);
+        idx = (idx + 1) % self.fps_choices.len();
         self.fps = self.fps_choices[idx];
     }
 
@@ -416,12 +464,12 @@ impl App {
     /// Cache selected block and ±12 blocks around it for context navigation
     fn cache_block_with_context(&mut self, center_height: u64) {
         const CONTEXT_RANGE: i64 = 12;
-        const MAX_TOTAL_CACHED: usize = 50;  // Safety limit
+        const MAX_TOTAL_CACHED: usize = 50; // Safety limit
 
         // Find the center block's index
         let center_idx = match self.find_block_index(Some(center_height)) {
             Some(idx) => idx,
-            None => return,  // Center block not in buffer, can't cache context
+            None => return, // Center block not in buffer, can't cache context
         };
 
         // Cache blocks in range [center - 12, center + 12]
@@ -438,7 +486,9 @@ impl App {
                 self.cached_block_order.push(height);
 
                 // Add to cache
-                if let std::collections::hash_map::Entry::Vacant(e) = self.cached_blocks.entry(height) {
+                if let std::collections::hash_map::Entry::Vacant(e) =
+                    self.cached_blocks.entry(height)
+                {
                     e.insert(block.clone());
                     cached_count += 1;
                 }
@@ -454,8 +504,13 @@ impl App {
         }
 
         if cached_count > 0 {
-            self.log_debug(format!("Cached block #{} with ±{} context ({} new, {} total)",
-                center_height, CONTEXT_RANGE, cached_count, self.cached_blocks.len()));
+            self.log_debug(format!(
+                "Cached block #{} with ±{} context ({} new, {} total)",
+                center_height,
+                CONTEXT_RANGE,
+                cached_count,
+                self.cached_blocks.len()
+            ));
         }
     }
 
@@ -504,14 +559,26 @@ impl App {
     /// Toggle debug panel visibility (Ctrl+D)
     pub fn toggle_debug_panel(&mut self) {
         self.debug_visible = !self.debug_visible;
-        self.log_debug(format!("Debug panel: {}", if self.debug_visible { "visible" } else { "hidden" }));
+        self.log_debug(format!(
+            "Debug panel: {}",
+            if self.debug_visible {
+                "visible"
+            } else {
+                "hidden"
+            }
+        ));
     }
 
     /// Toggle details fullscreen mode (Spacebar when details pane focused)
     pub fn toggle_details_fullscreen(&mut self) {
-        if self.pane == 2 {  // Only toggle when details pane is focused
+        if self.pane == 2 {
+            // Only toggle when details pane is focused
             self.details_fullscreen = !self.details_fullscreen;
-            let mode = if self.details_fullscreen { "fullscreen" } else { "normal" };
+            let mode = if self.details_fullscreen {
+                "fullscreen"
+            } else {
+                "normal"
+            };
             self.log_debug(format!("Details view: {mode}"));
         }
     }
@@ -519,9 +586,9 @@ impl App {
     /// Return to auto-follow mode (track newest block)
     pub fn return_to_auto_follow(&mut self) {
         let old_height = self.sel_block_height;
-        self.manual_block_nav = false;
-        self.sel_block_height = None;  // None = auto-follow newest
-        self.sel_tx = 0;  // Reset to first tx
+        self.follow_blocks_latest = true; // Re-enable auto-follow mode
+        self.sel_block_height = None; // None = auto-follow newest
+        self.sel_tx = 0; // Reset to first tx
         if !self.blocks.is_empty() {
             self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
             self.log_debug(format!("[USER_ACTION] Return to AUTO-FOLLOW mode (Home key pressed), was locked to height={old_height:?}"));
@@ -551,13 +618,13 @@ impl App {
         self.filter_query.clear();
         self.filter_compiled = CompiledFilter::default();
         self.input_mode = InputMode::Normal;
-        self.validate_and_refresh_tx(BlockChangeReason::FilterChange);  // Try to preserve tx
+        self.validate_and_refresh_tx(BlockChangeReason::FilterChange); // Try to preserve tx
     }
 
     pub fn apply_filter(&mut self) {
         self.filter_compiled = compile_filter(&self.filter_query);
         self.input_mode = InputMode::Normal;
-        self.validate_and_refresh_tx(BlockChangeReason::FilterChange);  // Try to preserve tx
+        self.validate_and_refresh_tx(BlockChangeReason::FilterChange); // Try to preserve tx
     }
 
     pub fn filter_add_char(&mut self, ch: char) {
@@ -569,54 +636,78 @@ impl App {
     }
 
     // ----- copy functionality -----
+    /// Get copy content for the currently focused pane.
+    ///
+    /// Delegates to `copy_api` for consistent behavior across all targets.
     pub fn get_copy_content(&self) -> String {
-        match self.pane {
-            0 => self.copy_block_info(),
-            1 => self.copy_tx_hash(),
-            2 => self.details().to_string(),
-            _ => String::new(),
-        }
-    }
-
-    fn copy_block_info(&self) -> String {
-        if let Some(block) = self.current_block() {
-            format!("#{} | {}", block.height, block.hash)
-        } else {
-            String::new()
-        }
-    }
-
-    fn copy_tx_hash(&self) -> String {
-        if self.current_block().is_some() {
-            let (filtered_txs, _, _) = self.txs();
-            if let Some(tx) = filtered_txs.get(self.sel_tx) {
-                // If we have signer/receiver, format as "signer → receiver | hash"
-                if let (Some(signer), Some(receiver)) = (&tx.signer_id, &tx.receiver_id) {
-                    format!("{} → {} | {}", signer, receiver, tx.hash)
-                } else {
-                    tx.hash.clone()
-                }
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        }
+        crate::copy_api::current_text(self).unwrap_or_default()
     }
 
     // ----- selection / scrolling -----
     /// Move focus to next pane (circular: 0→1→2→0)
-    pub fn next_pane(&mut self){
+    pub fn next_pane(&mut self) {
         self.pane = (self.pane + 1) % 3;
         self.log_debug(format!("Tab -> pane={}", self.pane));
     }
 
     /// Move focus to previous pane (circular: 2→1→0→2)
-    pub fn prev_pane(&mut self){
+    pub fn prev_pane(&mut self) {
         // Backward navigation: subtract 1 with wrap-around
         // (pane - 1 + 3) % 3 ensures we don't underflow (e.g., 0-1 = -1)
         self.pane = (self.pane + 3 - 1) % 3;
         self.log_debug(format!("BackTab -> pane={}", self.pane));
+    }
+
+    /// Set pane directly (used by deep link router)
+    pub fn set_pane_direct(&mut self, pane: usize) {
+        if pane < 3 {
+            self.pane = pane;
+            self.log_debug(format!("DeepLink -> pane={}", self.pane));
+        }
+    }
+
+    /// Apply a deep link route to the current app state
+    ///
+    /// This method maps deep link routes to the existing explorer UI by:
+    /// - Setting the appropriate pane focus
+    /// - Applying filters to match the route target
+    ///
+    /// Example routes:
+    /// - `Tx{hash}` → Focus transactions pane, filter to hash
+    /// - `Block{height}` → Focus blocks pane, filter to height
+    /// - `Account{id}` → Focus transactions pane, filter to account
+    pub fn apply_route(&mut self, route: &crate::router::Route) {
+        use crate::router::{Route, RouteV1};
+
+        match route {
+            Route::V1(RouteV1::Tx { hash }) => {
+                // Focus transactions pane and filter to the specific hash
+                self.set_pane_direct(1);
+                self.filter_query = hash.clone();
+                self.apply_filter();
+                self.log_debug(format!("Route: tx/{}", hash));
+            }
+            Route::V1(RouteV1::Block { height }) => {
+                // Focus blocks pane and filter to the specific height
+                self.set_pane_direct(0);
+                self.filter_query = format!("height:{}", height);
+                self.apply_filter();
+                self.log_debug(format!("Route: block/{}", height));
+            }
+            Route::V1(RouteV1::Account { id }) => {
+                // Focus transactions pane and filter to the account
+                self.set_pane_direct(1);
+                self.filter_query = format!("acct:{}", id);
+                self.apply_filter();
+                self.log_debug(format!("Route: account/{}", id));
+            }
+            Route::V1(RouteV1::Home) => {
+                // Clear filter and return to auto-follow mode
+                self.clear_filter();
+                self.return_to_auto_follow();
+                self.log_debug("Route: home".to_string());
+            }
+        }
     }
 
     /// Refresh tx details if current selection is still valid, otherwise reset
@@ -653,10 +744,14 @@ impl App {
     }
 
     /// Handle Up arrow key - behavior depends on which pane is focused
-    pub fn up(&mut self){
+    pub fn up(&mut self) {
         match self.pane {
-            0 => {  // Blocks pane: navigate to previous block (newer)
-                self.log_debug(format!("[USER_NAV_UP] manual_nav={}, sel_height={:?}", self.manual_block_nav, self.sel_block_height));
+            0 => {
+                // Blocks pane: navigate to previous block (newer)
+                self.log_debug(format!(
+                    "[USER_NAV_UP] follow_latest={}, sel_height={:?}",
+                    self.follow_blocks_latest, self.sel_block_height
+                ));
 
                 // Get the navigation list (respects filter)
                 let nav_list = self.get_navigation_list();
@@ -673,7 +768,7 @@ impl App {
                         // This shouldn't happen with auto-lock, but handle gracefully
                         let h = nav_list[0];
                         self.sel_block_height = Some(h);
-                        self.manual_block_nav = true;
+                        self.follow_blocks_latest = false; // User navigation disables auto-follow
                         self.cache_block_with_context(h);
                         self.log_debug(format!("[USER_NAV_UP] edge case lock to #{h}"));
                         return;
@@ -687,7 +782,7 @@ impl App {
                         // Only navigate if target block is available
                         if self.is_block_available(new_height) {
                             self.sel_block_height = Some(new_height);
-                            self.manual_block_nav = true;
+                            self.follow_blocks_latest = false; // User navigation disables auto-follow
                             self.details_scroll = 0;
                             self.cache_block_with_context(new_height);
                             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
@@ -702,14 +797,17 @@ impl App {
                     // Current selection not in navigation list (filtered out), jump to newest
                     let new_height = nav_list[0];
                     self.sel_block_height = Some(new_height);
-                    self.manual_block_nav = true;
+                    self.follow_blocks_latest = false; // User navigation disables auto-follow
                     self.details_scroll = 0;
                     self.cache_block_with_context(new_height);
                     self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
-                    self.log_debug(format!("Blocks UP -> not in list, jump to newest #{new_height}"));
+                    self.log_debug(format!(
+                        "Blocks UP -> not in list, jump to newest #{new_height}"
+                    ));
                 }
             }
-            1 => {  // Tx pane: navigate to previous transaction
+            1 => {
+                // Tx pane: navigate to previous transaction
                 if self.sel_tx > 0 {
                     self.sel_tx -= 1;
                     self.details_scroll = 0;
@@ -717,17 +815,22 @@ impl App {
                     self.log_debug(format!("Tx UP, sel={}", self.sel_tx));
                 }
             }
-            2 => {  // Details pane: scroll up
+            2 => {
+                // Details pane: scroll up
                 self.scroll_details(-1);
             }
             _ => {}
         }
     }
     /// Handle Down arrow key - behavior depends on which pane is focused
-    pub fn down(&mut self){
+    pub fn down(&mut self) {
         match self.pane {
-            0 => {  // Blocks pane: navigate to next block (older)
-                self.log_debug(format!("[USER_NAV_DOWN] manual_nav={}, sel_height={:?}", self.manual_block_nav, self.sel_block_height));
+            0 => {
+                // Blocks pane: navigate to next block (older)
+                self.log_debug(format!(
+                    "[USER_NAV_DOWN] follow_latest={}, sel_height={:?}",
+                    self.follow_blocks_latest, self.sel_block_height
+                ));
 
                 // Get the navigation list (respects filter)
                 let nav_list = self.get_navigation_list();
@@ -747,15 +850,17 @@ impl App {
                             // Move to next older block
                             let next_h = nav_list[1];
                             self.sel_block_height = Some(next_h);
-                            self.manual_block_nav = true;
+                            self.follow_blocks_latest = false; // User navigation disables auto-follow
                             self.details_scroll = 0;
                             self.cache_block_with_context(next_h);
                             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
-                            self.log_debug(format!("[USER_NAV_DOWN] first press, move to #{next_h}"));
+                            self.log_debug(format!(
+                                "[USER_NAV_DOWN] first press, move to #{next_h}"
+                            ));
                         } else {
                             // Only one block, just lock to it
                             self.sel_block_height = Some(h);
-                            self.manual_block_nav = true;
+                            self.follow_blocks_latest = false; // User navigation disables auto-follow
                             self.cache_block_with_context(h);
                             self.log_debug(format!("Blocks DOWN -> only one block, lock to #{h}"));
                         }
@@ -770,7 +875,7 @@ impl App {
                         // Only navigate if target block is available
                         if self.is_block_available(new_height) {
                             self.sel_block_height = Some(new_height);
-                            self.manual_block_nav = true;
+                            self.follow_blocks_latest = false; // User navigation disables auto-follow
                             self.details_scroll = 0;
                             self.cache_block_with_context(new_height);
                             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
@@ -785,14 +890,17 @@ impl App {
                     // Current selection not in navigation list (filtered out), jump to newest
                     let new_height = nav_list[0];
                     self.sel_block_height = Some(new_height);
-                    self.manual_block_nav = true;
+                    self.follow_blocks_latest = false; // User navigation disables auto-follow
                     self.details_scroll = 0;
                     self.cache_block_with_context(new_height);
                     self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
-                    self.log_debug(format!("Blocks DOWN -> not in list, jump to newest #{new_height}"));
+                    self.log_debug(format!(
+                        "Blocks DOWN -> not in list, jump to newest #{new_height}"
+                    ));
                 }
             }
-            1 => {  // Tx pane: navigate to next transaction
+            1 => {
+                // Tx pane: navigate to next transaction
                 let (txs, _, _) = self.txs();
                 if self.sel_tx + 1 < txs.len() {
                     self.sel_tx += 1;
@@ -801,10 +909,35 @@ impl App {
                     self.log_debug(format!("Tx DOWN, sel={}", self.sel_tx));
                 }
             }
-            2 => {  // Details pane: scroll down
+            2 => {
+                // Details pane: scroll down
                 self.scroll_details(1);
             }
             _ => {}
+        }
+    }
+
+    /// Select a block by row index (for mouse mapping)
+    pub fn select_block_row(&mut self, idx: usize) {
+        let nav_list = self.get_navigation_list();
+        if let Some(&height) = nav_list.get(idx) {
+            self.sel_block_height = Some(height);
+            self.follow_blocks_latest = false; // User interaction disables auto-follow
+            self.details_scroll = 0;
+            self.cache_block_with_context(height);
+            self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
+            self.log_debug(format!("Mouse select block #{height} (idx {idx})"));
+        }
+    }
+
+    /// Select a transaction by row index (for mouse mapping)
+    pub fn select_tx_row(&mut self, idx: usize) {
+        let (txs, _, _) = self.txs();
+        if idx < txs.len() {
+            self.sel_tx = idx;
+            self.details_scroll = 0;
+            self.select_tx();
+            self.log_debug(format!("Mouse select tx (idx {idx})"));
         }
     }
 
@@ -818,8 +951,8 @@ impl App {
                     let current_idx = self.find_block_index(self.sel_block_height).unwrap_or(0);
 
                     if current_idx != 0 {
-                        self.sel_block_height = Some(newest_height);  // Lock to newest
-                        self.manual_block_nav = true;  // Enter manual mode
+                        self.sel_block_height = Some(newest_height); // Lock to newest
+                        self.follow_blocks_latest = false; // User navigation disables auto-follow
                         self.details_scroll = 0;
                         self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                         self.log_debug(format!("Left -> jump to newest #{newest_height}"));
@@ -856,8 +989,8 @@ impl App {
 
                 if new_idx != current_idx && !self.blocks.is_empty() {
                     let new_height = self.blocks[new_idx].height;
-                    self.sel_block_height = Some(new_height);  // Lock to specific height
-                    self.manual_block_nav = true;  // Enter manual mode
+                    self.sel_block_height = Some(new_height); // Lock to specific height
+                    self.follow_blocks_latest = false; // User navigation disables auto-follow
                     self.details_scroll = 0;
                     self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                     self.log_debug(format!("Right -> paginate to block #{new_height}"));
@@ -883,18 +1016,30 @@ impl App {
         }
     }
 
-    pub fn page_up(&mut self, page:u16){ if self.pane==2 { self.scroll_details(-(page as i32)); } }
-    pub fn page_down(&mut self, page:u16){ if self.pane==2 { self.scroll_details(page as i32); } }
-    pub fn home(&mut self){ if self.pane==2 { self.details_scroll = 0; } }
-    pub fn end(&mut self){
-        if self.pane==2 {
+    pub fn page_up(&mut self, page: u16) {
+        if self.pane == 2 {
+            self.scroll_details(-(page as i32));
+        }
+    }
+    pub fn page_down(&mut self, page: u16) {
+        if self.pane == 2 {
+            self.scroll_details(page as i32);
+        }
+    }
+    pub fn home(&mut self) {
+        if self.pane == 2 {
+            self.details_scroll = 0;
+        }
+    }
+    pub fn end(&mut self) {
+        if self.pane == 2 {
             // Jump to bottom (clamped to actual content height)
             let content_lines = self.details.lines().count() as u16;
-            self.details_scroll = content_lines.saturating_sub(15);  // ~typical viewport size
+            self.details_scroll = content_lines.saturating_sub(15); // ~typical viewport size
         }
     }
 
-    fn scroll_details(&mut self, delta:i32){
+    fn scroll_details(&mut self, delta: i32) {
         let cur = self.details_scroll as i32;
 
         // Calculate actual content height for max scroll
@@ -904,6 +1049,24 @@ impl App {
 
         let next = (cur + delta).max(0).min(max_scroll as i32);
         self.details_scroll = next as u16;
+    }
+
+    /// Generic line scrolling based on current focused pane (for wheel events).
+    /// Positive delta = down/next, negative delta = up/prev.
+    pub fn scroll_lines(&mut self, delta: i32) {
+        if delta == 0 {
+            return;
+        }
+
+        // Call up()/down() repeatedly to leverage existing navigation logic
+        let steps = delta.abs();
+        for _ in 0..steps {
+            if delta > 0 {
+                self.down();
+            } else {
+                self.up();
+            }
+        }
     }
 
     /// Request archival fetch for a block that's not in buffer or cache
@@ -947,9 +1110,10 @@ impl App {
 
                 // Format actions with human-readable gas/deposits
                 if let Some(ref actions) = tx.actions {
-                    let formatted_actions: Vec<serde_json::Value> = actions.iter().map(|action| {
-                        format_action(action)
-                    }).collect();
+                    let formatted_actions: Vec<serde_json::Value> = actions
+                        .iter()
+                        .map(|action| crate::copy_payload::format_action(action))
+                        .collect();
                     pretty_json["actions"] = json!(formatted_actions);
                 }
 
@@ -959,20 +1123,23 @@ impl App {
     }
 
     // ----- events -----
-    pub fn on_event(&mut self, ev:AppEvent) {
+    pub fn on_event(&mut self, ev: AppEvent) {
         match ev {
             AppEvent::Quit => self.quit = true,
-            AppEvent::FromWs(WsPayload::Block{data}) => {
-                self.push_block(BlockRow{
+            AppEvent::FromWs(WsPayload::Block { data }) => {
+                self.push_block(BlockRow {
                     height: data,
                     hash: "".into(),
                     timestamp: 0,
                     tx_count: 0,
                     when: "".into(),
-                    transactions: vec![]
+                    transactions: vec![],
                 });
             }
-            AppEvent::FromWs(WsPayload::Tx{identifier:_, data}) => {
+            AppEvent::FromWs(WsPayload::Tx {
+                identifier: _,
+                data,
+            }) => {
                 if let Some(t) = data {
                     // For WS summary, show pretty-formatted JSON
                     let raw = serde_json::to_value(&t).unwrap_or(serde_json::json!({}));
@@ -981,27 +1148,36 @@ impl App {
                 }
             }
             AppEvent::NewBlock(b) => {
-                log::info!("📥 App received NewBlock event - height: {}, txs: {}", b.height, b.tx_count);
+                log::info!(
+                    "📥 App received NewBlock event - height: {}, txs: {}",
+                    b.height,
+                    b.tx_count
+                );
                 // Check if this block was being fetched from archival
                 if self.loading_block == Some(b.height) {
-                    self.loading_block = None;  // Clear loading state
+                    self.loading_block = None; // Clear loading state
                 }
                 self.push_block(b);
             }
         }
     }
 
-    fn push_block(&mut self, b:BlockRow){
+    fn push_block(&mut self, b: BlockRow) {
         // Compute owned count for this block before inserting
         let owned_count = self.count_owned_txs(&b.transactions);
         let height = b.height;
 
         // Log state BEFORE push
-        self.log_debug(format!("[PUSH_START] Block #{}, manual_nav={}, sel_height={:?}, blocks_count={}",
-            height, self.manual_block_nav, self.sel_block_height, self.blocks.len()));
+        self.log_debug(format!(
+            "[PUSH_START] Block #{}, follow_latest={}, sel_height={:?}, blocks_count={}",
+            height,
+            self.follow_blocks_latest,
+            self.sel_block_height,
+            self.blocks.len()
+        ));
 
         self.blocks.insert(0, b);
-        if self.blocks.len()>self.keep_blocks {
+        if self.blocks.len() > self.keep_blocks {
             // Remove oldest block and its count
             if let Some(old_block) = self.blocks.pop() {
                 self.owned_counts.remove(&old_block.height);
@@ -1014,60 +1190,38 @@ impl App {
         }
 
         // Height-based selection behavior
-        if !self.manual_block_nav {
-            // Auto-follow mode: always track newest block (index 0)
+        if self.follow_blocks_latest {
+            // Auto-follow mode: always jump to newest matching block
             if self.blocks.len() == 1 {
                 // First block: select it and reset tx
-                self.sel_block_height = None;  // None = auto-follow newest
+                self.sel_block_height = None; // None = auto-follow newest
                 self.sel_tx = 0;
                 self.select_tx();
-
-                // Auto-lock if this block has matching transactions (provides stability)
-                if self.count_matching_txs(&self.blocks[0]) > 0 {
-                    self.sel_block_height = Some(height);
-                    self.manual_block_nav = true;
-                    self.log_debug(format!("[AUTO_LOCK] Block #{} arr, FIRST MATCH, auto-locked -> manual_nav=true, sel_height={:?}", height, self.sel_block_height));
-                } else {
-                    self.log_debug(format!("[AUTO_FOLLOW] Block #{height} arr, FIRST block, auto-follow ON (no matches) -> manual_nav=false, sel_height=None"));
-                }
+                self.log_debug(format!(
+                    "[AUTO_FOLLOW] Block #{height} arr, FIRST block, staying in follow-latest mode"
+                ));
             } else {
-                // Subsequent blocks: check if we should auto-lock to first matching block
-                let current_matches = self.current_block()
-                    .map(|b| self.count_matching_txs(b))
-                    .unwrap_or(0);
-                let new_matches = self.count_matching_txs(&self.blocks[0]);
-
-                self.log_debug(format!("[AUTO_FOLLOW_CHECK] Block #{}, cur_matches={}, new_matches={}, sel_height={:?}",
-                    height, current_matches, new_matches, self.sel_block_height));
-
-                if current_matches == 0 && new_matches > 0 {
-                    // Switching from no matches to has matches - auto-lock for stability
-                    self.sel_block_height = Some(height);
-                    self.manual_block_nav = true;
-                    self.sel_tx = 0;
-                    self.select_tx();
-                    self.log_debug(format!("[AUTO_LOCK] Block #{} arr, FIRST MATCH, auto-locked -> manual_nav=true, sel_height={:?}", height, self.sel_block_height));
-                } else {
-                    // Continue auto-follow
-                    let old_sel_height = self.sel_block_height;
-                    self.sel_block_height = None;
-                    self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
-                    self.log_debug(format!("[AUTO_FOLLOW] Block #{height} arr, continuing auto-follow, cur_matches={current_matches}, new_matches={new_matches}, sel_height: {old_sel_height:?} -> None"));
-                }
+                // Continue auto-follow (no auto-lock!)
+                let old_sel_height = self.sel_block_height;
+                self.sel_block_height = None; // Always jump to newest
+                self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
+                self.log_debug(format!("[AUTO_FOLLOW] Block #{height} arr, jumping to newest, sel_height: {old_sel_height:?} -> None"));
             }
         } else {
             // Manual mode: maintain locked block height (block may be in cache if aged out)
             if let Some(locked_height) = self.sel_block_height {
                 if self.find_block_index(Some(locked_height)).is_some() {
                     // Block still in main buffer
-                    self.log_debug(format!("Block #{height} arr, MANUAL mode locked to #{locked_height}"));
+                    self.log_debug(format!(
+                        "Block #{height} arr, MANUAL mode locked to #{locked_height}"
+                    ));
                 } else if self.cached_blocks.contains_key(&locked_height) {
                     // Block aged out but available in cache
                     self.log_debug(format!("[MANUAL_CACHED] Block #{height} arr, MANUAL mode viewing cached block #{locked_height}"));
                 } else {
                     // Block not in buffer or cache - shouldn't happen, but handle gracefully
-                    self.log_debug(format!("[FALLBACK] Block #{height} arr, WARNING: locked block #{locked_height} not found, FORCING auto-follow -> manual_nav=false, sel_height=None"));
-                    self.manual_block_nav = false;
+                    self.log_debug(format!("[FALLBACK] Block #{height} arr, WARNING: locked block #{locked_height} not found, FORCING auto-follow"));
+                    self.follow_blocks_latest = true; // Return to auto-follow mode
                     self.sel_block_height = None;
                     self.sel_tx = 0;
                     self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
@@ -1197,8 +1351,8 @@ impl App {
         // Navigate to the mark's location
         if let Some(height) = mark.height {
             if self.blocks.iter().any(|b| b.height == height) {
-                self.sel_block_height = Some(height);  // Lock to specific block height
-                self.manual_block_nav = true;  // Jumping to mark locks the selection
+                self.sel_block_height = Some(height); // Lock to specific block height
+                self.follow_blocks_latest = false; // Jumping to mark disables auto-follow
                 self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
             }
         }

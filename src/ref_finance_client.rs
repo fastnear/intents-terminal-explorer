@@ -2,11 +2,11 @@
 // Polls v2.ref-finance.near contract for real-time pool state
 
 use anyhow::{Context, Result};
+use futures_util::future;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
 use tokio::time;
-use futures_util::future;
 
 use crate::arb_engine::PoolInfo;
 
@@ -70,7 +70,7 @@ impl RefFinanceClient {
 
     /// Call view function on Ref Finance contract
     async fn view_function(&self, method_name: &str, args: serde_json::Value) -> Result<Vec<u8>> {
-        use base64::{Engine as _, engine::general_purpose};
+        use base64::{engine::general_purpose, Engine as _};
         let args_json = serde_json::to_string(&args).unwrap();
         let args_base64 = general_purpose::STANDARD.encode(args_json.as_bytes());
 
@@ -87,7 +87,8 @@ impl RefFinanceClient {
             },
         };
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&self.rpc_url)
             .json(&request)
             .send()
@@ -106,63 +107,77 @@ impl RefFinanceClient {
     pub async fn get_number_of_pools(&self) -> Result<u64> {
         let result = self.view_function("get_number_of_pools", json!({})).await?;
         let result_str = String::from_utf8(result).context("Invalid UTF-8 in response")?;
-        let num_pools: u64 = result_str.trim_matches('"').parse()
+        let num_pools: u64 = result_str
+            .trim_matches('"')
+            .parse()
             .context("Failed to parse pool count")?;
         Ok(num_pools)
     }
 
     /// Get pools by range
     pub async fn get_pools(&self, from_index: u64, limit: u64) -> Result<Vec<PoolInfo>> {
-        let result = self.view_function(
-            "get_pools",
-            json!({
-                "from_index": from_index,
-                "limit": limit
-            })
-        ).await?;
+        let result = self
+            .view_function(
+                "get_pools",
+                json!({
+                    "from_index": from_index,
+                    "limit": limit
+                }),
+            )
+            .await?;
 
         let result_str = String::from_utf8(result).context("Invalid UTF-8 in response")?;
-        let pools: Vec<RefPoolInfo> = serde_json::from_str(&result_str)
-            .context("Failed to parse pools JSON")?;
+        let pools: Vec<RefPoolInfo> =
+            serde_json::from_str(&result_str).context("Failed to parse pools JSON")?;
 
         // Convert to our PoolInfo format
-        Ok(pools.into_iter().enumerate().map(|(idx, p)| {
-            PoolInfo {
+        Ok(pools
+            .into_iter()
+            .enumerate()
+            .map(|(idx, p)| PoolInfo {
                 pool_id: from_index + idx as u64,
                 token_account_ids: p.token_account_ids,
-                amounts: p.amounts.into_iter().map(|s| {
-                    s.trim_matches('"').parse::<u128>().unwrap_or(0)
-                }).collect(),
+                amounts: p
+                    .amounts
+                    .into_iter()
+                    .map(|s| s.trim_matches('"').parse::<u128>().unwrap_or(0))
+                    .collect(),
                 total_fee: p.total_fee,
-                shares_total_supply: p.shares_total_supply
+                shares_total_supply: p
+                    .shares_total_supply
                     .trim_matches('"')
                     .parse::<u128>()
                     .unwrap_or(0),
-            }
-        }).collect())
+            })
+            .collect())
     }
 
     /// Get specific pool by ID
     pub async fn get_pool(&self, pool_id: u64) -> Result<PoolInfo> {
-        let result = self.view_function(
-            "get_pool",
-            json!({
-                "pool_id": pool_id
-            })
-        ).await?;
+        let result = self
+            .view_function(
+                "get_pool",
+                json!({
+                    "pool_id": pool_id
+                }),
+            )
+            .await?;
 
         let result_str = String::from_utf8(result).context("Invalid UTF-8 in response")?;
-        let pool: RefPoolInfo = serde_json::from_str(&result_str)
-            .context("Failed to parse pool JSON")?;
+        let pool: RefPoolInfo =
+            serde_json::from_str(&result_str).context("Failed to parse pool JSON")?;
 
         Ok(PoolInfo {
             pool_id,
             token_account_ids: pool.token_account_ids,
-            amounts: pool.amounts.into_iter().map(|s| {
-                s.trim_matches('"').parse::<u128>().unwrap_or(0)
-            }).collect(),
+            amounts: pool
+                .amounts
+                .into_iter()
+                .map(|s| s.trim_matches('"').parse::<u128>().unwrap_or(0))
+                .collect(),
             total_fee: pool.total_fee,
-            shares_total_supply: pool.shares_total_supply
+            shares_total_supply: pool
+                .shares_total_supply
                 .trim_matches('"')
                 .parse::<u128>()
                 .unwrap_or(0),
@@ -170,14 +185,19 @@ impl RefFinanceClient {
     }
 
     /// Poll specific pools continuously and yield updates
-    pub async fn poll_pools(&self, pool_ids: Vec<u64>, mut callback: impl FnMut(PoolInfo)) -> Result<()> {
+    pub async fn poll_pools(
+        &self,
+        pool_ids: Vec<u64>,
+        mut callback: impl FnMut(PoolInfo),
+    ) -> Result<()> {
         let mut interval = time::interval(self.poll_interval);
 
         loop {
             interval.tick().await;
 
             // Fetch all pools concurrently
-            let futures: Vec<_> = pool_ids.iter()
+            let futures: Vec<_> = pool_ids
+                .iter()
                 .map(|&pool_id| self.get_pool(pool_id))
                 .collect();
 
@@ -203,8 +223,9 @@ impl RefFinanceClient {
 
             for pool in pools {
                 // Filter for NEAR pairs with decent liquidity
-                if pool.token_account_ids.iter().any(|t| t.contains("near")) &&
-                   pool.liquidity_usd() > 1000.0 {
+                if pool.token_account_ids.iter().any(|t| t.contains("near"))
+                    && pool.liquidity_usd() > 1000.0
+                {
                     interesting_pools.push(pool.pool_id);
                 }
             }
@@ -244,7 +265,8 @@ mod tests {
         assert!(!pools.is_empty());
 
         for pool in pools {
-            println!("Pool {}: {:?} <-> {:?}",
+            println!(
+                "Pool {}: {:?} <-> {:?}",
                 pool.pool_id,
                 pool.token_account_ids.get(0),
                 pool.token_account_ids.get(1)

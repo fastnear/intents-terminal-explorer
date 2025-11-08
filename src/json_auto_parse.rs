@@ -32,22 +32,18 @@ pub fn auto_parse_nested_json(value: Value, max_depth: usize, current_depth: usi
 
     match value {
         // Handle arrays: recursively process each element
-        Value::Array(arr) => {
-            Value::Array(
-                arr.into_iter()
-                    .map(|v| auto_parse_nested_json(v, max_depth, current_depth + 1))
-                    .collect()
-            )
-        }
+        Value::Array(arr) => Value::Array(
+            arr.into_iter()
+                .map(|v| auto_parse_nested_json(v, max_depth, current_depth + 1))
+                .collect(),
+        ),
 
         // Handle objects: recursively process each value
-        Value::Object(obj) => {
-            Value::Object(
-                obj.into_iter()
-                    .map(|(k, v)| (k, auto_parse_nested_json(v, max_depth, current_depth + 1)))
-                    .collect()
-            )
-        }
+        Value::Object(obj) => Value::Object(
+            obj.into_iter()
+                .map(|(k, v)| (k, auto_parse_nested_json(v, max_depth, current_depth + 1)))
+                .collect(),
+        ),
 
         // Handle strings: detect and parse JSON
         Value::String(s) => {
@@ -126,7 +122,10 @@ mod tests {
         // Real-world case from screenshot: msg field with array of objects
         let input = json!({"msg": "[{\"pool_id\":6518,\"token_in\":\"jambo\"}]"});
         let output = auto_parse_nested_json(input, 5, 0);
-        assert_eq!(output, json!({"msg": [{"pool_id": 6518, "token_in": "jambo"}]}));
+        assert_eq!(
+            output,
+            json!({"msg": [{"pool_id": 6518, "token_in": "jambo"}]})
+        );
     }
 
     #[test]

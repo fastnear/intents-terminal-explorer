@@ -23,18 +23,35 @@
 
 // Core modules (available on all platforms)
 pub mod config;
+pub mod json_auto_parse;
+pub mod json_pretty;
+pub mod json_syntax;
 pub mod types;
 pub mod util_text;
-pub mod json_pretty;
-pub mod json_auto_parse;
 
 // RPC utilities (same direct JSON-RPC implementation for both native and web)
 pub mod rpc_utils;
 
+// Theme system (available on all platforms, with platform-specific helpers)
+pub mod theme;
+
+// csli-style pane frame helper (native-only)
+#[cfg(feature = "native")]
+pub mod pane_frame;
+
 pub mod app;
-pub mod ui;
-pub mod near_args;
 pub mod filter;
+pub mod near_args;
+pub mod ui;
+
+// Deep link router (available on all platforms)
+pub mod router;
+
+// UI feature flags (available on all platforms)
+pub mod flags;
+
+// Debug logging system (available on all platforms)
+pub mod debug;
 
 // History module (has native-only implementation internally)
 pub mod history;
@@ -47,8 +64,8 @@ pub mod clipboard;
 #[cfg(feature = "native")]
 pub mod source_ws;
 
-pub mod source_rpc;
 pub mod archival_fetch;
+pub mod source_rpc;
 
 #[cfg(feature = "native")]
 pub mod credentials;
@@ -59,29 +76,36 @@ pub mod marks;
 // Platform abstraction layer
 pub mod platform;
 
-// Arbitrage engine (native-only for now)
-#[cfg(feature = "native")]
-pub mod arb_engine;
+// Copy functionality (shared across all targets)
+pub mod copy_api;
+pub mod copy_payload;
 
-#[cfg(feature = "native")]
-pub mod ref_finance_client;
+// egui helpers (only available when egui is enabled)
+// Temporarily disabled - needs API updates for egui 0.32
+// #[cfg(feature = "egui-web")]
+// pub mod egui_extra;
 
-#[cfg(feature = "native")]
-pub mod price_discovery;
-
-#[cfg(feature = "native")]
-pub mod arb_config;
-
-#[cfg(feature = "native")]
-pub mod slippage;
-
-#[cfg(feature = "native")]
-pub mod risk_manager;
-
-#[cfg(feature = "native")]
-pub mod execution_engine;
+// Arbitrage engine modules - MOVED to ref-arb-scanner workspace
+// These modules are no longer part of the main crate since ref-arb-scanner
+// has been extracted to a separate workspace member.
+// See: ref-arb-scanner/ directory
+//
+// #[cfg(feature = "native")]
+// pub mod arb_engine;
+// #[cfg(feature = "native")]
+// pub mod ref_finance_client;
+// #[cfg(feature = "native")]
+// pub mod price_discovery;
+// #[cfg(feature = "native")]
+// pub mod arb_config;
+// #[cfg(feature = "native")]
+// pub mod slippage;
+// #[cfg(feature = "native")]
+// pub mod risk_manager;
+// #[cfg(feature = "native")]
+// pub mod execution_engine;
 
 // Re-export commonly used types
 pub use app::{App, InputMode};
-pub use types::{AppEvent, BlockRow, TxLite, Mark};
 pub use config::{Config, Source};
+pub use types::{AppEvent, BlockRow, Mark, TxLite};

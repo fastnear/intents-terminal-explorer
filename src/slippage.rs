@@ -70,10 +70,7 @@ pub fn calculate_max_trade_size(
 
 /// Calculate price impact for a multi-hop swap (2 or 3 pools)
 /// Returns (final_output, total_slippage_pct)
-pub fn calculate_multihop_slippage(
-    pools: &[&PoolInfo],
-    input_amount: f64,
-) -> (f64, f64) {
+pub fn calculate_multihop_slippage(pools: &[&PoolInfo], input_amount: f64) -> (f64, f64) {
     if pools.is_empty() {
         return (0.0, 100.0);
     }

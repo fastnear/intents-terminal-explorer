@@ -1,6 +1,6 @@
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

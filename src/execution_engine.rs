@@ -116,7 +116,10 @@ impl ExecutionEngine {
 
         log::warn!("⚠️  Live execution not yet implemented - would execute:");
         log::warn!("   Trade size: ${:.2}", risk_assessment.max_trade_size);
-        log::warn!("   Expected profit: ${:.2}", opportunity.calculate_profit(risk_assessment.max_trade_size));
+        log::warn!(
+            "   Expected profit: ${:.2}",
+            opportunity.calculate_profit(risk_assessment.max_trade_size)
+        );
 
         Ok(ExecutionResult {
             mode: ExecutionMode::Execute,
@@ -154,7 +157,8 @@ impl ExecutionEngine {
             }
             ArbType::Triangle => {
                 println!("📊 Type: Triangle Arbitrage");
-                println!("🔺 Pools: {} → {} → {}",
+                println!(
+                    "🔺 Pools: {} → {} → {}",
                     opportunity.pool_a,
                     opportunity.pool_b,
                     opportunity.pool_c.unwrap_or(0)
@@ -163,8 +167,12 @@ impl ExecutionEngine {
         }
 
         println!("\n💰 Financial Analysis:");
-        println!("  • Optimal Trade Size: ${:.2} (Kelly criterion)", opportunity.optimal_size());
-        println!("  • Capital Constraint: ${:.2} ✓ (within ${:.0} limit)",
+        println!(
+            "  • Optimal Trade Size: ${:.2} (Kelly criterion)",
+            opportunity.optimal_size()
+        );
+        println!(
+            "  • Capital Constraint: ${:.2} ✓ (within ${:.0} limit)",
             risk_assessment.max_trade_size,
             self.config.max_trade_size()
         );
@@ -172,7 +180,8 @@ impl ExecutionEngine {
         if let Some(result) = execution_result {
             println!("  • Expected Profit: ${:.2}", result.estimated_pnl);
             println!("  • Gas Cost: ${:.2}", result.gas_cost_usd);
-            println!("  • Net Profit: ${:.2} ({:.2}%)",
+            println!(
+                "  • Net Profit: ${:.2} ({:.2}%)",
                 result.net_pnl,
                 (result.net_pnl / risk_assessment.max_trade_size) * 100.0
             );
@@ -180,23 +189,37 @@ impl ExecutionEngine {
 
         println!("\n⚠️  Risk Assessment:");
         println!("  • Confidence: {:.1}%", opportunity.confidence * 100.0);
-        println!("  • Slippage Estimate: {:.2}%{}",
+        println!(
+            "  • Slippage Estimate: {:.2}%{}",
             risk_assessment.estimated_slippage,
-            if risk_assessment.estimated_slippage <= self.config.max_slippage() { " ✓" } else { " ✗" }
+            if risk_assessment.estimated_slippage <= self.config.max_slippage() {
+                " ✓"
+            } else {
+                " ✗"
+            }
         );
-        println!("  • Pool Exposure: {:.1}%{}",
+        println!(
+            "  • Pool Exposure: {:.1}%{}",
             risk_assessment.pool_exposure_pct,
-            if risk_assessment.pool_exposure_pct <= self.config.max_pool_exposure() { " ✓" } else { " ✗" }
+            if risk_assessment.pool_exposure_pct <= self.config.max_pool_exposure() {
+                " ✓"
+            } else {
+                " ✗"
+            }
         );
 
         if !risk_assessment.approved {
-            println!("\n❌ Rejection Reason: {}", risk_assessment.rejection_reason.as_ref().unwrap());
+            println!(
+                "\n❌ Rejection Reason: {}",
+                risk_assessment.rejection_reason.as_ref().unwrap()
+            );
         }
 
         let stats = risk_manager.stats();
         println!("\n📊 Capital Tracker:");
         println!("  • Total Capital: ${:.2}", stats.total_capital);
-        println!("  • Allocated: ${:.2} ({:.1}%)",
+        println!(
+            "  • Allocated: ${:.2} ({:.1}%)",
             stats.allocated_capital,
             (stats.allocated_capital / stats.total_capital) * 100.0
         );

@@ -1,604 +1,684 @@
-# Ratacat Development - Technical Discussion
+# NEARx Development - Architecture & Current Status
 
-## Overview
-Ratacat is a high-performance terminal UI for monitoring NEAR Protocol blockchain transactions in real-time. Built with Ratatui and Rust, it provides a 3-pane dashboard for exploring blocks, transactions, and detailed transaction data with multiple viewing modes.
+## Executive Summary
 
-## Architecture Decisions
+NEARx (formerly Ratacat) is a high-performance NEAR Protocol blockchain transaction viewer with **quad-mode deployment**: Terminal (TUI), Web (WASM), Desktop (Tauri), and Browser Extension integration.
 
-### 1. Dual Data Source Strategy
-We support both WebSocket and RPC polling modes to accommodate different use cases:
+**Current Status (2025-11-07)**:
+- ✅ Native Terminal: Fully functional with mouse toggle, theme system, excellent performance
+- ⚠️ Web Browser: Rendering broken - large blue area instead of UI, WASM errors in console
+- ⚠️ Tauri Desktop: Similar issues to Web (shares WASM/egui pipeline)
+- 🏗️ Theme parity work: Completed but Web/Tauri need rendering pipeline fixes
 
-**WebSocket Mode (Development)**:
-- Real-time push notifications from Node breakout server
-- Hybrid mode: WS notifications trigger RPC fetches for complete block data
-- Network auto-detection based on block height (>100M = mainnet, <100M = testnet)
+---
 
-**RPC Polling Mode (Production)**:
-- Direct NEAR RPC connection with smart catch-up limits
-- Prevents cascade failures during network delays
-- Configurable concurrency for parallel chunk fetching
+## Recent Work: Visual Parity Implementation (2025-11-07)
 
+### Goal
+Align Web and Tauri visual appearance with the TUI's flat, minimal aesthetic.
+
+### Changes Made
+
+#### 1. Enhanced `src/theme.rs::eg::apply()` (egui theme)
+- **Flat panels**: No glossy chrome, minimal shadows
+- **Subtle corner radius**: 4px windows, 3px widgets
+- **Strong focus indicators**: Accent borders on hover, accent-strong on active
+- **Compact spacing**: 8x6px items, 8x4px buttons (matches TUI density)
+- **Selection emphasis**: Proper selection background + accent-strong stroke
+- **State colors**: warn/error colors from theme
+- **Monospace fonts**: System stack for code-like UI elements
+
+**API fixes applied**:
+- `Rounding` → `CornerRadius` (egui 0.32 API)
+- `window_rounding` → `window_corner_radius`
+- `f32` → `u8` for corner radius values
+
+#### 2. Extended `web/theme.css`
+- Added `--radius`, `--stroke`, `--spacing` variables
+- Created `.nx-panel` class for DOM elements (toasts, overlays)
+- Ensures any non-canvas UI elements match egui styling
+
+#### 3. Fixed `src/bin/nearx-web.rs` frame
 ```rust
-// Key design: Auto-detect network to prevent mainnet/testnet mismatches
-fn detect_network_from_height(height: u64) -> &'static str {
-    if height > 100_000_000 { "mainnet" } else { "testnet" }
+// Before:
+.frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
+
+// After:
+.frame(egui::Frame::default())  // Respects theme
+```
+
+### Build Verification
+✅ All 3 targets compile successfully
+✅ All 13 preflight checks pass
+✅ No theme violations detected
+
+---
+
+## Critical Issue: Web/Tauri Rendering Broken
+
+### Symptom
+Large bright blue section dominates screen instead of proper 3-pane TUI layout.
+
+### Evidence
+- Screenshot shows ~70% of window as solid blue
+- Small ratatui content visible in top portion
+- User reported: "WASM-related error in browser dev console"
+
+### Suspected Root Causes
+
+#### 1. egui_ratatui Layout Issues
+The ratatui terminal is being rendered but egui might be:
+- Not allocating enough space for the terminal widget
+- Incorrectly sizing the canvas
+- Failing to paint the terminal texture
+
+#### 2. SoftBackend Initialization
+Current dimensions in `src/bin/nearx-web.rs:64-66`:
+```rust
+let soft_backend = SoftBackend::<EmbeddedGraphics>::new(
+    100,  // width in columns
+    35,   // height in rows
+    // ... fonts
+);
+```
+
+**Problem**: Fixed size (100x35) might not match window size, causing:
+- Clipping/overflow
+- Blank areas filled with default color
+- Layout math mismatch with actual pixels
+
+#### 3. Frame Usage After Theme Changes
+The `Frame::default()` change might interact poorly with egui's layout if:
+- Default frame has padding/margins
+- Inner/outer sizing calculations are wrong
+- CentralPanel isn't expanding to fill window
+
+#### 4. WASM Module Errors (Unreported)
+User mentioned console errors but didn't share details. Could be:
+- Font loading failures
+- Texture allocation failures
+- WebGL context issues
+- Memory limits exceeded
+
+---
+
+## Unified Architecture Proposal
+
+### Vision: Single Core, Multiple Transforms
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Shared Core (Rust)                      │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ • App state (blocks, txs, selection, filter)          │ │
+│  │ • Business logic (filtering, navigation, history)     │ │
+│  │ • Unified Theme (Rgb values, contrast ratios)         │ │
+│  │ • Data layer (RPC, archival fetch)                    │ │
+│  └────────────────────────────────────────────────────────┘ │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+        ┌────────────────┼────────────────┐
+        ▼                ▼                ▼
+┌───────────────┐ ┌──────────────┐ ┌────────────────┐
+│ Native TUI    │ │ Web/Tauri    │ │ Extension      │
+│ Transform     │ │ Transform    │ │ Transform      │
+├───────────────┤ ├──────────────┤ ├────────────────┤
+│ • Crossterm   │ │ • egui       │ │ • Native msg   │
+│ • Ratatui     │ │ • egui_ratatui│ │ • Deep links  │
+│   direct      │ │ • SoftBackend│ │ • Relay        │
+│ • SQLite      │ │ • WebGL      │ │                │
+│ • Mouse opt-in│ │ • Mouse ON   │ │                │
+│ • Theme::rat  │ │ • Theme::eg  │ │                │
+└───────────────┘ └──────────────┘ └────────────────┘
+```
+
+### Core Principles
+
+#### 1. Theme as Single Source of Truth
+**Current State**: ✅ Working well
+```rust
+pub struct Theme {
+    pub bg: Rgb,
+    pub panel: Rgb,
+    pub panel_alt: Rgb,
+    pub text: Rgb,
+    pub accent: Rgb,
+    // ...
 }
 ```
 
-### 2. FPS-Capped Rendering
-Implemented coalesced rendering to prevent UI thrashing:
+**Transform Layer**:
+- `theme::rat` → ratatui `Color::Rgb`
+- `theme::eg` → egui `Color32`
+- `theme.css` → CSS variables
 
+**Missing**: Web/Tauri need better integration with egui visuals.
+
+#### 2. Input as Unified Events
+**Current State**: ⚠️ Partially unified
+- Native: Crossterm events → App methods
+- Web: egui events → App methods
+- Tauri: Same as Web
+
+**Problems**:
+- Mouse handling duplicated between TUI and Web binaries
+- Tab consumption logic duplicated
+- UiFlags partially applied
+
+**Proposal**: Unified input abstraction
 ```rust
-// Target frame budget based on configurable FPS
-let frame_ms = 1000u32.saturating_div(app.fps()) as u64;
-let frame_budget = Duration::from_millis(frame_ms.max(1));
-
-// Only draw when budget elapsed
-if last_frame.elapsed() >= frame_budget {
-    terminal.draw(|f| ui::draw(f, &app))?;
-    last_frame = Instant::now();
-}
-```
-
-**Benefits**:
-- Prevents CPU thrashing during high-frequency updates
-- Maintains responsive input handling via event polling
-- User-controllable FPS at runtime (Ctrl+O cycles 20→30→60)
-
-### 3. Official NEAR Primitives Integration
-We use official NEAR Protocol crates for maximum compatibility:
-
-```rust
-// Human-readable formatting
-use near_gas::NearGas;
-use near_token::NearToken;
-
-pub fn format_gas(gas: u64) -> String {
-    let near_gas = NearGas::from_gas(gas);
-    format!("{}", near_gas)  // "30 TGas"
+pub enum InputEvent {
+    Key { code: KeyCode, modifiers: Modifiers },
+    Mouse { kind: MouseKind, pos: (u16, u16) },
 }
 
-pub fn format_near(yoctonear: u128) -> String {
-    let token = NearToken::from_yoctonear(yoctonear);
-    format!("{}", token)  // "1 NEAR"
-}
-```
-
-**Action Type Coverage**:
-- CreateAccount
-- DeployContract (with code size)
-- FunctionCall (method name, args size, gas, deposit)
-- Transfer (deposit amount)
-- Stake (stake amount, public key)
-- AddKey (public key, access key)
-- DeleteKey (public key)
-- DeleteAccount (beneficiary)
-
-### 4. Vim-Style Jump Marks
-Persistent bookmark system with SQLite write-through caching:
-
-```rust
-pub struct JumpMarks {
-    marks: Vec<Mark>,        // In-memory cache
-    cursor: usize,           // Current position
-    history: History,        // SQLite persistence layer
-}
-
-// Write-through: Updates both memory and DB
-pub async fn add_or_replace(&mut self, label: String, ...) {
-    // Update in-memory
-    self.marks.push(mark);
-    // Write-through to SQLite
-    self.history.put_mark(persisted).await;
-}
-```
-
-**Auto-labels**: Numeric (1-9, 0) then alphabetic (a-z) for quick bookmarking.
-
-### 5. Transaction Filtering
-Powerful query syntax with AND/OR logic:
-
-```
-acct:alice.near              # Match signer OR receiver
-action:FunctionCall          # Match action type
-method:ft_transfer           # Match FunctionCall method name
-raw:some_text                # Search in raw JSON
-```
-
-Combined filters: `acct:alice.near action:Transfer` (Alice sending tokens)
-
-## Technical Challenges & Solutions
-
-### 1. Mainnet/Testnet Mismatch (Critical Bug Fix)
-**Problem**: WebSocket server sending mainnet blocks (168M+), but RPC defaulting to testnet URL, resulting in "0 txs" displayed.
-
-**Root Cause**: Height-based network detection was not implemented initially.
-
-**Solution**:
-```rust
-// Auto-detect network if URL not explicitly set
-let url = if cfg.near_node_url_explicit {
-    cfg.near_node_url.clone()
-} else {
-    let detected_network = detect_network_from_height(height);
-    let auto_url = get_rpc_url_for_network(detected_network);
-    eprintln!("[WS] Auto-detected {} network from block height {}",
-        detected_network, height);
-    auto_url.to_string()
-};
-```
-
-**Impact**: Transactions now display correctly in WebSocket mode.
-
-### 2. Rust Borrow Checker with Filtered Views
-**Challenge**: Maintaining both full transaction list and filtered view while allowing selection.
-
-**Solution**: Store both vectors, use indices for coordination:
-```rust
-pub fn txs(&self) -> (Vec<TxLite>, usize, usize) {
-    if let Some(b) = self.blocks.get(self.sel_block) {
-        let total = b.transactions.len();
-        let filtered: Vec<TxLite> = b.transactions.iter()
-            .filter(|tx| tx_matches_filter(&tx, &self.filter_compiled))
-            .cloned()
-            .collect();
-        (filtered, self.sel_tx, total)
-    } else {
-        (vec![], 0, 0)
+impl App {
+    pub fn handle_input(&mut self, event: InputEvent) -> InputResult {
+        // Unified logic for all targets
+        // Returns commands for platform layer
     }
 }
 ```
 
-### 3. Non-Blocking History Persistence
-**Architecture**: SQLite operations run on dedicated thread to avoid blocking UI.
+**Transform Layer**:
+- Native: `crossterm::Event` → `InputEvent`
+- Web: `egui::Event` → `InputEvent`
 
+#### 3. Rendering as Target-Specific
+**Current State**: ⚠️ Diverging implementations
+
+**Native TUI**:
 ```rust
-// Unbounded channel for async writes
-let (tx, mut rx) = unbounded_channel::<HistoryMsg>();
-
-// Dedicated worker thread
-tokio::spawn(async move {
-    while let Some(msg) = rx.recv().await {
-        // Process DB operations without blocking main thread
-    }
-});
+fn draw(f: &mut Frame, app: &App, marks: &[Mark]) {
+    // Direct ratatui rendering
+    // Full control over layout
+}
 ```
 
-**Benefits**:
-- UI remains responsive during database writes
-- WAL mode enables concurrent reads during writes
-- Graceful degradation if DB operations fail
-
-### 4. Soft-Wrapped Tokens for Terminal Display
-**Problem**: Long base58/base64 strings (transaction hashes, public keys) break terminal layout.
-
-**Solution**: Insert zero-width space characters (ZWSP) for clean line breaking:
+**Web/Tauri**:
 ```rust
-pub fn soft_wrap_tokens(s: &str, max_run: usize) -> String {
-    let mut out = String::with_capacity(s.len() + s.len()/64);
-    let mut run = 0usize;
-    for ch in s.chars() {
-        let token = ch.is_ascii_alphanumeric() || matches!(ch, '+'|'/'|'='|':'|'_'|'-');
-        if token {
-            run += 1;
-            out.push(ch);
-            if run >= max_run { out.push(ZWSP); run = 0; }
-        } else {
-            run = 0;
-            out.push(ch);
+impl eframe::App for RatacatApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // egui layout
+        // ratatui terminal as widget
+        // Limited control
+    }
+}
+```
+
+**Problem**: Two completely different render paths with duplicated UI logic.
+
+**Proposal**: Unified render core with target adapters
+```rust
+pub struct RenderState {
+    pub blocks_area: Rect,
+    pub txs_area: Rect,
+    pub details_area: Rect,
+    pub chrome_height: u16,
+}
+
+pub fn calculate_layout(total: Rect, app: &App) -> RenderState {
+    // Unified layout math
+    // Returns areas for all panes
+}
+
+// Native uses directly:
+pub fn draw_native(f: &mut Frame, state: &RenderState, app: &App) {
+    f.render_widget(blocks_widget, state.blocks_area);
+    // ...
+}
+
+// Web wraps in egui:
+pub fn draw_web(ui: &mut egui::Ui, terminal: &mut Terminal<...>, app: &App) {
+    let state = calculate_layout(terminal.size(), app);
+    terminal.draw(|f| draw_native(f, &state, app));
+    ui.add(terminal.backend_mut());
+}
+```
+
+#### 4. Clipboard as Platform Abstraction
+**Current State**: ✅ Working well
+```rust
+// src/platform/mod.rs
+pub fn copy_to_clipboard(text: &str) -> Result<()> {
+    #[cfg(feature = "native")]
+    return native::copy_to_clipboard(text);
+
+    #[cfg(target_arch = "wasm32")]
+    return web::copy_to_clipboard(text);
+}
+```
+
+**Transform Layer**:
+- Native: copypasta crate
+- Web: JavaScript bridge with 4-tier fallback
+- Tauri: Tauri plugin (highest priority)
+
+---
+
+## Specific Issues to Fix
+
+### 1. Web/Tauri Rendering (Critical)
+
+**Task**: Fix large blue area, make ratatui content fill window
+
+**Investigation Steps**:
+1. Get WASM console errors from user (F12 → Console tab)
+2. Check if SoftBackend is creating correct texture size
+3. Verify egui_ratatui widget is getting full available space
+4. Test with fixed window size vs. responsive sizing
+
+**Potential Fixes**:
+- Make SoftBackend dimensions responsive to window size
+- Use `ui.available_size()` to calculate columns/rows dynamically
+- Ensure CentralPanel has no margins/padding
+- Check if Clear widget is working correctly
+
+**Code Location**: `src/bin/nearx-web.rs:47-82` (RatacatApp::new)
+
+### 2. Dynamic Terminal Sizing (High Priority)
+
+**Current**: Fixed 100x35 columns/rows
+```rust
+let soft_backend = SoftBackend::<EmbeddedGraphics>::new(
+    100,  // Fixed
+    35,   // Fixed
+    // ...
+);
+```
+
+**Needed**: Responsive sizing
+```rust
+fn calculate_terminal_size(window_size: egui::Vec2, font_size: (f32, f32)) -> (u16, u16) {
+    let cols = (window_size.x / font_size.0).floor() as u16;
+    let rows = (window_size.y / font_size.1).floor() as u16;
+    (cols, rows)
+}
+
+// On window resize:
+let (cols, rows) = calculate_terminal_size(ui.available_size(), (9.0, 18.0));
+// Recreate terminal with new size
+```
+
+**Complexity**: SoftBackend might not support dynamic resize
+
+**Alternative**: Use larger fixed size (e.g., 200x60) and let egui scale down
+
+### 3. UiFlags Consistency (Medium Priority)
+
+**Current State**: Flags exist but not consistently applied
+
+```rust
+pub struct UiFlags {
+    pub consume_tab: bool,        // ✅ Applied in Web
+    pub dpr_snap: bool,           // ✅ Applied in Web
+    pub mouse_map: bool,          // ⚠️ Default false, needs testing
+    pub dblclick_details: bool,   // ⚠️ Default false, needs testing
+}
+```
+
+**Target-Specific Defaults** (from `src/flags.rs:18-25`):
+```rust
+#[cfg(target_arch = "wasm32")]
+impl Default for UiFlags {
+    fn default() -> Self {
+        Self {
+            consume_tab: true,
+            dpr_snap: true,
+            mouse_map: true,   // Should be ON for Web/Tauri
+            dblclick_details: true,  // Should be ON for Web/Tauri
         }
     }
-    out
 }
 ```
 
-## Performance Optimizations
+**Issue**: These defaults exist but mouse_map/dblclick_details features might not be fully wired up.
 
-### 1. Parallel Chunk Fetching
-Configurable concurrency for fetching chunk data:
+**Testing Needed**:
+1. Verify mouse click selects panes/rows
+2. Verify double-click toggles details fullscreen
+3. Check if scroll wheel works
 
+### 4. Font Rendering Sharpness (Low Priority)
+
+**Current**: Using embedded_graphics_unicodefonts (9x18 bitmap)
+
+**Observation**: Web might look blurry compared to native terminal
+
+**Options**:
+1. Keep bitmap fonts (current, crisp but retro)
+2. Switch to egui's native text rendering (modern but loses terminal feel)
+3. Hybrid: Use egui text for chrome, ratatui for content
+
+**Decision**: Defer until rendering is working at all
+
+### 5. Theme Application Timing (Medium Priority)
+
+**Current**: Applied once on startup + when theme changes
 ```rust
-let chunk_futures = chunk_hashes.into_iter().map(|hash| {
-    let url = url.to_string();
-    async move { get_chunk(&url, hash, timeout).await }
-});
-
-let chunks = stream::iter(chunk_futures)
-    .buffer_unordered(concurrency)  // Parallel execution
-    .collect::<Vec<_>>()
-    .await;
-```
-
-**Configuration**: `POLL_CHUNK_CONCURRENCY=4` (default)
-
-### 2. Catch-Up Limits
-Prevents cascade failures during network delays:
-
-```rust
-let to_fetch = head_height.saturating_sub(cursor);
-if to_fetch > cfg.poll_max_catchup as u64 {
-    eprintln!("[RPC] Behind by {} blocks, skipping to catch up", to_fetch);
-    cursor = head_height.saturating_sub(cfg.poll_max_catchup as u64);
+let cur_theme = *self.app.borrow().theme();
+if self.last_egui_theme != Some(cur_theme) {
+    nearx::theme::eg::apply(ctx, &cur_theme);
+    self.last_egui_theme = Some(cur_theme);
 }
 ```
 
-**Configuration**: `POLL_MAX_CATCHUP=5` (default)
+**Issue**: Frame background might not update if set before theme applies
 
-### 3. In-Memory Block Window
-Fixed-size rolling buffer to prevent unbounded memory growth:
-
+**Fix**: Apply theme before creating frame, or use theme colors directly in frame construction
 ```rust
-fn push_block(&mut self, b: BlockRow) {
-    self.blocks.insert(0, b);
-    if self.blocks.len() > self.keep_blocks {
-        self.blocks.pop();
-    }
-}
+// Apply theme first
+nearx::theme::eg::apply(ctx, &cur_theme);
+
+// Then create panel with themed background
+egui::CentralPanel::default()
+    .frame(egui::Frame {
+        fill: egui::Color32::from_rgb(
+            cur_theme.bg.0,
+            cur_theme.bg.1,
+            cur_theme.bg.2
+        ),
+        ..Default::default()
+    })
+    .show(ctx, |ui| { /* ... */ });
 ```
-
-**Configuration**: `KEEP_BLOCKS=100` (default)
-
-## Code Quality Observations
-
-### 1. Comprehensive Action Type Support
-All 8 NEAR action types are properly parsed and displayed with human-readable formatting.
-
-### 2. Dual View Modes
-- **PRETTY**: ANSI-colored JSON with formatted gas/deposits
-- **RAW**: Unformatted JSON for debugging/copy-paste
-
-### 3. Clipboard Integration
-Uses `copypasta` crate for cross-platform clipboard support (copy transaction details with `c` key).
-
-### 4. Idiomatic NEAR Types
-Proper use of `near-primitives`, `near-gas`, `near-token` matching official NEAR tooling patterns.
-
-### 5. Error Handling Strategy
-Current approach logs errors but keeps UI responsive:
-
-```rust
-match fetch_block_with_txs(&url, height, timeout, concurrency).await {
-    Ok(row) => {
-        let _ = tx_clone.send(AppEvent::NewBlock(row));
-    }
-    Err(e) => {
-        eprintln!("[WS] RPC fetch failed for block {}: {:?}", height, e);
-        // Fallback: send empty block notification
-        let _ = tx_clone.send(AppEvent::FromWs(WsPayload::Block { data: height }));
-    }
-}
-```
-
-**Future Enhancement**: Add user-facing error notifications/toast system.
-
-## Feature Completeness
-
-### ✅ Implemented Features
-- [x] 3-pane dashboard (Blocks → Transactions → Details)
-- [x] Dual data sources (WebSocket + RPC)
-- [x] Network auto-detection
-- [x] FPS control (runtime adjustable)
-- [x] View mode toggle (PRETTY/RAW)
-- [x] Smooth scrolling with PgUp/PgDn/Home/End
-- [x] Transaction filtering (account, action, method, raw)
-- [x] Jump marks with persistence (m, M, ', [, ])
-- [x] SQLite history with non-blocking writes
-- [x] Human-readable gas/token formatting
-- [x] Clipboard integration
-- [x] Comprehensive action type parsing
-
-### 🚧 Potential Enhancements
-- [ ] Search history (Ctrl+R style)
-- [ ] Export transactions to JSON/CSV
-- [ ] Block/transaction bookmarking with tags
-- [ ] Multi-block comparison view
-- [ ] Gas consumption analytics
-- [ ] Custom color themes
-- [ ] Plugin system for custom analyzers
-
-### 🔧 Technical Debt
-- [ ] Add comprehensive test suite (especially for action parsing)
-- [ ] Formal benchmarking/profiling
-- [ ] Configuration file support (beyond env vars)
-- [ ] Better error recovery for network failures
-- [ ] User-facing status notifications
-
-## Security Considerations
-
-### 1. Parameterized SQL Queries
-All database operations use parameterized queries to prevent SQL injection:
-
-```rust
-let mut stmt = conn.prepare(
-    "INSERT OR REPLACE INTO marks(label, pane, height, tx, when_ms) VALUES(?,?,?,?,?)"
-)?;
-stmt.execute(params![label, pane, height, tx, when_ms])?;
-```
-
-### 2. Network Request Timeouts
-All RPC requests have configurable timeouts to prevent hanging:
-
-```rust
-let client = reqwest::Client::builder()
-    .timeout(Duration::from_millis(timeout_ms))
-    .build()?;
-```
-
-**Configuration**: `RPC_TIMEOUT_MS=8000` (default)
-
-### 3. Data Validation
-Transaction hashes and account IDs are validated by NEAR primitives parsing.
-
-## Performance Profiling Targets
-(To be measured in production)
-
-1. **Memory usage** at various `KEEP_BLOCKS` settings
-2. **CPU usage** at different FPS settings (20/30/60)
-3. **Network latency** impact on UI responsiveness
-4. **SQLite write throughput** for history persistence
-5. **Chunk fetch concurrency** optimal values
-
-## Architectural Patterns Worth Highlighting
-
-### 1. Event-Driven Architecture
-```rust
-pub enum AppEvent {
-    FromWs(WsPayload),    // WebSocket events
-    NewBlock(BlockRow),    // Parsed block data
-    Quit,                  // Shutdown signal
-}
-```
-
-Clean separation between data sources and application logic.
-
-### 2. Compile-Time Configuration
-Environment variables parsed at startup, not runtime:
-
-```rust
-pub struct Config {
-    pub source: DataSource,
-    pub ws_url: String,
-    pub ws_fetch_blocks: bool,
-    pub near_node_url: String,
-    pub near_node_url_explicit: bool,
-    // ... all configuration immutable after parse
-}
-```
-
-### 3. Zero-Copy String Manipulation
-Using `&str` references throughout rendering pipeline to minimize allocations.
-
-## Testing Strategy Recommendations
-
-1. **Unit Tests**: Action parsing, filtering logic, formatting functions
-2. **Integration Tests**: Mock RPC responses, test block processing pipeline
-3. **Snapshot Tests**: UI rendering output verification
-4. **Property Tests**: Quickcheck for action parsing edge cases
-5. **Load Tests**: High-frequency block arrival scenarios
-
-## Comparison with Original MVP
-Ratacat pivoted from a todo list application (v0.1.0) to a blockchain viewer (v0.2.0+). This represents a significant architectural shift but maintained core TUI patterns:
-
-**Retained**:
-- 3-pane layout concept
-- FPS-capped rendering
-- Vim-style keybindings
-- SQLite persistence
-
-**Added**:
-- Async networking (WebSocket + RPC)
-- NEAR blockchain integration
-- Real-time data streaming
-- Complex filtering/searching
-- Dual view modes
-
-## Recommendations for Next Steps
-
-### Immediate (Pre-Production)
-1. ✅ Complete gas/token formatting integration
-2. ✅ Verify mainnet transaction display
-3. ✅ Update documentation
-4. [ ] Add basic unit tests for action parsing
-5. [ ] Performance profiling with mainnet load
-
-### Short-Term (Production Readiness)
-1. [ ] Implement user-facing error notifications
-2. [ ] Add help overlay (`?` key)
-3. [ ] Export functionality (JSON/CSV)
-4. [ ] Configuration file support
-5. [ ] Logging to file (not just stderr)
-
-### Medium-Term (Feature Enhancement)
-1. [ ] Search history with fuzzy matching
-2. [ ] Block/transaction analytics
-3. [ ] Custom color themes
-4. [ ] Multi-account monitoring
-5. [ ] Gas consumption tracking
-
-### Long-Term (Ecosystem Integration)
-1. [ ] Plugin system for custom analyzers
-2. [ ] NEAR wallet integration
-3. [ ] Contract verification integration
-4. [ ] Multi-network support (mainnet + testnet + shards)
-5. [ ] Distributed monitoring (multiple nodes)
-
-## Recent Bug Fixes & UX Improvements (2025-01-XX)
-
-### Issue: Tab Navigation Not Visible
-**Problem**: User couldn't see which pane was focused when pressing Tab/Shift+Tab.
-
-**Root Cause**: Focus indicator was using subtle cyan color that wasn't visible enough against the terminal background.
-
-**Fix** (src/ui.rs:111):
-```rust
-// Changed from:
-let focus_color = Color::Cyan;
-
-// To:
-let focus_color = Color::Yellow;  // Bright yellow, highly visible
-```
-
-**Result**: Focused panes now have bright yellow borders, unfocused panes are gray. Tab cycling is now visually clear.
 
 ---
 
-### Issue: Missing Left/Right Page Scrolling in Details Pane
-**Problem**: Up/Down arrows scrolled 1 line (correct), but no way to page through long transaction details quickly.
+## Transform Architecture Examples
 
-**User Requirement**: Left/Right arrows should jump 6 lines at a time for faster navigation through large JSON payloads.
+### Example 1: Keyboard Input Transform
 
-**Fix** (src/app.rs:280-290, src/main.rs:240-241):
+**Core Event**:
 ```rust
-// Added Left/Right key handlers
-pub fn left(&mut self) {
-    if self.pane == 2 {
-        self.scroll_details(-6);  // 6 lines up
-    }
+pub enum KeyAction {
+    NextPane,
+    PrevPane,
+    ScrollUp(u16),
+    ScrollDown(u16),
+    Copy,
+    ToggleFullscreen,
+    // ...
 }
-pub fn right(&mut self) {
-    if self.pane == 2 {
-        self.scroll_details(6);   // 6 lines down
+```
+
+**Native Transform**:
+```rust
+// src/bin/nearx.rs
+match crossterm_event {
+    Event::Key(KeyEvent { code: KeyCode::Tab, modifiers: KeyModifiers::SHIFT, .. }) => {
+        app.handle_key_action(KeyAction::PrevPane);
+    }
+    Event::Key(KeyEvent { code: KeyCode::Tab, .. }) => {
+        app.handle_key_action(KeyAction::NextPane);
+    }
+    // ...
+}
+```
+
+**Web Transform**:
+```rust
+// src/bin/nearx-web.rs
+match egui_event {
+    egui::Event::Key { key: egui::Key::Tab, modifiers, .. } => {
+        let action = if modifiers.shift {
+            KeyAction::PrevPane
+        } else {
+            KeyAction::NextPane
+        };
+        app.handle_key_action(action);
+
+        // Platform-specific: Consume Tab for egui
+        if app.ui_flags().consume_tab {
+            ctx.input_mut(|i| i.consume_key(...));
+        }
     }
 }
 ```
 
-**Result**:
-- Up/Down: 1-line precision scrolling
-- Left/Right: 6-line page jumps
-- PgUp/PgDn: 20-line jumps (existing)
-- Home/End: Jump to top/bottom (existing)
+### Example 2: Mouse Input Transform
+
+**Core Event**:
+```rust
+pub enum MouseAction {
+    SelectPane(PaneIndex),
+    SelectRow { pane: PaneIndex, row: usize },
+    Scroll { delta: i32 },
+    DoubleClickDetails,
+}
+```
+
+**Native Transform**:
+```rust
+// src/bin/nearx.rs
+match crossterm_event {
+    Event::Mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column, row, .. }) => {
+        let pane = determine_pane_from_position(column, row, terminal.size()?);
+        app.handle_mouse_action(MouseAction::SelectPane(pane));
+
+        if pane != PaneIndex::Details {
+            let row_idx = (row - 2).max(0) as usize;
+            app.handle_mouse_action(MouseAction::SelectRow { pane, row: row_idx });
+        }
+    }
+}
+```
+
+**Web Transform**:
+```rust
+// src/bin/nearx-web.rs
+if flags.mouse_map && resp.hovered() {
+    if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+        // Convert pixels to cells
+        let col = ((pos.x - rect.min.x) / cell_w).floor() as i32;
+        let row = ((pos.y - rect.min.y) / cell_h).floor() as i32;
+
+        let pane = determine_pane_from_position(col, row, terminal.size()?);
+        app.handle_mouse_action(MouseAction::SelectPane(pane));
+
+        // Platform-specific: Double-click on details
+        if flags.dblclick_details && ui.input(|i| i.pointer.button_double_clicked(...)) {
+            app.handle_mouse_action(MouseAction::DoubleClickDetails);
+        }
+    }
+}
+```
+
+### Example 3: Theme Transform
+
+**Core Definition**:
+```rust
+// src/theme.rs
+pub struct Theme {
+    pub bg: Rgb,
+    pub panel: Rgb,
+    pub accent: Rgb,
+    // ...
+}
+
+impl Theme {
+    pub fn contrast_ratio(&self, fg: Rgb, bg: Rgb) -> f32 {
+        // WCAG calculation
+    }
+}
+```
+
+**Native Transform**:
+```rust
+// src/theme.rs (mod rat)
+#[inline]
+pub fn c(Rgb(r, g, b): Rgb) -> ratatui::style::Color {
+    Color::Rgb(r, g, b)
+}
+
+pub fn styles(t: &Theme) -> Styles {
+    Styles {
+        border: Style::default().fg(c(t.border)),
+        border_focus: Style::default().fg(c(t.accent_strong)),
+        // ...
+    }
+}
+```
+
+**Web Transform**:
+```rust
+// src/theme.rs (mod eg)
+#[inline]
+pub fn c(Rgb(r, g, b): Rgb) -> egui::Color32 {
+    Color32::from_rgb(r, g, b)
+}
+
+pub fn apply(ctx: &egui::Context, t: &Theme) {
+    let mut v = egui::Visuals::dark();
+    v.panel_fill = c(t.panel);
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, c(t.accent));
+    // ... full egui visuals mapping
+    ctx.set_style(style);
+}
+```
+
+**CSS Transform**:
+```css
+/* web/theme.css - generated or manually synced */
+:root {
+  --bg: #0b0e14;      /* Theme.bg */
+  --panel: #0f131a;   /* Theme.panel */
+  --accent: #66b3ff;  /* Theme.accent */
+  /* ... */
+}
+```
 
 ---
 
-### Issue: 2-Row Layout Implementation
-**Problem**: Original 3-column layout was cramped. Transaction details were squashed and hard to read.
+## Testing Strategy
 
-**Battle Station Pattern**: Uses 2-row layout:
-- **Top row**: Blocks (left) + Tx list (right) - 50/50 split
-- **Bottom row**: Details pane (full width) - only shown when txs exist
+### Web/Tauri Rendering Fix
 
-**Fix** (src/ui.rs:82-195):
-```rust
-// Split vertically first (rows)
-let rows = if has_selection {
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(50),  // Top row
-            Constraint::Percentage(50),  // Bottom row (details)
-        ])
-        .split(area)
-} else {
-    // No selection: Use full height for top row
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(100)])
-        .split(area)
-};
-
-// Then split top row horizontally (columns)
-let top_cols = Layout::default()
-    .direction(Direction::Horizontal)
-    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-    .split(rows[0]);
+**Step 1: Get Error Details**
+```bash
+# User runs:
+trunk serve --open
+# Then in browser: F12 → Console tab
+# Copy all errors/warnings mentioning WASM, canvas, or texture
 ```
 
-**Result**: Transaction details now have full terminal width, much more readable. Blocks and tx list get equal space in top half.
+**Step 2: Minimal Reproduction**
+```rust
+// Simplify RatacatApp::new to minimal working state
+let soft_backend = SoftBackend::<EmbeddedGraphics>::new(
+    80, 24,  // Standard terminal size
+    mono_9x18_atlas(),
+    None, None,
+);
+// Test if even blank terminal renders correctly
+```
+
+**Step 3: Incremental Fixes**
+1. Fix any WASM module errors
+2. Ensure SoftBackend creates valid texture
+3. Verify egui_ratatui widget renders texture
+4. Add responsive sizing
+5. Apply theme properly
+
+### Cross-Platform Input Testing
+
+**Test Matrix**:
+| Action | Native (TUI) | Web (Browser) | Tauri (Desktop) |
+|--------|-------------|---------------|-----------------|
+| Tab cycles panes | ✅ Ctrl+M mouse | ⚠️ Test needed | ⚠️ Test needed |
+| Click selects pane | ✅ (opt-in) | ⚠️ Should work | ⚠️ Should work |
+| Double-click details | ❌ N/A | ⚠️ Test needed | ⚠️ Test needed |
+| Scroll wheel | ✅ (opt-in) | ⚠️ Test needed | ⚠️ Test needed |
+| Space fullscreen | ✅ Works | ⚠️ Test needed | ⚠️ Test needed |
+| Copy (c key) | ✅ Works | ⚠️ Test needed | ⚠️ Test needed |
 
 ---
 
-### Known Issue: Selection Drift (Investigation in Progress)
+## Immediate Next Steps
 
-**User Report**: "The selection is still changing as blocks come in. I feel like there is a significant delay compared to the JS one."
+### Priority 1: Fix Web Rendering (Blocking)
+1. User provides console errors
+2. Investigate SoftBackend sizing
+3. Test with different terminal dimensions
+4. Verify egui_ratatui integration
 
-**Battle Station Behavior** (Reference):
-```typescript
-// When at index 0: Stay at index 0 (live mode)
-const isViewingLatest = currentIndex === 0;
-if (isViewingLatest) {
-  setSelectedBlock(blockHeights[0]);
-  ref.current.select(0);
-} else {
-  // History browsing: Track block object by reference
-  const index = blockIndex(blockRef.current);
-  ref.current.select(index);
-}
-```
+### Priority 2: Test Mouse/Keyboard on Web
+1. Verify UiFlags defaults are actually applied
+2. Test mouse click → pane selection
+3. Test double-click → fullscreen toggle
+4. Test scroll wheel
+5. Document any broken behaviors
 
-**Ratacat Current Approach** (src/app.rs:411-439):
+### Priority 3: Unified Input Layer (Refactoring)
+1. Create `InputEvent` enum in core
+2. Implement `App::handle_input_event(&mut self, event: InputEvent)`
+3. Update Native binary to use new API
+4. Update Web binary to use new API
+5. Verify behavior unchanged
+
+### Priority 4: Documentation
+1. Update README with current status
+2. Add troubleshooting section for Web rendering
+3. Document UiFlags and target-specific defaults
+4. Create ARCHITECTURE.md with transform diagrams
+
+---
+
+## Long-Term Vision
+
+### Unified Core API
 ```rust
-// Three-way branching based on flags
-if self.follow_latest {
-    // Live mode: stay at index 0
-    self.sel_block = 0;
-} else if let Some(target_height) = self.selected_block_height {
-    // History browsing: find block by height
-    if let Some(new_idx) = self.blocks.iter().position(|block| block.height == target_height) {
-        self.sel_block = new_idx;
-    }
-} else {
-    // INIT mode: first blocks arriving
-    self.sel_block = 0;
-    self.selected_block_height = Some(self.blocks[0].height);
+// High-level goal
+pub struct NEARx {
+    app: App,
+    platform: Box<dyn PlatformAdapter>,
 }
+
+trait PlatformAdapter {
+    fn render(&mut self, state: &RenderState) -> Result<()>;
+    fn poll_events(&mut self) -> Vec<InputEvent>;
+    fn copy_to_clipboard(&self, text: &str) -> Result<()>;
+}
+
+// Native
+struct CrosstermAdapter { /* ... */ }
+impl PlatformAdapter for CrosstermAdapter { /* ... */ }
+
+// Web/Tauri
+struct EguiAdapter { /* ... */ }
+impl PlatformAdapter for EguiAdapter { /* ... */ }
 ```
 
-**Suspected Issues**:
-1. **State Management Complexity**: Using both `follow_latest` boolean AND `selected_block_height` Option creates edge cases
-2. **Missing Pane Context**: Battle station doesn't re-select on every block arrival - only when in blocks pane
-3. **Initialization Race**: INIT mode might be re-triggering unexpectedly
-4. **Render Delay**: FPS capping (30 FPS default) might create perceived lag vs. React's immediate updates
-
-**Debug Strategy**:
-- Debug log panel now shows: "Block #X arr, [MODE], sel=Y"
-- Next step: Copy debug output during drift to identify exact state transitions
-- Compare timing: Battle station's useEffect vs. Ratacat's push_block() timing
-
-**Hypothesis**: The Rust version correctly implements the logic, but:
-- **Timing difference**: Battle station batches React state updates, Ratacat processes each block immediately
-- **Visual feedback delay**: 30 FPS render budget means up to 33ms lag between state change and visual update
-- **Pane-aware selection**: Might need to skip repositioning when not in blocks pane (pane != 0)
-
-**Next Steps**:
-1. User to run app and copy debug log showing drift
-2. Add pane awareness: Only reposition selection if `self.pane == 0` (blocks pane active)
-3. Consider increasing default FPS to 60 for snappier updates
-4. Profile block arrival timing vs. render timing
+### Benefits of Unified Approach
+1. **Single UI Logic**: All layout/rendering rules in one place
+2. **Consistent Behavior**: Input handling guaranteed same across targets
+3. **Easier Testing**: Mock PlatformAdapter for unit tests
+4. **Theme Compliance**: Impossible to use wrong colors (enforced at compile time)
+5. **New Targets Easy**: Just implement PlatformAdapter trait
 
 ---
 
 ## Conclusion
 
-Ratacat successfully demonstrates a production-quality TUI application for blockchain monitoring. The architecture is:
+NEARx has excellent foundational architecture with successful platform abstractions for theme, clipboard, and configuration. The current challenge is completing the Web/Tauri rendering pipeline to achieve feature parity with the native TUI.
 
-- **Performant**: FPS-capped rendering, parallel data fetching, non-blocking I/O
-- **Resilient**: Network auto-detection, catch-up limits, graceful error handling
-- **Idiomatic**: Proper use of official NEAR crates and Rust patterns
-- **User-Friendly**: Vim-style navigation, clipboard integration, multiple view modes, **NOW with 2-row layout and 6-line page scrolling**
+**Key Strengths**:
+- ✅ Unified theme system (Rgb → ratatui/egui/CSS)
+- ✅ Clean platform abstraction (clipboard, storage)
+- ✅ Strong native TUI experience
+- ✅ Comprehensive documentation (CLAUDE.md, COLLABORATION.md, KEYMAP.md)
 
-The codebase is well-structured and maintainable, with clear separation of concerns:
-- `source_*.rs`: Data acquisition layer
-- `app.rs`: State management and business logic
-- `ui.rs`: Rendering and presentation
-- `types.rs`: Data models
-- `config.rs`: Configuration management
+**Current Gaps**:
+- ⚠️ Web/Tauri rendering broken (large blue area)
+- ⚠️ Input handling duplicated between binaries
+- ⚠️ UiFlags not fully tested on Web/Tauri
+- ⚠️ No responsive terminal sizing
 
-**Primary strengths**:
-1. Hybrid WebSocket + RPC architecture handles both development and production needs
-2. Network auto-detection solved critical mainnet/testnet mismatch bug
-3. Official NEAR primitives integration ensures compatibility
-4. FPS-capped rendering prevents UI thrashing
-5. Non-blocking persistence maintains responsiveness
-6. **NEW**: 2-row layout provides excellent space utilization (battle station pattern)
-7. **NEW**: Comprehensive scrolling controls (1-line, 6-line, 20-line jumps)
-8. **NEW**: Clear focus indicators (bright yellow borders)
+**Path Forward**:
+1. Fix Web rendering (get console errors, debug SoftBackend)
+2. Test all interactions on Web/Tauri (mouse, keyboard, copy)
+3. Refactor input handling to unified core
+4. Implement responsive terminal sizing
+5. Document transform architecture for future contributors
 
-**Areas for polish**:
-1. Add comprehensive test coverage
-2. Implement user-facing error notifications
-3. Performance profiling under production load
-4. Export/analytics features
-5. Configuration file support
-6. **IN PROGRESS**: Debug selection drift issue with pane-aware repositioning
-
-The technical foundation is solid and ready for principal engineer review. All major architectural decisions are documented, trade-offs are explained, and the codebase follows Rust best practices.
+The vision is clear: **Single Core, Multiple Transforms**. We're 70% there—just need to fix the rendering pipeline and complete the Web/Tauri experience.

@@ -231,7 +231,9 @@ impl RiskManager {
         let stats = self.stats();
         log::info!("💰 Capital Summary:");
         log::info!("  Total: ${:.2}", stats.total_capital);
-        log::info!("  Allocated: ${:.2} ({:.1}%)", stats.allocated_capital,
+        log::info!(
+            "  Allocated: ${:.2} ({:.1}%)",
+            stats.allocated_capital,
             (stats.allocated_capital / stats.total_capital) * 100.0
         );
         log::info!("  Available: ${:.2}", stats.available_capital);
@@ -258,7 +260,9 @@ pub struct CapitalStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(unused_imports)]
     use crate::arb_engine::ArbType;
+    #[allow(unused_imports)]
     use std::time::Instant;
 
     fn create_test_config() -> ArbConfig {

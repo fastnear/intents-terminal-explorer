@@ -1,15 +1,15 @@
 // Graph-based price discovery using DEX pool reserves
 // Finds shortest path from any token to known stablecoins
 
-use std::collections::{HashMap, HashSet, VecDeque};
 use crate::arb_engine::PoolInfo;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Known stablecoins (USD-pegged) to use as price anchors
 const STABLECOINS: &[&str] = &[
     "dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near", // USDT
     "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near", // USDC
     "6b175474e89094c44da98b954eedeac495271d0f.factory.bridge.near", // DAI
-    "usdt.tether-token.near",                                        // Native USDT
+    "usdt.tether-token.near",                                       // Native USDT
     "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", // USDt
 ];
 
@@ -187,10 +187,7 @@ mod tests {
         let graph = PriceGraph::new();
 
         // Stablecoins should have $1.00 price
-        assert_eq!(
-            graph.get_usd_price("usdt.tether-token.near"),
-            Some(1.0)
-        );
+        assert_eq!(graph.get_usd_price("usdt.tether-token.near"), Some(1.0));
     }
 
     #[test]
@@ -206,7 +203,7 @@ mod tests {
             ],
             amounts: vec![
                 1_000_000_000_000_000_000_000_000, // 1 NEAR (24 decimals)
-                5_000_000, // 5 USDC (6 decimals, but we simplify)
+                5_000_000,                         // 5 USDC (6 decimals, but we simplify)
             ],
             total_fee: 25,
             shares_total_supply: 1_000_000,

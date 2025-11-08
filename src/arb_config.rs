@@ -26,7 +26,10 @@ impl std::str::FromStr for ExecutionMode {
             "display" => Ok(ExecutionMode::Display),
             "simulate" => Ok(ExecutionMode::Simulate),
             "execute" => Ok(ExecutionMode::Execute),
-            _ => anyhow::bail!("Invalid execution mode: {}. Must be 'display', 'simulate', or 'execute'", s),
+            _ => anyhow::bail!(
+                "Invalid execution mode: {}. Must be 'display', 'simulate', or 'execute'",
+                s
+            ),
         }
     }
 }
@@ -73,7 +76,11 @@ pub struct ArbConfig {
     pub gas_buffer_tgas: u64,
 
     /// NEAR RPC URL
-    #[arg(long, env = "NEAR_NODE_URL", default_value = "https://rpc.mainnet.fastnear.com/")]
+    #[arg(
+        long,
+        env = "NEAR_NODE_URL",
+        default_value = "https://rpc.mainnet.fastnear.com/"
+    )]
     pub near_node_url: String,
 
     /// FastNEAR API token for rate limiting
@@ -215,7 +222,8 @@ impl ArbConfig {
         if max_trade > capital {
             anyhow::bail!(
                 "MAX_TRADE_SIZE_USD (${}) cannot exceed CAPITAL_USD (${})",
-                max_trade, capital
+                max_trade,
+                capital
             );
         }
 
@@ -232,11 +240,17 @@ impl ArbConfig {
 
         let max_exposure = self.max_pool_exposure_pct.unwrap();
         if max_exposure < 0.0 || max_exposure > 100.0 {
-            anyhow::bail!("MAX_POOL_EXPOSURE_PCT must be in [0, 100], got {}", max_exposure);
+            anyhow::bail!(
+                "MAX_POOL_EXPOSURE_PCT must be in [0, 100], got {}",
+                max_exposure
+            );
         }
 
         if self.min_pool_liquidity_usd <= 0.0 {
-            anyhow::bail!("MIN_POOL_LIQUIDITY_USD must be > 0, got {}", self.min_pool_liquidity_usd);
+            anyhow::bail!(
+                "MIN_POOL_LIQUIDITY_USD must be > 0, got {}",
+                self.min_pool_liquidity_usd
+            );
         }
 
         // Execution validation
@@ -251,11 +265,20 @@ impl ArbConfig {
     pub fn print_summary(&self) {
         log::info!("⚙️  Configuration:");
         log::info!("  💰 Capital: ${:.2}", self.capital_usd.unwrap());
-        log::info!("  📊 Max Trade Size: ${:.2}", self.max_trade_size_usd.unwrap());
+        log::info!(
+            "  📊 Max Trade Size: ${:.2}",
+            self.max_trade_size_usd.unwrap()
+        );
         log::info!("  📈 Min Profit: {:.2}%", self.min_profit_pct.unwrap());
         log::info!("  ⚠️  Max Slippage: {:.2}%", self.max_slippage_pct.unwrap());
-        log::info!("  🏊 Max Pool Exposure: {:.1}%", self.max_pool_exposure_pct.unwrap());
-        log::info!("  💧 Min Pool Liquidity: ${:.0}", self.min_pool_liquidity_usd);
+        log::info!(
+            "  🏊 Max Pool Exposure: {:.1}%",
+            self.max_pool_exposure_pct.unwrap()
+        );
+        log::info!(
+            "  💧 Min Pool Liquidity: ${:.0}",
+            self.min_pool_liquidity_usd
+        );
         log::info!("  🎬 Execution Mode: {:?}", self.execution_mode);
 
         if let Some(ref account) = self.near_account {
@@ -299,9 +322,18 @@ mod tests {
 
     #[test]
     fn test_execution_mode_parsing() {
-        assert_eq!("display".parse::<ExecutionMode>().unwrap(), ExecutionMode::Display);
-        assert_eq!("simulate".parse::<ExecutionMode>().unwrap(), ExecutionMode::Simulate);
-        assert_eq!("execute".parse::<ExecutionMode>().unwrap(), ExecutionMode::Execute);
+        assert_eq!(
+            "display".parse::<ExecutionMode>().unwrap(),
+            ExecutionMode::Display
+        );
+        assert_eq!(
+            "simulate".parse::<ExecutionMode>().unwrap(),
+            ExecutionMode::Simulate
+        );
+        assert_eq!(
+            "execute".parse::<ExecutionMode>().unwrap(),
+            ExecutionMode::Execute
+        );
         assert!("invalid".parse::<ExecutionMode>().is_err());
     }
 

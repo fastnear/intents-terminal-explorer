@@ -1,11 +1,14 @@
 //! Web platform implementation (uses web-sys, in-memory storage)
 
+// Allow dead code when native feature is enabled (Tauri uses native, not web)
+#![cfg_attr(feature = "native", allow(dead_code))]
+
 use crate::history::{BlockPersist, HistoryHit};
 use anyhow::Result;
 
 /// Clipboard support for web using web-sys
 pub fn copy_to_clipboard(content: &str) -> bool {
-    #[cfg(feature = "web")]
+    #[cfg(any(feature = "web", feature = "egui-web"))]
     {
         if let Some(window) = web_sys::window() {
             let clipboard = window.navigator().clipboard();
@@ -19,7 +22,7 @@ pub fn copy_to_clipboard(content: &str) -> bool {
         }
     }
 
-    #[cfg(not(feature = "web"))]
+    #[cfg(not(any(feature = "web", feature = "egui-web")))]
     false
 }
 

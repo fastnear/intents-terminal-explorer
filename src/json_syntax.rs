@@ -1,25 +1,34 @@
+use crate::theme::Theme;
 /// JSON syntax highlighting for ratatui
 /// Produces colored Span/Line objects with WCAG AAA compliant colors
-
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
-// WCAG AAA compliant colors for RGB(40,40,40) background
-// All colors achieve 7:1+ contrast ratio for optimal readability
-const KEY_COLOR: Color = Color::Rgb(102, 221, 236);      // Soft cyan #66DDEC (9.7:1 contrast)
-const STRING_COLOR: Color = Color::Rgb(171, 227, 56);    // Yellow-green #ABE338 (11.4:1 contrast)
-const NUMBER_COLOR: Color = Color::Rgb(245, 171, 50);    // Warm orange #F5AB32 (9.8:1 contrast)
-const BOOLEAN_COLOR: Color = Color::Rgb(107, 190, 255);  // Light blue #6BBEFF (8.1:1 contrast)
-const STRUCT_COLOR: Color = Color::Rgb(212, 208, 171);   // Tan/beige #D4D0AB (9.3:1 contrast)
-
 /// Parse JSON string and produce colored Lines for ratatui rendering
-/// Uses accessible colors optimized for dark backgrounds:
-/// - Keys: Soft cyan (was harsh Cyan)
-/// - String values: Yellow-green (was bright Green)
-/// - Numbers: Warm orange (was harsh Yellow)
-/// - Booleans/null: Light blue (was dark Blue - FAILED contrast)
-/// - Braces/Brackets: Tan (was DarkGray - FAILED contrast)
-pub fn colorize_json(json_str: &str) -> Vec<Line<'static>> {
+/// Uses theme colors with WCAG AAA compliance:
+/// - Keys: Soft cyan
+/// - String values: Yellow-green
+/// - Numbers: Warm orange
+/// - Booleans/null: Light blue
+/// - Braces/Brackets: Tan/beige
+pub fn colorize_json(json_str: &str, theme: &Theme) -> Vec<Line<'static>> {
+    let key_color = Color::Rgb(theme.json_key.0, theme.json_key.1, theme.json_key.2);
+    let string_color = Color::Rgb(
+        theme.json_string.0,
+        theme.json_string.1,
+        theme.json_string.2,
+    );
+    let number_color = Color::Rgb(
+        theme.json_number.0,
+        theme.json_number.1,
+        theme.json_number.2,
+    );
+    let boolean_color = Color::Rgb(theme.json_bool.0, theme.json_bool.1, theme.json_bool.2);
+    let struct_color = Color::Rgb(
+        theme.json_struct.0,
+        theme.json_struct.1,
+        theme.json_struct.2,
+    );
     let mut lines = Vec::new();
     let mut current_line = Vec::new();
     let mut chars = json_str.chars().peekable();
@@ -39,13 +48,9 @@ pub fn colorize_json(json_str: &str) -> Vec<Line<'static>> {
             // String (could be key or value)
             '"' => {
                 let (string_content, is_key) = parse_string(&mut chars);
-                let color = if is_key {
-                    KEY_COLOR
-                } else {
-                    STRING_COLOR
-                };
+                let color = if is_key { key_color } else { string_color };
                 current_line.push(Span::styled(
-                    format!("\"{}\"", string_content),
+                    format!("\"{string_content}\""),
                     Style::default().fg(color),
                 ));
             }
@@ -53,26 +58,20 @@ pub fn colorize_json(json_str: &str) -> Vec<Line<'static>> {
             // Numbers
             '-' | '0'..='9' => {
                 let number = parse_number(ch, &mut chars);
-                current_line.push(Span::styled(
-                    number,
-                    Style::default().fg(NUMBER_COLOR),
-                ));
+                current_line.push(Span::styled(number, Style::default().fg(number_color)));
             }
 
             // Booleans and null
             't' | 'f' | 'n' => {
                 let keyword = parse_keyword(ch, &mut chars);
-                current_line.push(Span::styled(
-                    keyword,
-                    Style::default().fg(BOOLEAN_COLOR),
-                ));
+                current_line.push(Span::styled(keyword, Style::default().fg(boolean_color)));
             }
 
             // Structural characters (braces, brackets, colons, commas)
             '{' | '}' | '[' | ']' | ':' | ',' => {
                 current_line.push(Span::styled(
                     ch.to_string(),
-                    Style::default().fg(STRUCT_COLOR),
+                    Style::default().fg(struct_color),
                 ));
             }
 
@@ -96,7 +95,7 @@ fn parse_string(chars: &mut std::iter::Peekable<std::str::Chars>) -> (String, bo
     let mut content = String::new();
     let mut escaped = false;
 
-    while let Some(ch) = chars.next() {
+    for ch in chars.by_ref() {
         if escaped {
             content.push(ch);
             escaped = false;
@@ -171,19 +170,21 @@ mod tests {
 
     #[test]
     fn test_simple_object() {
+        let theme = Theme::default();
         let json = r#"{"name": "Alice", "age": 30}"#;
-        let lines = colorize_json(json);
+        let lines = colorize_json(json, &theme);
         assert!(!lines.is_empty());
     }
 
     #[test]
     fn test_multiline_json() {
+        let theme = Theme::default();
         let json = r#"{
   "name": "Alice",
   "active": true,
   "count": 42
 }"#;
-        let lines = colorize_json(json);
+        let lines = colorize_json(json, &theme);
         assert_eq!(lines.len(), 5);
     }
 }

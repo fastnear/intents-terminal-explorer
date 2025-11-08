@@ -1,6 +1,6 @@
+use crate::{config::Config, rpc_utils::fetch_block_with_txs, types::AppEvent};
 use anyhow::Result;
 use tokio::sync::mpsc::UnboundedReceiver;
-use crate::{types::AppEvent, config::Config, rpc_utils::fetch_block_with_txs};
 
 /// Background task that fetches historical blocks from archival RPC endpoint
 /// Receives block height requests and fetches them on demand
@@ -26,9 +26,14 @@ pub async fn run_archival_fetch(
             cfg.rpc_timeout_ms,
             cfg.poll_chunk_concurrency,
             cfg.fastnear_auth_token.as_deref(),
-        ).await {
+        )
+        .await
+        {
             Ok(block) => {
-                eprintln!("[Archival] Successfully fetched block #{} ({} txs)", height, block.tx_count);
+                eprintln!(
+                    "[Archival] Successfully fetched block #{} ({} txs)",
+                    height, block.tx_count
+                );
                 // Send block via existing event channel
                 if let Err(e) = block_tx.send(AppEvent::NewBlock(block)) {
                     eprintln!("[Archival] Failed to send block: {e}");
