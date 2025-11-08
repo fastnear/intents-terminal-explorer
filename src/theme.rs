@@ -131,7 +131,7 @@ pub mod eg {
         v.panel_fill = c(t.panel);
         v.window_fill = c(t.panel); // Avoid window chrome
         v.faint_bg_color = c(t.panel_alt); // Hovered backgrounds
-        // IMPORTANT: eframe clears with extreme_bg_color. Use true bg, not panel.
+                                           // IMPORTANT: eframe clears with extreme_bg_color. Use true bg, not panel.
         v.extreme_bg_color = c(t.bg);
 
         // Corner radius & shadows - subtle like TUI
@@ -235,8 +235,7 @@ mod tests {
         let ratio = contrast_ratio(t.text, t.panel);
         assert!(
             ratio >= 4.5,
-            "Primary text should meet WCAG AA on panel (got {:.2}:1, need >=4.5:1)",
-            ratio
+            "Primary text should meet WCAG AA on panel (got {ratio:.2}:1, need >=4.5:1)"
         );
     }
 
@@ -246,8 +245,7 @@ mod tests {
         let ratio = contrast_ratio(t.text, t.bg);
         assert!(
             ratio >= 4.5,
-            "Primary text should meet WCAG AA on bg (got {:.2}:1, need >=4.5:1)",
-            ratio
+            "Primary text should meet WCAG AA on bg (got {ratio:.2}:1, need >=4.5:1)"
         );
     }
 
@@ -258,8 +256,7 @@ mod tests {
         // Allow slightly lower for secondary text (comfortable threshold)
         assert!(
             ratio >= 3.0,
-            "Dim text should be readable (got {:.2}:1, need >=3.0:1)",
-            ratio
+            "Dim text should be readable (got {ratio:.2}:1, need >=3.0:1)"
         );
     }
 
@@ -269,8 +266,7 @@ mod tests {
         let ratio = contrast_ratio(t.text, t.sel_bg);
         assert!(
             ratio >= 4.5,
-            "Selected text should meet WCAG AA (got {:.2}:1, need >=4.5:1)",
-            ratio
+            "Selected text should meet WCAG AA (got {ratio:.2}:1, need >=4.5:1)"
         );
     }
 
@@ -281,8 +277,7 @@ mod tests {
         // Focus borders should be clearly visible
         assert!(
             ratio >= 3.0,
-            "Focus border should be visible (got {:.2}:1, need >=3.0:1)",
-            ratio
+            "Focus border should be visible (got {ratio:.2}:1, need >=3.0:1)"
         );
     }
 }

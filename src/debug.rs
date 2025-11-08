@@ -140,7 +140,10 @@ pub fn init_from_url_and_storage_once() {
                     }
                     if key.eq_ignore_ascii_case("nxoverlay") {
                         if let Ok(decoded_js) = js_sys::decode_uri_component(val) {
-                            let v = decoded_js.as_string().unwrap_or_default().to_ascii_lowercase();
+                            let v = decoded_js
+                                .as_string()
+                                .unwrap_or_default()
+                                .to_ascii_lowercase();
                             if v == "1" || v == "true" {
                                 set_overlay(true);
                             }

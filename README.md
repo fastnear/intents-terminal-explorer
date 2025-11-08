@@ -303,6 +303,26 @@ cd tauri-workspace && cargo tauri build
 
 ---
 
+## Release
+
+One-button release automation that runs all checks, builds all targets, and creates tagged release:
+
+```bash
+# Cut version 0.9.0 (runs preflight, clippy, tests, builds Web + Tauri)
+tools/release.sh 0.9.0
+```
+
+**Artifacts:**
+- Webview WASM for Tauri: `dist-egui/nearx-web.js`, `dist-egui/nearx-web_bg.wasm`
+- Tauri bundles: `tauri-workspace/src-tauri/target/release/bundle/`
+
+**Notes:**
+- Preflight enforces theme discipline + wasm-bindgen parity + loader sanity
+- Deep links: `nearx://v1/...` registered via plugin; single-instance forward enabled
+- Debugging UI: `?nxdebug=all`, overlay: **Ctrl+Shift+D**
+
+---
+
 ## Web Build Technical Details
 
 The web build uses **eframe** (egui's app framework) with **egui_ratatui** to render terminal UI in browser via WebGL.

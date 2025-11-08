@@ -20,18 +20,19 @@ fn main() {
         .plugin(tauri_plugin_deep_link::init())
         // Single-instance plugin: if a second process starts with nearx://..., forward it
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            log::info!("Single-instance: received argv: {:?}", argv);
+            log::info!("Single-instance: received argv: {argv:?}");
             // argv example (Windows): ["nearx.exe", "nearx://v1/tx/ABC123"]
             // macOS may call via deep_link plugin instead; this is an extra guard.
             for arg in argv {
                 let arg = arg.trim().to_string();
                 if arg.starts_with("nearx://") {
-                    log::info!("Single-instance: forwarding deep link: {}", arg);
+                    log::info!("Single-instance: forwarding deep link: {arg}");
                     let _ = app.emit("nearx://open", arg.clone());
-                } else if arg.starts_with("/v1/") || arg.starts_with("v1/") || arg.contains("#/v1/") {
+                } else if arg.starts_with("/v1/") || arg.starts_with("v1/") || arg.contains("#/v1/")
+                {
                     // Normalize non-scheme route to a nearx:// URL for consistency
                     let norm = format!("nearx://{}", arg.trim_start_matches('/'));
-                    log::info!("Single-instance: normalized {} to {}", arg, norm);
+                    log::info!("Single-instance: normalized {arg} to {norm}");
                     let _ = app.emit("nearx://open", norm);
                 }
             }
@@ -57,7 +58,7 @@ fn main() {
                 // When a deep link arrives (warm or cold), buffer it and *try* to emit.
                 app.deep_link().on_open_url(move |event| {
                     let urls = event.urls();
-                    log::info!("Deep link received: {:?}", urls);
+                    log::info!("Deep link received: {urls:?}");
 
                     for url in urls {
                         let s = url.to_string();
@@ -67,14 +68,14 @@ fn main() {
                         }
                         // Try to deliver immediately to any open windows; if none exist yet,
                         // the page-load hook will flush.
-                        log::info!("Emitting deep link event: {}", s);
+                        log::info!("Emitting deep link event: {s}");
                         let _ = app_handle.emit("nearx://open", s);
                     }
                 });
 
                 // Check for initial deep links on cold start
                 if let Some(urls) = app.deep_link().get_current()? {
-                    log::info!("Initial deep links: {:?}", urls);
+                    log::info!("Initial deep links: {urls:?}");
                     for url in urls {
                         let s = url.to_string();
                         let mut q = pending.0.lock().expect("pending lock");
@@ -108,6 +109,6 @@ fn main() {
 fn get_queued_links(state: tauri::State<PendingLinks>) -> Vec<String> {
     let mut q = state.0.lock().expect("pending lock");
     let links = q.drain(..).collect();
-    log::info!("Frontend requested queued links: {:?}", links);
+    log::info!("Frontend requested queued links: {links:?}");
     links
 }

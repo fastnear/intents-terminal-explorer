@@ -105,10 +105,10 @@ impl History {
             let _ = spawn_blocking(move || -> Result<()> {
                 let conn = Connection::open(path)?;
                 // Enable WAL mode for concurrent read/write performance
-                conn.pragma_update(None, "journal_mode", &"WAL")?;
-                conn.pragma_update(None, "synchronous", &"NORMAL")?;
+                conn.pragma_update(None, "journal_mode", "WAL")?;
+                conn.pragma_update(None, "synchronous", "NORMAL")?;
                 // Set busy timeout to avoid immediate lock failures
-                conn.pragma_update(None, "busy_timeout", &250)?;
+                conn.pragma_update(None, "busy_timeout", 250)?;
                 conn.execute_batch(
                     r#"
                     CREATE TABLE IF NOT EXISTS blocks(
@@ -368,7 +368,7 @@ fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<History
     if !sq.acct.is_empty() {
         for a in &sq.acct {
             where_clauses.push("(LOWER(t.signer) LIKE ? OR LOWER(t.receiver) LIKE ?)".to_string());
-            let pattern = format!("%{}%", a);
+            let pattern = format!("%{a}%");
             params_vec.push(Box::new(pattern.clone()));
             params_vec.push(Box::new(pattern));
         }
@@ -382,7 +382,7 @@ fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<History
         );
         where_clauses.push(clause);
         for s in &sq.signer {
-            params_vec.push(Box::new(format!("%{}%", s)));
+            params_vec.push(Box::new(format!("%{s}%")));
         }
     }
 
@@ -394,7 +394,7 @@ fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<History
         );
         where_clauses.push(clause);
         for r in &sq.receiver {
-            params_vec.push(Box::new(format!("%{}%", r)));
+            params_vec.push(Box::new(format!("%{r}%")));
         }
     }
 
@@ -428,7 +428,7 @@ fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<History
         );
         where_clauses.push(clause);
         for m in &sq.method {
-            params_vec.push(Box::new(format!("%{}%", m)));
+            params_vec.push(Box::new(format!("%{m}%")));
         }
     }
     if !sq.action.is_empty() {
@@ -438,7 +438,7 @@ fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<History
         );
         where_clauses.push(clause);
         for a in &sq.action {
-            params_vec.push(Box::new(format!("%{}%", a)));
+            params_vec.push(Box::new(format!("%{a}%")));
         }
     }
 
@@ -447,7 +447,7 @@ fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<History
         let clause = format!("({})", vec!["(LOWER(t.signer)||' '||LOWER(t.receiver)||' '||LOWER(t.hash)||' '||LOWER(t.actions_json)) LIKE ?"; sq.free.len()].join(" AND "));
         where_clauses.push(clause);
         for f in &sq.free {
-            params_vec.push(Box::new(format!("%{}%", f)));
+            params_vec.push(Box::new(format!("%{f}%")));
         }
     }
 
@@ -476,12 +476,7 @@ fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<History
         })
     })?;
 
-    let mut hits = Vec::new();
-    for r in rows {
-        if let Ok(hit) = r {
-            hits.push(hit);
-        }
-    }
+    let hits: Vec<HistoryHit> = rows.flatten().collect();
     Ok(hits)
 }
 

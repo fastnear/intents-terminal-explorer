@@ -2,8 +2,6 @@
 //!
 //! This module is only available on native targets (depends on persistent history).
 
-#![cfg(feature = "native")]
-
 use crate::history::{History, PersistedMark};
 use crate::types::Mark;
 
@@ -121,7 +119,7 @@ impl JumpMarks {
         self.history.del_mark(label.to_string()).await;
     }
 
-    pub fn next(&mut self) -> Option<Mark> {
+    pub fn next_mark(&mut self) -> Option<Mark> {
         let list = self.list();
         if list.is_empty() {
             return None;
@@ -130,7 +128,7 @@ impl JumpMarks {
         Some(list[self.cursor].clone())
     }
 
-    pub fn prev(&mut self) -> Option<Mark> {
+    pub fn prev_mark(&mut self) -> Option<Mark> {
         let list = self.list();
         if list.is_empty() {
             return None;

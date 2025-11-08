@@ -2,8 +2,6 @@
 //!
 //! This module is only available on native targets (file system access not available in WASM).
 
-#![cfg(feature = "native")]
-
 use anyhow::Result;
 use notify::{Error as NotifyError, Event, EventKind, RecursiveMode, Watcher};
 use serde_json::Value;

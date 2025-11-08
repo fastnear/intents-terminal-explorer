@@ -2,7 +2,10 @@
 
 use anyhow::{Context, Result};
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -53,7 +56,7 @@ async fn main() -> Result<()> {
     let network = std::env::var("NEAR_NETWORK").unwrap_or_else(|_| "mainnet".into());
 
     // Start watcher (don't fail if directory doesn't exist - it will be created)
-    let _ = tokio::spawn(async move {
+    tokio::spawn(async move {
         let _ = credentials::start_credentials_watcher(creds_base, network, creds_tx).await;
     });
 
@@ -101,7 +104,7 @@ async fn main() -> Result<()> {
             if arg.starts_with("nearx://") || arg.starts_with("/v1/") || arg.contains("#/v1/") {
                 if let Some(route) = nearx::router::parse(arg) {
                     app.apply_route(&route);
-                    log::info!("Applied deep link route from CLI: {}", arg);
+                    log::info!("Applied deep link route from CLI: {arg}");
                     break; // Only process first route
                 }
             }
@@ -125,12 +128,13 @@ async fn main() -> Result<()> {
     jump_marks.load_from_persistence().await;
 
     // main loop
-    let mouse_enabled = run_loop(&mut app, &mut terminal, rx, history, jump_marks, creds_rx).await?;
+    let mouse_enabled =
+        run_loop(&mut app, &mut terminal, rx, history, jump_marks, creds_rx).await?;
 
     // cleanup
-    let _ = source_task.abort();
+    source_task.abort();
     if let Some(task) = archival_task {
-        let _ = task.abort();
+        task.abort();
     }
     if mouse_enabled {
         execute!(terminal.backend_mut(), DisableMouseCapture)?;
@@ -249,20 +253,20 @@ fn handle_mouse(
             if row >= mid_row {
                 // Details pane
                 app.set_pane_direct(2);
-                app.log_debug(format!("Mouse select Details pane"));
+                app.log_debug("Mouse select Details pane".to_string());
             } else if col < mid_col {
                 // Blocks pane (top-left)
                 app.set_pane_direct(0);
                 // Account for header rows (typically 2-3 rows)
                 let idx = (row - 2).max(0) as usize;
                 app.select_block_row(idx);
-                app.log_debug(format!("Mouse select Blocks pane, row {}", idx));
+                app.log_debug(format!("Mouse select Blocks pane, row {idx}"));
             } else {
                 // Transactions pane (top-right)
                 app.set_pane_direct(1);
                 let idx = (row - 2).max(0) as usize;
                 app.select_tx_row(idx);
-                app.log_debug(format!("Mouse select Txs pane, row {}", idx));
+                app.log_debug(format!("Mouse select Txs pane, row {idx}"));
             }
         }
         MouseEventKind::ScrollUp => {
@@ -405,7 +409,7 @@ async fn handle_key(app: &mut App, k: KeyEvent, history: &History, jump_marks: &
         (KeyCode::Char('o'), KeyModifiers::CONTROL) => app.cycle_fps(),
         (KeyCode::Char('c'), _) => {
             // Copy content using unified copy_api (pane-aware)
-            if nearx::copy_api::copy_current(&app) {
+            if nearx::copy_api::copy_current(app) {
                 let msg = match app.pane() {
                     0 => "Copied block info".to_string(),
                     1 => "Copied tx hash".to_string(),
@@ -465,13 +469,13 @@ async fn handle_key(app: &mut App, k: KeyEvent, history: &History, jump_marks: &
         }
         (KeyCode::Char('['), _) => {
             // Jump to previous mark
-            if let Some(mark) = jump_marks.prev() {
+            if let Some(mark) = jump_marks.prev_mark() {
                 app.jump_to_mark(&mark);
             }
         }
         (KeyCode::Char(']'), _) => {
             // Jump to next mark
-            if let Some(mark) = jump_marks.next() {
+            if let Some(mark) = jump_marks.next_mark() {
                 app.jump_to_mark(&mark);
             }
         }

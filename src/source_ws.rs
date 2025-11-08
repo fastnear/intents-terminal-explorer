@@ -2,8 +2,6 @@
 //!
 //! This module is only available on native targets (not WASM).
 
-#![cfg(feature = "native")]
-
 use crate::{
     config::Config,
     rpc_utils::fetch_block_with_txs,

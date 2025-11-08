@@ -301,10 +301,7 @@ fn handle_urls<R: Runtime>(app: &tauri::AppHandle<R>, raws: &[String]) {
     // The JS bridge (web/deep_link.js) listens for "nearx://open" and updates location.hash
     for raw_url in raws {
         let _ = app.emit("nearx://open", raw_url);
-        log::info!(
-            "🟢 [HANDLE-URLS] Emitted 'nearx://open' event with URL: {}",
-            raw_url
-        );
+        log::info!("🟢 [HANDLE-URLS] Emitted 'nearx://open' event with URL: {raw_url}");
     }
 
     log::info!("🟢 [HANDLE-URLS] ==================== END ====================");

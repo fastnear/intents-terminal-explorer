@@ -685,21 +685,21 @@ impl App {
                 self.set_pane_direct(1);
                 self.filter_query = hash.clone();
                 self.apply_filter();
-                self.log_debug(format!("Route: tx/{}", hash));
+                self.log_debug(format!("Route: tx/{hash}"));
             }
             Route::V1(RouteV1::Block { height }) => {
                 // Focus blocks pane and filter to the specific height
                 self.set_pane_direct(0);
-                self.filter_query = format!("height:{}", height);
+                self.filter_query = format!("height:{height}");
                 self.apply_filter();
-                self.log_debug(format!("Route: block/{}", height));
+                self.log_debug(format!("Route: block/{height}"));
             }
             Route::V1(RouteV1::Account { id }) => {
                 // Focus transactions pane and filter to the account
                 self.set_pane_direct(1);
-                self.filter_query = format!("acct:{}", id);
+                self.filter_query = format!("acct:{id}");
                 self.apply_filter();
-                self.log_debug(format!("Route: account/{}", id));
+                self.log_debug(format!("Route: account/{id}"));
             }
             Route::V1(RouteV1::Home) => {
                 // Clear filter and return to auto-follow mode
@@ -1112,7 +1112,7 @@ impl App {
                 if let Some(ref actions) = tx.actions {
                     let formatted_actions: Vec<serde_json::Value> = actions
                         .iter()
-                        .map(|action| crate::copy_payload::format_action(action))
+                        .map(crate::copy_payload::format_action)
                         .collect();
                     pretty_json["actions"] = json!(formatted_actions);
                 }
