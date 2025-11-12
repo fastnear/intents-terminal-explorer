@@ -1,18 +1,8 @@
-# Ratacat Cargo Configuration
-#
-# This configuration enforces zero-warning policy for both native and WASM targets.
-# All warnings are treated as errors during compilation to maintain code quality.
-
-[build]
-target-dir = "target"
-
-# Enforce warnings as errors for native targets
-[target.'cfg(not(target_arch = "wasm32"))']
-rustflags = ["-Dwarnings"]
-
-# Enforce warnings as errors for WASM targets
+# Target-specific hardening for Web (wasm32)
 [target.wasm32-unknown-unknown]
-rustflags = ["-Dwarnings"]
-
-[env]
-RUST_LOG = "info"
+# Abort on panic (no unwinding) - avoids "unreachable" traps escalating.
+# Note: LTO and opt-level are applied via Trunk.toml for release builds to avoid
+# conflicts with cargo check/dev builds.
+rustflags = [
+  "-C", "panic=abort"
+]

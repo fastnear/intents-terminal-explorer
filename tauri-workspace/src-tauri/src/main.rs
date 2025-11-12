@@ -1,114 +1,111 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::{Arc, Mutex};
-
 use tauri::{Emitter, Manager};
 
-/// Keeps deep-link URLs that arrive before the webview is ready.
+#[cfg(feature = "e2e")]
+mod test_api;
+
 #[derive(Default, Clone)]
 struct PendingLinks(Arc<Mutex<Vec<String>>>);
 
-fn main() {
-    // Logger initialized by tauri-plugin-log
-    log::info!("NEARx Tauri starting");
+#[tauri::command]
+fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
 
+fn main() {
     let pending = PendingLinks::default();
 
-    let builder = tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .manage(pending.clone())
-        // Deep-link plugin: registers the "nearx" scheme and forwards URLs to the webview
+        // Logging to DevTools console
+        .plugin(tauri_plugin_log::Builder::default().build())
+        // Deep-link registration for nearx:// scheme
         .plugin(tauri_plugin_deep_link::init())
-        // Single-instance plugin: if a second process starts with nearx://..., forward it
+        // Single instance; forward deep links / CLI args to the running window
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            log::info!("Single-instance: received argv: {argv:?}");
-            // argv example (Windows): ["nearx.exe", "nearx://v1/tx/ABC123"]
-            // macOS may call via deep_link plugin instead; this is an extra guard.
+            // Forward CLI args that look like deep links
             for arg in argv {
-                let arg = arg.trim().to_string();
                 if arg.starts_with("nearx://") {
-                    log::info!("Single-instance: forwarding deep link: {arg}");
-                    let _ = app.emit("nearx://open", arg.clone());
-                } else if arg.starts_with("/v1/") || arg.starts_with("v1/") || arg.contains("#/v1/")
-                {
-                    // Normalize non-scheme route to a nearx:// URL for consistency
-                    let norm = format!("nearx://{}", arg.trim_start_matches('/'));
-                    log::info!("Single-instance: normalized {arg} to {norm}");
-                    let _ = app.emit("nearx://open", norm);
+                    let _ = app.emit("nearx://open", arg);
                 }
             }
         }))
-        .plugin(tauri_plugin_log::Builder::default().build())
-        .setup(move |app| {
-            log::info!("Tauri setup starting");
+        // System browser for Google OAuth / external links
+        .plugin(tauri_plugin_opener::init())
+        // Clipboard support (first tier of fallback chain)
+        .plugin(tauri_plugin_clipboard_manager::init());
 
+    // Add E2E test commands if feature is enabled
+    #[cfg(feature = "e2e")]
+    {
+        builder = builder.invoke_handler(tauri::generate_handler![
+            open_external,
+            test_api::nearx_test_emit_deeplink,
+            test_api::nearx_test_get_last_route,
+            test_api::nearx_test_clear_storage
+        ]);
+    }
+
+    #[cfg(not(feature = "e2e"))]
+    {
+        builder = builder.invoke_handler(tauri::generate_handler![open_external]);
+    }
+
+    builder
+        .setup(move |app| {
             let pending_clone = pending.clone();
-            // Register the custom scheme for this app.
+            let app_handle = app.handle().clone();
+
+            // Register deep link handler
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
 
-                // Register deep link handler
+                // Register scheme on Linux and debug Windows
                 #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
                 app.deep_link().register_all()?;
 
-                log::info!("Deep link registration complete");
-
-                let app_handle = app.handle().clone();
-
-                // When a deep link arrives (warm or cold), buffer it and *try* to emit.
+                // When a deep link arrives, buffer and emit
                 app.deep_link().on_open_url(move |event| {
-                    let urls = event.urls();
-                    log::info!("Deep link received: {urls:?}");
-
-                    for url in urls {
+                    for url in event.urls() {
                         let s = url.to_string();
-                        {
-                            let mut q = pending_clone.0.lock().expect("pending lock");
-                            q.push(s.clone());
-                        }
-                        // Try to deliver immediately to any open windows; if none exist yet,
-                        // the page-load hook will flush.
-                        log::info!("Emitting deep link event: {s}");
+                        // Buffer in case window isn't ready
+                        pending_clone.0.lock().unwrap().push(s.clone());
+                        // Try immediate delivery
                         let _ = app_handle.emit("nearx://open", s);
                     }
                 });
 
                 // Check for initial deep links on cold start
                 if let Some(urls) = app.deep_link().get_current()? {
-                    log::info!("Initial deep links: {urls:?}");
                     for url in urls {
-                        let s = url.to_string();
-                        let mut q = pending.0.lock().expect("pending lock");
-                        q.push(s);
+                        pending.0.lock().unwrap().push(url.to_string());
                     }
                 }
             }
 
-            log::info!("Tauri setup complete");
-
             // Auto-open DevTools in debug builds
             #[cfg(debug_assertions)]
-            {
-                if let Some(window) = app.get_webview_window("main") {
-                    window.open_devtools();
-                    log::info!("DevTools opened");
+            if let Some(win) = app.get_webview_window("main") {
+                win.open_devtools();
+                let _ = win.set_focus();
+            }
+
+            // Flush any buffered deep links to the now-ready window
+            if let Some(win) = app.get_webview_window("main") {
+                let mut q = pending.0.lock().unwrap();
+                for url in q.drain(..) {
+                    let _ = win.emit("nearx://open", url);
                 }
             }
 
             Ok(())
         })
-        // Command to flush queued URLs when frontend is ready
-        .invoke_handler(tauri::generate_handler![get_queued_links]);
-
-    builder
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
-}
-
-#[tauri::command]
-fn get_queued_links(state: tauri::State<PendingLinks>) -> Vec<String> {
-    let mut q = state.0.lock().expect("pending lock");
-    let links = q.drain(..).collect();
-    log::info!("Frontend requested queued links: {links:?}");
-    links
+        .expect("NEARx Tauri failed");
 }

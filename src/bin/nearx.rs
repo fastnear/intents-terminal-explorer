@@ -29,6 +29,7 @@ use nearx::{
     source_rpc, source_ws,
     types::AppEvent,
     ui,
+    util::dblclick::DblClick,
 };
 
 #[tokio::main]
@@ -154,6 +155,7 @@ async fn run_loop(
 ) -> Result<bool> {
     let mut last_frame = Instant::now();
     let mut mouse_enabled = false;
+    let mut dbl = DblClick::new(Duration::from_millis(280));
 
     loop {
         // frame budget (coalesced renders)
@@ -183,7 +185,7 @@ async fn run_loop(
                 }
                 Event::Mouse(m) => {
                     if mouse_enabled && app.ui_flags().mouse_map {
-                        handle_mouse(app, m, terminal)?;
+                        handle_mouse(app, m, terminal, &mut dbl)?;
                     }
                 }
                 _ => {}
@@ -238,10 +240,11 @@ fn handle_mouse(
     app: &mut App,
     mouse: MouseEvent,
     terminal: &Terminal<CrosstermBackend<io::Stdout>>,
+    dbl: &mut DblClick,
 ) -> Result<()> {
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            let (col, row) = (mouse.column as i32, mouse.row as i32);
+            let (col, row) = (mouse.column, mouse.row);
             let size = terminal.size()?;
 
             let mid_row = (size.height as i32) / 2;
@@ -250,21 +253,30 @@ fn handle_mouse(
             // Click detection: same layout as Web/Tauri
             // Top half: Blocks (left) and Txs (right)
             // Bottom half: Details (full width)
-            if row >= mid_row {
-                // Details pane
+            if (row as i32) >= mid_row {
+                // Details pane - check for double-click
+                // Only if Details is already focused (pane index 2)
+                if app.pane() == 2 && dbl.register(col, row) {
+                    // Double-click detected! Toggle fullscreen details
+                    app.toggle_details_fullscreen();
+                    app.log_debug("Mouse double-click → toggle details fullscreen".to_string());
+                    return Ok(()); // Skip normal click handling
+                }
+
+                // Single click - focus Details pane
                 app.set_pane_direct(2);
                 app.log_debug("Mouse select Details pane".to_string());
-            } else if col < mid_col {
+            } else if (col as i32) < mid_col {
                 // Blocks pane (top-left)
                 app.set_pane_direct(0);
                 // Account for header rows (typically 2-3 rows)
-                let idx = (row - 2).max(0) as usize;
+                let idx = (row as i32 - 2).max(0) as usize;
                 app.select_block_row(idx);
                 app.log_debug(format!("Mouse select Blocks pane, row {idx}"));
             } else {
                 // Transactions pane (top-right)
                 app.set_pane_direct(1);
-                let idx = (row - 2).max(0) as usize;
+                let idx = (row as i32 - 2).max(0) as usize;
                 app.select_tx_row(idx);
                 app.log_debug(format!("Mouse select Txs pane, row {idx}"));
             }

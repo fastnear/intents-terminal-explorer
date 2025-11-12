@@ -25,17 +25,30 @@ pub async fn run_rpc(cfg: &Config, tx: UnboundedSender<AppEvent>) -> Result<()> 
         cfg.near_node_url
     );
 
+    // Get effective auth token with priority: User token (from auth module) → Config token → None
+    let get_token = || -> Option<String> {
+        // Try user token first (from authenticated login via auth module)
+        if let Some(token) = crate::auth::token_string() {
+            log::debug!("🔑 Using user FastNEAR token (from auth)");
+            return Some(token);
+        }
+        // Fall back to config token (from env or URL param)
+        if let Some(ref token) = cfg.fastnear_auth_token {
+            log::debug!("🔑 Using config FastNEAR token (env/URL)");
+            Some(token.clone())
+        } else {
+            log::debug!("⚠️ No FastNEAR token available (may hit rate limits)");
+            None
+        }
+    };
+
     loop {
         log::debug!("📡 RPC loop tick - polling for latest block...");
 
+        let token = get_token();
+
         // non-overlapping loop, catch-up limited (guide's pattern).
-        match get_latest_block(
-            &cfg.near_node_url,
-            cfg.rpc_timeout_ms,
-            cfg.fastnear_auth_token.as_deref(),
-        )
-        .await
-        {
+        match get_latest_block(&cfg.near_node_url, cfg.rpc_timeout_ms, token.as_deref()).await {
             Ok(latest) => {
                 let latest_h = latest["header"]["height"].as_u64().unwrap_or(0);
                 log::debug!("✅ Got latest block height: {latest_h}");
@@ -56,12 +69,13 @@ pub async fn run_rpc(cfg: &Config, tx: UnboundedSender<AppEvent>) -> Result<()> 
                     );
 
                     for h in start..=end {
+                        let token = get_token(); // Refresh token for each block fetch
                         if let Ok(row) = fetch_block_with_txs(
                             &cfg.near_node_url,
                             h,
                             cfg.rpc_timeout_ms,
                             cfg.poll_chunk_concurrency,
-                            cfg.fastnear_auth_token.as_deref(),
+                            token.as_deref(),
                         )
                         .await
                         {

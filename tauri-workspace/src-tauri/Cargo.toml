@@ -25,6 +25,8 @@ rand = "0.8"
 tauri-plugin-deep-link = { workspace = true }
 tauri-plugin-single-instance = { workspace = true }
 tauri-plugin-log = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
 
 # Utilities
 chrono = "0.4"
@@ -49,6 +51,9 @@ winreg = "0.52"
 
 [features]
 default = []
+
+# E2E testing support - exposes test-only IPC commands for Selenium/WebDriver tests
+e2e = []
 
 # Disabled - using Tauri webview instead of native eframe
 # egui-ui = ["dep:egui", "dep:eframe", "dep:egui_ratatui", "dep:soft_ratatui", "dep:embedded-graphics-unicodefonts", "dep:ratatui", "dep:nearx", "dep:tokio", "dep:anyhow"]

@@ -1,6 +1,6 @@
 //! Filterable debug logging system for Web/Tauri development
 //!
-//! Categories: UI, INPUT, MOUSE, COPY, ROUTER, RENDER, THEME, DPR
+//! Categories: UI, INPUT, MOUSE, COPY, ROUTER, RENDER, THEME, DPR, AUTH
 //! Enable via: ?nxdebug=all or localStorage.setItem('nearx.debug','ui,mouse,overlay')
 //! Toggle overlay: Ctrl+Shift+D
 
@@ -15,6 +15,7 @@ pub mod cat {
     pub const RENDER: u32 = 1 << 5;
     pub const THEME: u32 = 1 << 6;
     pub const DPR: u32 = 1 << 7;
+    pub const AUTH: u32 = 1 << 8;
     pub const ALL: u32 = 0xffff_ffff;
 }
 
@@ -68,6 +69,7 @@ pub fn cat_name(cat: u32) -> &'static str {
         c if c == cat::RENDER => "render",
         c if c == cat::THEME => "theme",
         c if c == cat::DPR => "dpr",
+        c if c == cat::AUTH => "auth",
         _ => "misc",
     }
 }
@@ -109,6 +111,9 @@ pub fn set_from_list(list: &str) {
             }
             "dpr" => {
                 m |= cat::DPR;
+            }
+            "auth" => {
+                m |= cat::AUTH;
             }
             _ => {}
         }

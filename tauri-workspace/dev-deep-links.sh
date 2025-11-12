@@ -9,6 +9,7 @@
 #   ./dev-deep-links.sh              # Build and register, no test
 #   ./dev-deep-links.sh test         # Build, register, and test with sample URL
 #   ./dev-deep-links.sh clean        # Just clean old registrations
+#   ./dev-deep-links.sh --help       # Show this help
 #
 # What it does:
 #   1. Kills any running instances of the app
@@ -17,8 +18,24 @@
 #   4. Registers the fresh debug bundle
 #   5. Optionally tests with a deep link
 #
+# When to use:
+#   - Testing deep link handling (nearx:// URLs)
+#   - After changing CFBundleURLTypes in Info.plist
+#   - When deep links open wrong app version
+#
+# When NOT to use:
+#   - General UI development → use `cargo tauri dev` instead
+#   - Building for release → use `cargo tauri build --release`
+#
 
 set -e  # Exit on error
+
+# Check if running on macOS
+if [[ "$OSTYPE" != "darwin"* ]]; then
+    echo "Error: This script only works on macOS"
+    echo "Deep link registration uses macOS Launch Services"
+    exit 1
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -41,6 +58,40 @@ echo ""
 
 # Parse command
 MODE="${1:-build}"
+
+# Show help if requested
+if [[ "$MODE" == "--help" || "$MODE" == "-h" || "$MODE" == "help" ]]; then
+    echo "Usage: $0 [MODE]"
+    echo ""
+    echo "Modes:"
+    echo "  (none)  - Build debug binary, register bundle, no test"
+    echo "  test    - Build, register, and open sample deep link"
+    echo "  clean   - Clear old registrations without building"
+    echo "  --help  - Show this help message"
+    echo ""
+    echo "What it does:"
+    echo "  1. Kills any running instances of NEARx"
+    echo "  2. Builds a debug .app bundle with symbols"
+    echo "  3. Clears macOS Launch Services cache"
+    echo "  4. Registers the fresh debug bundle"
+    echo "  5. Optionally tests with nearx://v1/tx/ABC123"
+    echo ""
+    echo "When to use:"
+    echo "  • Testing deep link handling (nearx:// URLs)"
+    echo "  • After changing CFBundleURLTypes in Info.plist"
+    echo "  • When deep links open wrong app version"
+    echo ""
+    echo "When NOT to use:"
+    echo "  • General UI development → use 'cargo tauri dev' instead"
+    echo "  • Building for release → use 'cargo tauri build --release'"
+    echo ""
+    echo "Examples:"
+    echo "  $0              # Build and register"
+    echo "  $0 test         # Build, register, and test"
+    echo "  $0 clean        # Just clear old registrations"
+    echo ""
+    exit 0
+fi
 
 if [[ "$MODE" == "clean" ]]; then
     echo -e "${YELLOW}Cleaning mode: Only clearing registrations${NC}"
@@ -114,7 +165,7 @@ echo ""
 # Step 4.5: Create .app bundle structure manually
 echo -e "${YELLOW}[4.5/5] Creating .app bundle structure...${NC}"
 
-cd ../..  # Back to repo root
+cd ..  # Back to tauri-workspace directory
 
 # Remove old debug bundle if exists
 if [[ -d "$DEBUG_BUNDLE_PATH" ]]; then
@@ -130,7 +181,7 @@ BUNDLE_RESOURCES="$BUNDLE_CONTENTS/Resources"
 mkdir -p "$BUNDLE_MACOS"
 mkdir -p "$BUNDLE_RESOURCES"
 
-# Copy binary
+# Copy binary (from workspace target/debug)
 echo "  Copying binary..."
 cp "target/debug/$BINARY_NAME" "$BUNDLE_MACOS/"
 

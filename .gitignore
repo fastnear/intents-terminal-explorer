@@ -36,7 +36,14 @@ debug.log
 
 # Web build artifacts (Trunk)
 /dist/
+/dist-egui/
 **/dist/
+
+# Playwright E2E artifacts
+node_modules/
+test-results/
+playwright-report/
+playwright/.cache/
 
 # Session notes and summaries (Claude Code artifacts)
 *_SUMMARY.md

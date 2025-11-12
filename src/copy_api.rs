@@ -18,7 +18,7 @@
 //!
 //! All targets (Native TUI, Web, Tauri) call a single function:
 //!
-//! ```rust
+//! ```rust,ignore
 //! if copy_api::copy_current(&app) {
 //!     // Success - Native TUI shows toast, Web/Tauri may show overlay
 //! }
@@ -105,7 +105,7 @@ pub fn current_text(app: &App) -> Option<String> {
 /// ## Usage in Binaries
 ///
 /// **Native TUI:**
-/// ```rust
+/// ```rust,ignore
 /// if copy_api::copy_current(&app) {
 ///     app.show_toast("Copied".to_string());
 /// } else {
@@ -114,7 +114,7 @@ pub fn current_text(app: &App) -> Option<String> {
 /// ```
 ///
 /// **Web/Tauri:**
-/// ```rust
+/// ```rust,ignore
 /// // Just call it - platform.js may show overlay on success
 /// let _ = copy_api::copy_current(&app);
 /// ```

@@ -35,6 +35,9 @@ pub mod rpc_utils;
 // Theme system (available on all platforms, with platform-specific helpers)
 pub mod theme;
 
+// UI core (layout and input policy - available on all platforms)
+pub mod ui_core;
+
 // csli-style pane frame helper (native-only)
 #[cfg(feature = "native")]
 pub mod pane_frame;
@@ -76,6 +79,24 @@ pub mod marks;
 // Platform abstraction layer
 pub mod platform;
 
+// Authentication module (web/Tauri JavaScript bridge)
+pub mod auth;
+
+// Network utilities (429 backoff for native builds)
+#[cfg(feature = "native")]
+pub mod net;
+
+// WASM-specific JavaScript bridge (web/Tauri only)
+pub mod webshim;
+
+// WASM-facing exports (JS -> Rust) are only built on wasm32.
+// Keep surface tight to avoid pulling wasm_bindgen into native targets.
+#[cfg(target_arch = "wasm32")]
+pub mod wasm_api;
+
+// Utility modules (shared across all targets)
+pub mod util;
+
 // Copy functionality (shared across all targets)
 pub mod copy_api;
 pub mod copy_payload;
@@ -106,6 +127,6 @@ pub mod copy_payload;
 // pub mod execution_engine;
 
 // Re-export commonly used types
-pub use app::{App, InputMode};
+pub use app::{App, BlockLite, InputMode};
 pub use config::{Config, Source};
 pub use types::{AppEvent, BlockRow, Mark, TxLite};

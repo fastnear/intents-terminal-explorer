@@ -9,8 +9,8 @@ release = false
 # Output directory for built assets
 dist = "dist-egui"
 
-# Public URL base path (use "/" for root, or "/ratacat/" for subdirectory)
-public_url = "/"
+# Public URL base path (use "/" for root, or "./" for Tauri/relative paths)
+public_url = "./"
 
 # Optimize the WASM bundle
 [build.rust]

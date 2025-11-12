@@ -35,6 +35,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   line-height: 1.45;
+  cursor: default; /* Default cursor; set pointer from code when rows are hoverable */
 }
 
 /* Global rendering clarity for canvas-based UIs (egui + ratatui texture) */

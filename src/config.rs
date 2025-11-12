@@ -303,9 +303,7 @@ pub fn load() -> Result<Config> {
         archival_rpc_url,
         rpc_timeout_ms,
         rpc_retries,
-        fastnear_auth_token: args
-            .fastnear_auth_token
-            .or_else(|| env::var("FASTNEAR_AUTH_TOKEN").ok()),
+        fastnear_auth_token: args.fastnear_auth_token.or_else(fastnear_token),
         default_filter,
     })
 }
@@ -327,6 +325,38 @@ fn validate_url(url: &str, name: &str) -> Result<()> {
         Err(anyhow!(
             "{name} must start with ws://, wss://, http://, or https://"
         ))
+    }
+}
+
+/// Cross-target FastNEAR token resolution.
+/// Avoids runtime env reads on WASM (which cause panics).
+pub fn fastnear_token() -> Option<String> {
+    // Highest priority: user auth (web/tauri) if present
+    #[cfg(any(feature = "egui-web", feature = "web"))]
+    {
+        if let Some(t) = crate::auth::token_string() {
+            if !t.is_empty() {
+                return Some(t);
+            }
+        }
+    }
+
+    // Fallback: env var. On wasm, do not read at runtime!
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::var("FASTNEAR_AUTH_TOKEN")
+            .ok()
+            .filter(|s| !s.is_empty())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Compile-time embed; present if set when Cargo built the wasm.
+        if let Some(t) = option_env!("FASTNEAR_AUTH_TOKEN") {
+            if !t.is_empty() {
+                return Some(t.to_string());
+            }
+        }
+        None
     }
 }
 

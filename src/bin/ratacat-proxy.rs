@@ -20,14 +20,14 @@ use axum::{
     body::Body,
     extract::{Path, Query, State},
     http::{Method, StatusCode},
-    response::{IntoResponse, Json, Response},
+    response::{Json, Response},
     routing::{get, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
 use tower_http::cors::{Any, CorsLayer};
 
-use ratacat::{rpc_utils::fetch_block_with_txs, types::BlockRow};
+use nearx::{rpc_utils::fetch_block_with_txs, types::BlockRow};
 
 /// Application state shared across handlers
 #[derive(Clone)]

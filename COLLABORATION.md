@@ -1,684 +1,548 @@
-# NEARx Development - Architecture & Current Status
+# NEARx Development - Current Status & Architecture
 
-## Executive Summary
+## Executive Summary (2025-11-11 Update)
 
 NEARx (formerly Ratacat) is a high-performance NEAR Protocol blockchain transaction viewer with **quad-mode deployment**: Terminal (TUI), Web (WASM), Desktop (Tauri), and Browser Extension integration.
 
-**Current Status (2025-11-07)**:
-- ✅ Native Terminal: Fully functional with mouse toggle, theme system, excellent performance
-- ⚠️ Web Browser: Rendering broken - large blue area instead of UI, WASM errors in console
-- ⚠️ Tauri Desktop: Similar issues to Web (shares WASM/egui pipeline)
-- 🏗️ Theme parity work: Completed but Web/Tauri need rendering pipeline fixes
+**Current Status (All Targets Functional ✅)**:
+- ✅ Native Terminal: Fully functional, excellent performance
+- ✅ Web Browser: Working with relative WASM paths
+- ✅ Tauri Desktop: Working with fixed CSP + relative paths
+- ✅ Theme parity: Complete (unified tokens system)
+- ✅ Keyboard/Mouse: Full parity across all targets
 
 ---
 
-## Recent Work: Visual Parity Implementation (2025-11-07)
+## Recent Critical Fixes (2025-11-11)
 
-### Goal
-Align Web and Tauri visual appearance with the TUI's flat, minimal aesthetic.
+### 1. Tauri WASM Loading Regression (FIXED)
 
-### Changes Made
+**Problem**: Dark screen after "Loading NEARx" disappeared, WASM preload warnings in console.
 
-#### 1. Enhanced `src/theme.rs::eg::apply()` (egui theme)
-- **Flat panels**: No glossy chrome, minimal shadows
-- **Subtle corner radius**: 4px windows, 3px widgets
-- **Strong focus indicators**: Accent borders on hover, accent-strong on active
-- **Compact spacing**: 8x6px items, 8x4px buttons (matches TUI density)
-- **Selection emphasis**: Proper selection background + accent-strong stroke
-- **State colors**: warn/error colors from theme
-- **Monospace fonts**: System stack for code-like UI elements
+**Root Cause**: Trunk.toml configured with `public_url = "/"` (absolute paths) which work for web servers but fail with Tauri's custom protocol handler (`tauri://localhost/`).
 
-**API fixes applied**:
-- `Rounding` → `CornerRadius` (egui 0.32 API)
-- `window_rounding` → `window_corner_radius`
-- `f32` → `u8` for corner radius values
-
-#### 2. Extended `web/theme.css`
-- Added `--radius`, `--stroke`, `--spacing` variables
-- Created `.nx-panel` class for DOM elements (toasts, overlays)
-- Ensures any non-canvas UI elements match egui styling
-
-#### 3. Fixed `src/bin/nearx-web.rs` frame
-```rust
-// Before:
-.frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
-
-// After:
-.frame(egui::Frame::default())  // Respects theme
+**Solution**:
+```toml
+# Trunk.toml (line 13)
+public_url = "./"  # Changed from "/" to "./"
 ```
 
-### Build Verification
-✅ All 3 targets compile successfully
-✅ All 13 preflight checks pass
-✅ No theme violations detected
+**Why This Works**:
+- Web servers: Both `/nearx-web.js` and `./nearx-web.js` resolve correctly
+- Tauri protocol: `tauri://localhost/nearx-web.js` works, but `/nearx-web.js` tries to load from `tauri:///` (invalid)
+
+**Files Modified**:
+- `Trunk.toml` - Changed public_url to relative
+- Rebuilt WASM with `trunk build --release`
+- Tauri bundle now loads correctly
 
 ---
 
-## Critical Issue: Web/Tauri Rendering Broken
+### 2. Tauri CSP Configuration (FIXED)
 
-### Symptom
-Large bright blue section dominates screen instead of proper 3-pane TUI layout.
+**Problem**: Console errors about IPC protocol being blocked, causing fallback to postMessage.
 
-### Evidence
-- Screenshot shows ~70% of window as solid blue
-- Small ratatui content visible in top portion
-- User reported: "WASM-related error in browser dev console"
+**Root Cause**: Content Security Policy missing required Tauri IPC directives.
 
-### Suspected Root Causes
-
-#### 1. egui_ratatui Layout Issues
-The ratatui terminal is being rendered but egui might be:
-- Not allocating enough space for the terminal widget
-- Incorrectly sizing the canvas
-- Failing to paint the terminal texture
-
-#### 2. SoftBackend Initialization
-Current dimensions in `src/bin/nearx-web.rs:64-66`:
-```rust
-let soft_backend = SoftBackend::<EmbeddedGraphics>::new(
-    100,  // width in columns
-    35,   // height in rows
-    // ... fonts
-);
+**Solution**:
+```json
+// tauri.conf.json (line 24)
+"csp": "default-src 'none'; script-src 'self'; ... connect-src 'self' ipc: http://ipc.localhost https://accounts.google.com ..."
 ```
 
-**Problem**: Fixed size (100x35) might not match window size, causing:
-- Clipping/overflow
-- Blank areas filled with default color
-- Layout math mismatch with actual pixels
+**Added Directives**:
+- `ipc:` - Tauri's IPC protocol
+- `http://ipc.localhost` - Tauri's local IPC endpoint
 
-#### 3. Frame Usage After Theme Changes
-The `Frame::default()` change might interact poorly with egui's layout if:
-- Default frame has padding/margins
-- Inner/outer sizing calculations are wrong
-- CentralPanel isn't expanding to fill window
-
-#### 4. WASM Module Errors (Unreported)
-User mentioned console errors but didn't share details. Could be:
-- Font loading failures
-- Texture allocation failures
-- WebGL context issues
-- Memory limits exceeded
+**Reference**: [Tauri v2 CSP Documentation](https://v2.tauri.app/concept/security/#content-security-policy)
 
 ---
 
-## Unified Architecture Proposal
+### 3. Tauri Plugin Configuration (FIXED)
 
-### Vision: Single Core, Multiple Transforms
+**Problem**: App crashed immediately on launch with `PluginInitialization("opener", "Error deserializing 'plugins.opener'")`.
+
+**Root Cause**: Invalid `opener` plugin configuration with unsupported `scope` field.
+
+**Solution**: Removed invalid configuration block:
+```json
+// REMOVED FROM tauri.conf.json:
+"opener": {
+  "scope": [  // This field doesn't exist in opener plugin
+    "https://accounts.google.com/*",
+    ...
+  ]
+}
+```
+
+**Result**: Opener plugin works fine without explicit configuration.
+
+---
+
+### 4. Theme Tokens Centralization (IMPLEMENTED)
+
+**Problem**: Visual design tokens (border thickness, layout ratios, spacing) hardcoded and duplicated across `src/ui.rs` (TUI) and `src/bin/nearx-web.rs` (Web/Tauri).
+
+**Solution**: Created `src/theme/tokens.rs` as single source of truth.
+
+**Architecture**:
+```
+src/theme/tokens.rs
+├── LayoutSpec (top_ratio: 0.52, gaps)
+├── VisualTokens (focus_stroke_px: 2.0, row_height_px: 22.0, radii)
+└── RatTokens (focused_thick_border: true)
+```
+
+**Implementation**:
+
+1. **TUI (`src/ui.rs`)**:
+   - Layout ratio: Changed from hardcoded 30/70 to token-driven 52/48
+   - Focused borders: Use `BorderType::Thick` when `tokens().rat.focused_thick_border` is true
+   - Applied to all three panes: Blocks, Transactions, Details
+
+2. **Web/Tauri (`src/bin/nearx-web.rs`)**:
+   - Currently renders pure ratatui (no separate egui chrome)
+   - Uses same `src/ui.rs` rendering code
+   - Benefits from same token-driven design
+
+**Visual Consistency**:
+- TUI thick border = Web 2px stroke (both from tokens)
+- 52/48 layout split matches csli-dashboard feel
+- All spacing and gaps consistent
+
+**Accessibility**:
+- Included `audit_theme_for_contrast()` helper for WCAG AA compliance checking
+- Can be called from theme application code to log contrast ratios
+
+---
+
+## Architecture Overview
+
+### Quad-Mode Deployment
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Shared Core (Rust)                      │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ • App state (blocks, txs, selection, filter)          │ │
-│  │ • Business logic (filtering, navigation, history)     │ │
-│  │ • Unified Theme (Rgb values, contrast ratios)         │ │
-│  │ • Data layer (RPC, archival fetch)                    │ │
-│  └────────────────────────────────────────────────────────┘ │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-        ┌────────────────┼────────────────┐
-        ▼                ▼                ▼
-┌───────────────┐ ┌──────────────┐ ┌────────────────┐
-│ Native TUI    │ │ Web/Tauri    │ │ Extension      │
-│ Transform     │ │ Transform    │ │ Transform      │
-├───────────────┤ ├──────────────┤ ├────────────────┤
-│ • Crossterm   │ │ • egui       │ │ • Native msg   │
-│ • Ratatui     │ │ • egui_ratatui│ │ • Deep links  │
-│   direct      │ │ • SoftBackend│ │ • Relay        │
-│ • SQLite      │ │ • WebGL      │ │                │
-│ • Mouse opt-in│ │ • Mouse ON   │ │                │
-│ • Theme::rat  │ │ • Theme::eg  │ │                │
-└───────────────┘ └──────────────┘ └────────────────┘
+│              NEARx Deployment Architecture                   │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Terminal (TUI)    Web (WASM)      Tauri Desktop            │
+│  ├─ Crossterm     ├─ egui         ├─ Same as Web           │
+│  ├─ SQLite        ├─ RPC only     ├─ Deep links            │
+│  └─ WS + RPC      └─ In-memory    └─ Single instance       │
+│                                                              │
+│              ▼                                               │
+│  ┌────────────────────────────────────────────────────┐    │
+│  │          Shared Rust Core                          │    │
+│  │  • App state (src/app.rs)                          │    │
+│  │  • UI rendering (src/ui.rs - ratatui)              │    │
+│  │  • Theme tokens (src/theme/tokens.rs) ◄── NEW     │    │
+│  │  • RPC client (src/source_rpc.rs)                  │    │
+│  │  • Filter (src/filter.rs)                          │    │
+│  └────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Core Principles
+### Key Files
 
-#### 1. Theme as Single Source of Truth
-**Current State**: ✅ Working well
-```rust
-pub struct Theme {
-    pub bg: Rgb,
-    pub panel: Rgb,
-    pub panel_alt: Rgb,
-    pub text: Rgb,
-    pub accent: Rgb,
-    // ...
-}
-```
+**Binaries**:
+- `src/bin/nearx.rs` - Native terminal (Crossterm backend)
+- `src/bin/nearx-web.rs` - Web/Tauri (egui_ratatui bridge)
+- `tauri-workspace/src-tauri/src/main.rs` - Tauri wrapper
 
-**Transform Layer**:
-- `theme::rat` → ratatui `Color::Rgb`
-- `theme::eg` → egui `Color32`
-- `theme.css` → CSS variables
+**Shared Core**:
+- `src/app.rs` - Application state machine
+- `src/ui.rs` - Ratatui UI rendering (used by ALL targets)
+- `src/theme/` - Theme system
+  - `tokens.rs` - Design tokens (NEW)
+  - `mod.rs` - Theme definitions
+  - `rat.rs` - Ratatui helpers
+  - `eg.rs` - egui helpers
 
-**Missing**: Web/Tauri need better integration with egui visuals.
-
-#### 2. Input as Unified Events
-**Current State**: ⚠️ Partially unified
-- Native: Crossterm events → App methods
-- Web: egui events → App methods
-- Tauri: Same as Web
-
-**Problems**:
-- Mouse handling duplicated between TUI and Web binaries
-- Tab consumption logic duplicated
-- UiFlags partially applied
-
-**Proposal**: Unified input abstraction
-```rust
-pub enum InputEvent {
-    Key { code: KeyCode, modifiers: Modifiers },
-    Mouse { kind: MouseKind, pos: (u16, u16) },
-}
-
-impl App {
-    pub fn handle_input(&mut self, event: InputEvent) -> InputResult {
-        // Unified logic for all targets
-        // Returns commands for platform layer
-    }
-}
-```
-
-**Transform Layer**:
-- Native: `crossterm::Event` → `InputEvent`
-- Web: `egui::Event` → `InputEvent`
-
-#### 3. Rendering as Target-Specific
-**Current State**: ⚠️ Diverging implementations
-
-**Native TUI**:
-```rust
-fn draw(f: &mut Frame, app: &App, marks: &[Mark]) {
-    // Direct ratatui rendering
-    // Full control over layout
-}
-```
-
-**Web/Tauri**:
-```rust
-impl eframe::App for RatacatApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // egui layout
-        // ratatui terminal as widget
-        // Limited control
-    }
-}
-```
-
-**Problem**: Two completely different render paths with duplicated UI logic.
-
-**Proposal**: Unified render core with target adapters
-```rust
-pub struct RenderState {
-    pub blocks_area: Rect,
-    pub txs_area: Rect,
-    pub details_area: Rect,
-    pub chrome_height: u16,
-}
-
-pub fn calculate_layout(total: Rect, app: &App) -> RenderState {
-    // Unified layout math
-    // Returns areas for all panes
-}
-
-// Native uses directly:
-pub fn draw_native(f: &mut Frame, state: &RenderState, app: &App) {
-    f.render_widget(blocks_widget, state.blocks_area);
-    // ...
-}
-
-// Web wraps in egui:
-pub fn draw_web(ui: &mut egui::Ui, terminal: &mut Terminal<...>, app: &App) {
-    let state = calculate_layout(terminal.size(), app);
-    terminal.draw(|f| draw_native(f, &state, app));
-    ui.add(terminal.backend_mut());
-}
-```
-
-#### 4. Clipboard as Platform Abstraction
-**Current State**: ✅ Working well
-```rust
-// src/platform/mod.rs
-pub fn copy_to_clipboard(text: &str) -> Result<()> {
-    #[cfg(feature = "native")]
-    return native::copy_to_clipboard(text);
-
-    #[cfg(target_arch = "wasm32")]
-    return web::copy_to_clipboard(text);
-}
-```
-
-**Transform Layer**:
-- Native: copypasta crate
-- Web: JavaScript bridge with 4-tier fallback
-- Tauri: Tauri plugin (highest priority)
+**Configuration**:
+- `Trunk.toml` - Web build config (public_url = "./")
+- `tauri-workspace/src-tauri/tauri.conf.json` - Tauri config (CSP, deep links)
+- `.env.example` - Runtime configuration template
 
 ---
 
-## Specific Issues to Fix
+## Development Workflows
 
-### 1. Web/Tauri Rendering (Critical)
+### 1. General UI Development (Recommended)
 
-**Task**: Fix large blue area, make ratatui content fill window
-
-**Investigation Steps**:
-1. Get WASM console errors from user (F12 → Console tab)
-2. Check if SoftBackend is creating correct texture size
-3. Verify egui_ratatui widget is getting full available space
-4. Test with fixed window size vs. responsive sizing
-
-**Potential Fixes**:
-- Make SoftBackend dimensions responsive to window size
-- Use `ui.available_size()` to calculate columns/rows dynamically
-- Ensure CentralPanel has no margins/padding
-- Check if Clear widget is working correctly
-
-**Code Location**: `src/bin/nearx-web.rs:47-82` (RatacatApp::new)
-
-### 2. Dynamic Terminal Sizing (High Priority)
-
-**Current**: Fixed 100x35 columns/rows
-```rust
-let soft_backend = SoftBackend::<EmbeddedGraphics>::new(
-    100,  // Fixed
-    35,   // Fixed
-    // ...
-);
-```
-
-**Needed**: Responsive sizing
-```rust
-fn calculate_terminal_size(window_size: egui::Vec2, font_size: (f32, f32)) -> (u16, u16) {
-    let cols = (window_size.x / font_size.0).floor() as u16;
-    let rows = (window_size.y / font_size.1).floor() as u16;
-    (cols, rows)
-}
-
-// On window resize:
-let (cols, rows) = calculate_terminal_size(ui.available_size(), (9.0, 18.0));
-// Recreate terminal with new size
-```
-
-**Complexity**: SoftBackend might not support dynamic resize
-
-**Alternative**: Use larger fixed size (e.g., 200x60) and let egui scale down
-
-### 3. UiFlags Consistency (Medium Priority)
-
-**Current State**: Flags exist but not consistently applied
-
-```rust
-pub struct UiFlags {
-    pub consume_tab: bool,        // ✅ Applied in Web
-    pub dpr_snap: bool,           // ✅ Applied in Web
-    pub mouse_map: bool,          // ⚠️ Default false, needs testing
-    pub dblclick_details: bool,   // ⚠️ Default false, needs testing
-}
-```
-
-**Target-Specific Defaults** (from `src/flags.rs:18-25`):
-```rust
-#[cfg(target_arch = "wasm32")]
-impl Default for UiFlags {
-    fn default() -> Self {
-        Self {
-            consume_tab: true,
-            dpr_snap: true,
-            mouse_map: true,   // Should be ON for Web/Tauri
-            dblclick_details: true,  // Should be ON for Web/Tauri
-        }
-    }
-}
-```
-
-**Issue**: These defaults exist but mouse_map/dblclick_details features might not be fully wired up.
-
-**Testing Needed**:
-1. Verify mouse click selects panes/rows
-2. Verify double-click toggles details fullscreen
-3. Check if scroll wheel works
-
-### 4. Font Rendering Sharpness (Low Priority)
-
-**Current**: Using embedded_graphics_unicodefonts (9x18 bitmap)
-
-**Observation**: Web might look blurry compared to native terminal
-
-**Options**:
-1. Keep bitmap fonts (current, crisp but retro)
-2. Switch to egui's native text rendering (modern but loses terminal feel)
-3. Hybrid: Use egui text for chrome, ratatui for content
-
-**Decision**: Defer until rendering is working at all
-
-### 5. Theme Application Timing (Medium Priority)
-
-**Current**: Applied once on startup + when theme changes
-```rust
-let cur_theme = *self.app.borrow().theme();
-if self.last_egui_theme != Some(cur_theme) {
-    nearx::theme::eg::apply(ctx, &cur_theme);
-    self.last_egui_theme = Some(cur_theme);
-}
-```
-
-**Issue**: Frame background might not update if set before theme applies
-
-**Fix**: Apply theme before creating frame, or use theme colors directly in frame construction
-```rust
-// Apply theme first
-nearx::theme::eg::apply(ctx, &cur_theme);
-
-// Then create panel with themed background
-egui::CentralPanel::default()
-    .frame(egui::Frame {
-        fill: egui::Color32::from_rgb(
-            cur_theme.bg.0,
-            cur_theme.bg.1,
-            cur_theme.bg.2
-        ),
-        ..Default::default()
-    })
-    .show(ctx, |ui| { /* ... */ });
-```
-
----
-
-## Transform Architecture Examples
-
-### Example 1: Keyboard Input Transform
-
-**Core Event**:
-```rust
-pub enum KeyAction {
-    NextPane,
-    PrevPane,
-    ScrollUp(u16),
-    ScrollDown(u16),
-    Copy,
-    ToggleFullscreen,
-    // ...
-}
-```
-
-**Native Transform**:
-```rust
-// src/bin/nearx.rs
-match crossterm_event {
-    Event::Key(KeyEvent { code: KeyCode::Tab, modifiers: KeyModifiers::SHIFT, .. }) => {
-        app.handle_key_action(KeyAction::PrevPane);
-    }
-    Event::Key(KeyEvent { code: KeyCode::Tab, .. }) => {
-        app.handle_key_action(KeyAction::NextPane);
-    }
-    // ...
-}
-```
-
-**Web Transform**:
-```rust
-// src/bin/nearx-web.rs
-match egui_event {
-    egui::Event::Key { key: egui::Key::Tab, modifiers, .. } => {
-        let action = if modifiers.shift {
-            KeyAction::PrevPane
-        } else {
-            KeyAction::NextPane
-        };
-        app.handle_key_action(action);
-
-        // Platform-specific: Consume Tab for egui
-        if app.ui_flags().consume_tab {
-            ctx.input_mut(|i| i.consume_key(...));
-        }
-    }
-}
-```
-
-### Example 2: Mouse Input Transform
-
-**Core Event**:
-```rust
-pub enum MouseAction {
-    SelectPane(PaneIndex),
-    SelectRow { pane: PaneIndex, row: usize },
-    Scroll { delta: i32 },
-    DoubleClickDetails,
-}
-```
-
-**Native Transform**:
-```rust
-// src/bin/nearx.rs
-match crossterm_event {
-    Event::Mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column, row, .. }) => {
-        let pane = determine_pane_from_position(column, row, terminal.size()?);
-        app.handle_mouse_action(MouseAction::SelectPane(pane));
-
-        if pane != PaneIndex::Details {
-            let row_idx = (row - 2).max(0) as usize;
-            app.handle_mouse_action(MouseAction::SelectRow { pane, row: row_idx });
-        }
-    }
-}
-```
-
-**Web Transform**:
-```rust
-// src/bin/nearx-web.rs
-if flags.mouse_map && resp.hovered() {
-    if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
-        // Convert pixels to cells
-        let col = ((pos.x - rect.min.x) / cell_w).floor() as i32;
-        let row = ((pos.y - rect.min.y) / cell_h).floor() as i32;
-
-        let pane = determine_pane_from_position(col, row, terminal.size()?);
-        app.handle_mouse_action(MouseAction::SelectPane(pane));
-
-        // Platform-specific: Double-click on details
-        if flags.dblclick_details && ui.input(|i| i.pointer.button_double_clicked(...)) {
-            app.handle_mouse_action(MouseAction::DoubleClickDetails);
-        }
-    }
-}
-```
-
-### Example 3: Theme Transform
-
-**Core Definition**:
-```rust
-// src/theme.rs
-pub struct Theme {
-    pub bg: Rgb,
-    pub panel: Rgb,
-    pub accent: Rgb,
-    // ...
-}
-
-impl Theme {
-    pub fn contrast_ratio(&self, fg: Rgb, bg: Rgb) -> f32 {
-        // WCAG calculation
-    }
-}
-```
-
-**Native Transform**:
-```rust
-// src/theme.rs (mod rat)
-#[inline]
-pub fn c(Rgb(r, g, b): Rgb) -> ratatui::style::Color {
-    Color::Rgb(r, g, b)
-}
-
-pub fn styles(t: &Theme) -> Styles {
-    Styles {
-        border: Style::default().fg(c(t.border)),
-        border_focus: Style::default().fg(c(t.accent_strong)),
-        // ...
-    }
-}
-```
-
-**Web Transform**:
-```rust
-// src/theme.rs (mod eg)
-#[inline]
-pub fn c(Rgb(r, g, b): Rgb) -> egui::Color32 {
-    Color32::from_rgb(r, g, b)
-}
-
-pub fn apply(ctx: &egui::Context, t: &Theme) {
-    let mut v = egui::Visuals::dark();
-    v.panel_fill = c(t.panel);
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, c(t.accent));
-    // ... full egui visuals mapping
-    ctx.set_style(style);
-}
-```
-
-**CSS Transform**:
-```css
-/* web/theme.css - generated or manually synced */
-:root {
-  --bg: #0b0e14;      /* Theme.bg */
-  --panel: #0f131a;   /* Theme.panel */
-  --accent: #66b3ff;  /* Theme.accent */
-  /* ... */
-}
-```
-
----
-
-## Testing Strategy
-
-### Web/Tauri Rendering Fix
-
-**Step 1: Get Error Details**
 ```bash
-# User runs:
+cd tauri-workspace
+cargo tauri dev
+```
+
+**Features**:
+- Hot reload on Rust file changes
+- DevTools auto-open (Cmd+Option+I / F12)
+- Debug logging enabled
+- Fast iteration cycle
+
+**When to Use**:
+- UI layout changes
+- Feature development
+- Theme tweaks
+- General debugging
+
+**Limitations**:
+- Deep links won't work (macOS Launch Services caches URL schemes)
+- Use dev-deep-links.sh for deep link testing instead
+
+---
+
+### 2. Deep Link Testing (macOS Only)
+
+```bash
+./tauri-dev.sh test
+```
+
+**What It Does** (6 steps):
+1. Kills any running instances
+2. Builds debug binary (`cargo build` in tauri-workspace/src-tauri)
+3. Clears macOS Launch Services cache
+4. Creates .app bundle with Info.plist
+5. Copies bundle to /Applications
+6. Registers with Launch Services
+7. Tests with `nearx://v1/tx/ABC123` (optional)
+
+**Why Needed**:
+- macOS caches URL scheme registrations
+- `cargo tauri dev` doesn't update Launch Services
+- Fresh bundle required for deep link testing
+
+**When to Use**:
+- Testing deep link handling
+- After changing CFBundleURLTypes in Info.plist
+- When deep links open wrong app version
+
+**Script Location**: Project root (`/Users/mikepurvis/near/fn/ratacat/tauri-dev.sh`)
+
+---
+
+### 3. Web Development
+
+```bash
 trunk serve --open
-# Then in browser: F12 → Console tab
-# Copy all errors/warnings mentioning WASM, canvas, or texture
+# Opens at http://127.0.0.1:8083
 ```
 
-**Step 2: Minimal Reproduction**
+**Features**:
+- Auto-reload on changes
+- No bundle/registration overhead
+- Easy browser DevTools access
+
+**When to Use**:
+- Web-specific features (auth callbacks, etc.)
+- Testing CORS/CSP
+- Performance profiling
+
+---
+
+### 4. Native Terminal Development
+
+```bash
+cargo run --bin nearx --features native
+```
+
+**Features**:
+- Full TUI experience
+- SQLite persistence
+- WebSocket + RPC support
+- Fastest iteration for terminal-specific features
+
+**When to Use**:
+- Terminal-specific features
+- SQLite history debugging
+- Credential watching
+- Performance optimization
+
+---
+
+## Build Commands Reference
+
+### All Targets
+
+```bash
+# Check compilation (no binary)
+cargo check --features native --bin nearx
+cargo check --target wasm32-unknown-unknown --no-default-features --features egui-web --bin nearx-web
+
+# Full builds
+cargo build --release --features native --bin nearx              # Terminal
+trunk build --release                                            # Web
+cd tauri-workspace && cargo tauri build                          # Tauri
+```
+
+### Quick Iteration
+
+```bash
+# Fastest: Native terminal
+cargo run --bin nearx --features native
+
+# Fast: Web with hot reload
+trunk serve
+
+# Medium: Tauri with hot reload
+cd tauri-workspace && cargo tauri dev
+
+# Slow: Deep link testing (requires full rebuild + registration)
+./tauri-dev.sh
+```
+
+---
+
+## Common Issues & Solutions
+
+### Issue 1: Tauri Shows Dark Screen After Loading
+
+**Symptoms**:
+- "Loading NEARx" disappears but UI doesn't render
+- Console shows WASM preload warnings
+- Deep link bridge initializes but nothing visible
+
+**Solution**:
+```bash
+# 1. Verify Trunk.toml has relative paths
+grep "public_url" Trunk.toml
+# Should show: public_url = "./"
+
+# 2. Rebuild WASM
+trunk build --release
+
+# 3. Rebuild Tauri
+./tauri-dev.sh
+```
+
+---
+
+### Issue 2: CSP Errors in Console
+
+**Symptoms**:
+```
+Refused to connect to ipc://localhost/...
+IPC custom protocol failed, falling back to postMessage
+```
+
+**Solution**:
+Check `tauri.conf.json` CSP includes:
+```json
+"connect-src 'self' ipc: http://ipc.localhost ..."
+```
+
+---
+
+### Issue 3: Deep Links Don't Work
+
+**Symptoms**:
+- Clicking `nearx://` link does nothing
+- Opens wrong app version
+- Opens browser instead of app
+
+**Solution**:
+```bash
+# 1. Clean old registrations
+./tauri-dev.sh clean
+
+# 2. Rebuild and register
+./tauri-dev.sh
+
+# 3. Test
+open 'nearx://v1/tx/ABC123'
+
+# 4. Verify registration
+mdfind "kMDItemCFBundleIdentifier == 'com.fastnear.nearx'"
+# Should show: /Applications/NEARx.app
+```
+
+---
+
+### Issue 4: Keyboard/Mouse Not Working
+
+**Current Status**: ✅ Working across all targets
+
+**If Regresses**:
+1. Check browser console for errors
+2. Verify no panic messages in logs
+3. Test in `cargo tauri dev` mode (better error messages)
+4. Check if egui wants_keyboard_input() is true
+
+**Known Pattern**:
+- Mouse: Click events must not hold app borrows during egui context access
+- Keyboard: Key events collected first, then processed (avoid nested borrows)
+
+---
+
+## Theme System
+
+### Tokens Structure
+
 ```rust
-// Simplify RatacatApp::new to minimal working state
-let soft_backend = SoftBackend::<EmbeddedGraphics>::new(
-    80, 24,  // Standard terminal size
-    mono_9x18_atlas(),
-    None, None,
-);
-// Test if even blank terminal renders correctly
+// src/theme/tokens.rs
+pub struct Tokens {
+    pub layout: LayoutSpec {
+        top_ratio: 0.52,     // 52% top (Blocks+Txs), 48% bottom (Details)
+        gap_px: 6.0,         // Gap between panels (egui)
+        gap_cells: 1,        // Gap between panels (ratatui)
+    },
+    pub visuals: VisualTokens {
+        focus_stroke_px: 2.0,      // Focused border width (egui)
+        unfocus_stroke_px: 1.0,    // Unfocused border width (egui)
+        window_radius_px: 4,       // Window corners
+        widget_radius_px: 3,       // Widget corners
+        row_height_px: 22.0,       // Virtual scroll row height
+    },
+    pub rat: RatTokens {
+        focused_thick_border: true,  // Use BorderType::Thick when focused
+        gap_cells: 1,
+    },
+}
 ```
 
-**Step 3: Incremental Fixes**
-1. Fix any WASM module errors
-2. Ensure SoftBackend creates valid texture
-3. Verify egui_ratatui widget renders texture
-4. Add responsive sizing
-5. Apply theme properly
+### Usage Example
 
-### Cross-Platform Input Testing
-
-**Test Matrix**:
-| Action | Native (TUI) | Web (Browser) | Tauri (Desktop) |
-|--------|-------------|---------------|-----------------|
-| Tab cycles panes | ✅ Ctrl+M mouse | ⚠️ Test needed | ⚠️ Test needed |
-| Click selects pane | ✅ (opt-in) | ⚠️ Should work | ⚠️ Should work |
-| Double-click details | ❌ N/A | ⚠️ Test needed | ⚠️ Test needed |
-| Scroll wheel | ✅ (opt-in) | ⚠️ Test needed | ⚠️ Test needed |
-| Space fullscreen | ✅ Works | ⚠️ Test needed | ⚠️ Test needed |
-| Copy (c key) | ✅ Works | ⚠️ Test needed | ⚠️ Test needed |
-
----
-
-## Immediate Next Steps
-
-### Priority 1: Fix Web Rendering (Blocking)
-1. User provides console errors
-2. Investigate SoftBackend sizing
-3. Test with different terminal dimensions
-4. Verify egui_ratatui integration
-
-### Priority 2: Test Mouse/Keyboard on Web
-1. Verify UiFlags defaults are actually applied
-2. Test mouse click → pane selection
-3. Test double-click → fullscreen toggle
-4. Test scroll wheel
-5. Document any broken behaviors
-
-### Priority 3: Unified Input Layer (Refactoring)
-1. Create `InputEvent` enum in core
-2. Implement `App::handle_input_event(&mut self, event: InputEvent)`
-3. Update Native binary to use new API
-4. Update Web binary to use new API
-5. Verify behavior unchanged
-
-### Priority 4: Documentation
-1. Update README with current status
-2. Add troubleshooting section for Web rendering
-3. Document UiFlags and target-specific defaults
-4. Create ARCHITECTURE.md with transform diagrams
-
----
-
-## Long-Term Vision
-
-### Unified Core API
 ```rust
-// High-level goal
-pub struct NEARx {
-    app: App,
-    platform: Box<dyn PlatformAdapter>,
+// In src/ui.rs (TUI)
+let top_ratio = (tokens::tokens().layout.top_ratio * 100.0).round() as u16;
+let rows = Layout::default()
+    .constraints([Constraint::Percentage(top_ratio), ...])
+    .split(area);
+
+// Border thickness
+if focused && tokens::tokens().rat.focused_thick_border {
+    block.border_type(BorderType::Thick)
+} else {
+    block.border_type(BorderType::Rounded)
 }
-
-trait PlatformAdapter {
-    fn render(&mut self, state: &RenderState) -> Result<()>;
-    fn poll_events(&mut self) -> Vec<InputEvent>;
-    fn copy_to_clipboard(&self, text: &str) -> Result<()>;
-}
-
-// Native
-struct CrosstermAdapter { /* ... */ }
-impl PlatformAdapter for CrosstermAdapter { /* ... */ }
-
-// Web/Tauri
-struct EguiAdapter { /* ... */ }
-impl PlatformAdapter for EguiAdapter { /* ... */ }
 ```
-
-### Benefits of Unified Approach
-1. **Single UI Logic**: All layout/rendering rules in one place
-2. **Consistent Behavior**: Input handling guaranteed same across targets
-3. **Easier Testing**: Mock PlatformAdapter for unit tests
-4. **Theme Compliance**: Impossible to use wrong colors (enforced at compile time)
-5. **New Targets Easy**: Just implement PlatformAdapter trait
 
 ---
 
-## Conclusion
+## Testing Checklist
 
-NEARx has excellent foundational architecture with successful platform abstractions for theme, clipboard, and configuration. The current challenge is completing the Web/Tauri rendering pipeline to achieve feature parity with the native TUI.
+### Before Committing
 
-**Key Strengths**:
-- ✅ Unified theme system (Rgb → ratatui/egui/CSS)
-- ✅ Clean platform abstraction (clipboard, storage)
-- ✅ Strong native TUI experience
-- ✅ Comprehensive documentation (CLAUDE.md, COLLABORATION.md, KEYMAP.md)
+```bash
+# 1. Check all targets compile
+cargo check --features native --bin nearx
+cargo check --target wasm32-unknown-unknown --no-default-features --features egui-web --bin nearx-web
+cd tauri-workspace && cargo check
 
-**Current Gaps**:
-- ⚠️ Web/Tauri rendering broken (large blue area)
-- ⚠️ Input handling duplicated between binaries
-- ⚠️ UiFlags not fully tested on Web/Tauri
-- ⚠️ No responsive terminal sizing
+# 2. Format
+cargo fmt
 
-**Path Forward**:
-1. Fix Web rendering (get console errors, debug SoftBackend)
-2. Test all interactions on Web/Tauri (mouse, keyboard, copy)
-3. Refactor input handling to unified core
-4. Implement responsive terminal sizing
-5. Document transform architecture for future contributors
+# 3. Clippy
+cargo clippy --features native
+cargo clippy --target wasm32-unknown-unknown --no-default-features --features egui-web
 
-The vision is clear: **Single Core, Multiple Transforms**. We're 70% there—just need to fix the rendering pipeline and complete the Web/Tauri experience.
+# 4. Run preflight
+./tools/preflight.sh
+```
+
+### Manual Testing Matrix
+
+| Feature | Terminal | Web | Tauri | Notes |
+|---------|----------|-----|-------|-------|
+| Arrow keys | ✅ | ✅ | ✅ | Navigate lists |
+| Tab cycling | ✅ | ✅ | ✅ | Focus panes |
+| Space toggle | ✅ | ✅ | ✅ | Fullscreen details |
+| Copy ('c') | ✅ | ✅ | ✅ | Clipboard |
+| Mouse click | N/A | ✅ | ✅ | Focus + select |
+| Mouse scroll | N/A | ✅ | ✅ | Navigate lists |
+| Double-click | N/A | ✅ | ✅ | Fullscreen toggle |
+| Deep links | N/A | N/A | ✅ | `nearx://v1/tx/HASH` |
+| Theme borders | ✅ | ✅ | ✅ | Thick when focused |
+| Layout ratio | ✅ | ✅ | ✅ | 52/48 split |
+
+---
+
+## Configuration
+
+### Environment Variables
+
+```bash
+# RPC endpoint
+NEAR_NODE_URL=https://rpc.mainnet.fastnear.com/
+
+# Authentication
+FASTNEAR_AUTH_TOKEN=your_token_here
+
+# Filtering
+WATCH_ACCOUNTS=alice.near,bob.near
+DEFAULT_FILTER="acct:intents.near"
+
+# Performance
+RENDER_FPS=30
+KEEP_BLOCKS=100
+
+# Archival (optional)
+ARCHIVAL_RPC_URL=https://archival-rpc.mainnet.fastnear.com
+```
+
+See `.env.example` for complete documentation.
+
+---
+
+## Known Limitations
+
+### Web/Tauri
+- ⚠️ No SQLite persistence (in-memory only)
+- ⚠️ No WebSocket support (RPC polling only)
+- ⚠️ No credential watching
+- ⚠️ WASM preload warning (cosmetic, doesn't affect functionality)
+
+### Native Terminal
+- ⚠️ Mouse text selection requires modifier key (Option/Alt/Shift depending on terminal)
+
+### Tauri
+- ⚠️ Deep links require `./tauri-dev.sh` for testing (not `cargo tauri dev`)
+- ⚠️ Bundle identifier must not end in `.app` (Apple reserved)
+
+---
+
+## Next Steps / Roadmap
+
+### High Priority
+1. ✅ ~~Fix Tauri WASM loading~~ (DONE 2025-11-11)
+2. ✅ ~~Centralize theme tokens~~ (DONE 2025-11-11)
+3. ✅ ~~Fix CSP for Tauri IPC~~ (DONE 2025-11-11)
+4. ⬜ E2E tests for keyboard/mouse interactions
+5. ⬜ OAuth integration testing
+
+### Medium Priority
+1. ⬜ WASM preload warning fix (cosmetic)
+2. ⬜ Performance profiling (Web vs Native)
+3. ⬜ Contrast audit integration (call in debug builds)
+4. ⬜ Documentation for browser extension integration
+
+### Low Priority
+1. ⬜ Windows/Linux deep link testing
+2. ⬜ Code signing automation
+3. ⬜ Auto-updater integration
+4. ⬜ DMG installer with drag-to-Applications
+
+---
+
+## Files Modified (This Session - 2025-11-11)
+
+1. **Trunk.toml** - Changed `public_url` from `/` to `./`
+2. **tauri.conf.json** - Added `ipc:` and `http://ipc.localhost` to CSP, removed invalid opener config
+3. **src/theme/tokens.rs** - Created (NEW)
+4. **src/theme.rs** - Added `pub mod tokens;`
+5. **src/ui.rs** - Updated to use tokens for layout ratio and border thickness
+6. **dist-egui/** - Rebuilt with relative WASM paths
+
+---
+
+## Contact & Support
+
+**Project Repository**: [GitHub URL]
+**Documentation**: See `CLAUDE.md` for comprehensive technical details
+**Bug Reports**: GitHub Issues
+**Development Chat**: [Link if applicable]
+
+---
+
+**Last Updated**: 2025-11-11 21:15 UTC
+**Status**: ✅ All targets functional, theme tokens centralized, ready for PE review

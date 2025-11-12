@@ -1,6 +1,40 @@
+# NEARx — Quick Start (alpha)
+
+### Run targets
+```bash
+# Terminal (TUI)
+cargo run --bin nearx --features native
+
+# Web (Trunk)
+trunk serve --open
+
+# Tauri (Desktop)
+cd tauri-workspace && cargo tauri dev
+```
+
+### Build targets
+```bash
+# TUI release
+cargo build --release --features native --bin nearx
+
+# Web release
+trunk build --release
+
+# Tauri bundle
+cd tauri-workspace && cargo tauri build
+```
+
+### Preflight (alpha)
+```bash
+./tools/preflight.sh
+npm run e2e
+```
+
+---
+
 # Ratacat - NEAR Blockchain Transaction Viewer
 
-High-performance terminal UI for monitoring NEAR Protocol transactions in real-time. Runs as native terminal app, web browser app, Tauri desktop app, or browser extension integration.
+High-performance terminal UI for monitoring NEAR Protocol transactions in real-time. Runs as native terminal app, web browser app, or Tauri desktop app.
 
 Built with [Ratatui](https://ratatui.rs) and Rust.
 
@@ -8,59 +42,24 @@ Built with [Ratatui](https://ratatui.rs) and Rust.
 
 ## Quick Start
 
-### Native Terminal (Recommended)
+**Clone and run:**
 
 ```bash
-# Clone and build
-git clone <repo>
+# 1. Clone the repo
+git clone <repo-url>
 cd ratacat
-cargo build --release --features native
 
-# Run (defaults: mainnet RPC, filters to intents.near)
-./target/release/nearx
-
-# With authentication (recommended to avoid rate limits)
-FASTNEAR_AUTH_TOKEN=your_token ./target/release/nearx
-
-# Monitor different accounts
-WATCH_ACCOUNTS=alice.near,bob.near ./target/release/nearx
-
-# Or disable filtering entirely
-DEFAULT_FILTER= ./target/release/nearx
-
-# Use testnet
-NEAR_NODE_URL=https://rpc.testnet.fastnear.com/ ./target/release/nearx
-```
-
-### Web Browser
-
-```bash
-# One-time setup
-cargo install --locked trunk
-rustup target add wasm32-unknown-unknown
-
-# Run locally
-trunk serve  # Opens at http://127.0.0.1:8083
-
-# Build for deployment
-trunk build --release  # Output in dist-egui/
-```
-
-### Tauri Desktop App
-
-```bash
+# 2. Run the desktop app (macOS/Linux/Windows)
 cd tauri-workspace
 cargo tauri dev
-# or: cargo tauri build    # packages (DMG/EXE/AppImage) with signing if configured
 ```
 
-### Keyboard & Mouse
+That's it! The app will open with live blockchain data from NEAR mainnet.
 
-See **[docs/KEYMAP.md](docs/KEYMAP.md)** for standardized shortcuts across TUI / Web / Tauri:
-- Tab/Shift+Tab, Space, c-copy, scrolling
-- Mouse row select (Web/Tauri default ON, TUI Ctrl+M toggle)
-- Mouse wheel scrolling (Web/Tauri) - scroll through Blocks/Tx/Details
-- Double-click details (Web/Tauri only)
+**For deep link testing (macOS only):**
+```bash
+./tauri-dev.sh test
+```
 
 ---
 
@@ -75,6 +74,17 @@ Main interface: blocks on the left, transaction hashes in the middle, full trans
 ![Ratacat in fullscreen mode showing detailed JSON transaction data for intents.near on NEAR mainnet](static/full-screen.png)
 
 Press `Spacebar` to toggle fullscreen mode for maximum vertical space to inspect transaction payloads.
+
+---
+
+## Keyboard & Mouse
+
+See **[docs/KEYMAP.md](docs/KEYMAP.md)** for complete shortcuts:
+- **Tab/Shift+Tab**: Switch panes
+- **Spacebar**: Toggle fullscreen details
+- **c**: Copy focused content
+- **Ctrl+F**: Search history
+- **Mouse**: Click to select, scroll to navigate, double-click details for fullscreen
 
 ---
 
@@ -100,271 +110,148 @@ Press `Spacebar` to toggle fullscreen mode for maximum vertical space to inspect
 - **Non-blocking I/O**: Async data fetching keeps UI responsive
 - **Clipboard Integration**: Copy transaction details with `c`
 
----
-
-## Keyboard Shortcuts
-
-### Navigation
-- `Tab` / `Shift+Tab` - Switch panes
-- `↑ / ↓` - Navigate lists or scroll details
-- `← / →` - Jump to top / paginate down 12 items
-- `PgUp / PgDn` - Page scroll
-- `Home` - Return to auto-follow mode (blocks pane) / jump to top (other panes)
-- `End` - Jump to bottom
-- `Enter` - Select transaction
-
-### View Controls
-- `Spacebar` - Toggle fullscreen details
-- `Ctrl+O` - Cycle FPS (20 → 30 → 60)
-- `c` - Copy current details to clipboard
-- `Ctrl+D` - Toggle debug panel
-- `q` or `Ctrl+C` - Quit
-
-### Filter & Search
-- `/` or `f` - Enter filter mode
-- `Ctrl+U` - Toggle owned-only filter
-- `Ctrl+F` - Open history search
-- `Esc` - Close details overlay (if open), clear filter, or exit mode
-- `m` - Set mark at current location
-- `Ctrl+P` - Pin/unpin mark
-- `M` - Open marks overlay
-- `'` - Jump to mark
+### Multi-Platform
+- **Native Terminal**: Full-featured TUI with SQLite, WebSocket support
+- **Web Browser**: Same UI via WebAssembly (WASM), runs in any modern browser
+- **Tauri Desktop**: Native desktop app with deep link support (`nearx://` URLs)
 
 ---
 
 ## Configuration
 
-All configuration via environment variables. See `.env.example` for full options.
+Configuration is loaded with priority: **CLI args > Environment variables > Defaults**
 
-### Essential Settings
-
-**Defaults (no configuration required):**
-- Network: `mainnet` (https://rpc.mainnet.fastnear.com/)
-- Source: `rpc` (direct NEAR RPC polling)
-- Filter: `intents.near` (to see all transactions, set `DEFAULT_FILTER=`)
-
-**Common customizations:**
+### Quick Configuration
 
 ```bash
-# Authentication (recommended to avoid rate limits)
-FASTNEAR_AUTH_TOKEN=your_token_here
-
-# Watch different accounts
-WATCH_ACCOUNTS=alice.near,bob.near
-
-# Disable default filtering (see all transactions)
-DEFAULT_FILTER=
+# Watch specific accounts
+WATCH_ACCOUNTS=alice.near,bob.near cargo tauri dev
 
 # Use testnet
-NEAR_NODE_URL=https://rpc.testnet.fastnear.com/
+NEAR_NODE_URL=https://rpc.testnet.fastnear.com/ cargo tauri dev
 
-# Enable unlimited history navigation
-ARCHIVAL_RPC_URL=https://archival-rpc.mainnet.fastnear.com/
+# Disable filtering (show all transactions)
+DEFAULT_FILTER= cargo tauri dev
+
+# Add authentication (avoid rate limits)
+FASTNEAR_AUTH_TOKEN=your_token cargo tauri dev
 ```
 
-**Advanced settings** (rarely needed):
+### Configuration File
+
+Copy `.env.example` to `.env` and customize:
+
 ```bash
-SOURCE=rpc                    # Data source: rpc (default) or ws
-RENDER_FPS=30                 # Target FPS (1-120, default: 30)
-KEEP_BLOCKS=100               # In-memory block limit (default: 100)
-DEFAULT_FILTER=acct:alice.near method:swap  # Advanced filter syntax
+cp .env.example .env
+vim .env
 ```
 
-### Filter Syntax
-
-```
-acct:alice.near              # Match signer OR receiver
-signer:bob.near              # Match signer only
-receiver:contract.near       # Match receiver only
-action:FunctionCall          # Match action type
-method:ft_transfer           # Match method name
-raw:some_text                # Search in raw JSON
-```
-
-Combined example: `acct:alice.near action:Transfer` (Alice sending tokens)
-
-Filters use AND logic (all conditions must match). Within each field type, OR logic applies.
-
----
-
-## Architecture
-
-### Quad-Mode Deployment
-
-```
-┌───────────────────────────────────────────────────┐
-│              Ratacat Application                  │
-├───────────────────────────────────────────────────┤
-│                                                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────┐│
-│  │   Terminal   │  │  Web Browser │  │Tauri App ││
-│  │ (Crossterm)  │  │ (egui-web)   │  │(Desktop) ││
-│  └──────┬───────┘  └──────┬───────┘  └────┬─────┘│
-│         │                 │                │      │
-│         └─────────────────┼────────────────┘      │
-│                           ▼                       │
-│              ┌────────────────────────────┐       │
-│              │   Shared Core (Rust)       │       │
-│              │ • App state & UI rendering │       │
-│              │ • RPC client & polling     │       │
-│              │ • Filter & search logic    │       │
-│              └────────────────────────────┘       │
-│                                                   │
-│  Platform Abstraction:                            │
-│  • Clipboard: copypasta / web-sys / tauri        │
-│  • Storage: SQLite / in-memory                   │
-│  • Runtime: tokio (full/wasm/tauri)              │
-│                                                   │
-└───────────────────────────────────────────────────┘
-```
-
-**Write once, run everywhere** - Same Rust code compiles to native terminal, WASM for browser, and Tauri for desktop.
-
-### Data Flow
-
-```
-┌─────────────────────────────────────────────────┐
-│           NEAR Blockchain Data                  │
-│  ┌──────────────┐      ┌──────────────────┐     │
-│  │  WebSocket   │  OR  │   RPC Polling    │     │
-│  │ (Node side)  │      │  (Direct NEAR)   │     │
-│  └──────┬───────┘      └────────┬─────────┘     │
-│         └───────────┬───────────┘               │
-│                     ▼                           │
-│            ┌─────────────────┐                  │
-│            │  Event Channel  │                  │
-│            └────────┬────────┘                  │
-│                     ▼                           │
-│            ┌─────────────────┐                  │
-│            │   App State     │                  │
-│            └────────┬────────┘                  │
-│                     ▼                           │
-│   ┌─────────────────────────────────────────┐   │
-│   │        3-Pane TUI Layout                │   │
-│   │  ┌──────┐  ┌──────┐  ┌───────────┐      │   │
-│   │  │Blocks│→ │Tx IDs│→ │ Details   │      │   │
-│   │  │      │  │      │  │(JSON view)│      │   │
-│   │  └──────┘  └──────┘  └───────────┘      │   │
-│   └─────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────┘
-```
-
-### Key Components
-
-- **`source_ws.rs`**: WebSocket client for Node breakout server
-- **`source_rpc.rs`**: NEAR RPC poller with catch-up logic
-- **`archival_fetch.rs`**: Background archival RPC fetcher
-- **`app.rs`**: State management and event handling
-- **`ui.rs`**: Ratatui rendering (70/30 layout split)
-- **`filter.rs`**: Query parser and transaction matcher
-- **`history.rs`**: SQLite persistence and search
+See `.env.example` for all available options (RPC endpoints, polling intervals, rendering settings, etc.).
 
 ---
 
 ## Building from Source
 
-### Main Application
+### Tauri Desktop (Recommended)
 
-**Native Terminal:**
 ```bash
-cargo build --release --features native
-./target/release/nearx
+cd tauri-workspace
+
+# Development
+cargo tauri dev
+
+# Production build
+cargo tauri build
 ```
 
-**Web (egui + WebGL):**
+### Native Terminal
+
+```bash
+# Build release
+cargo build --release --features native
+
+# Run
+./target/release/nearx
+
+# With options
+FASTNEAR_AUTH_TOKEN=your_token ./target/release/nearx
+```
+
+### Web Browser
+
 ```bash
 # One-time setup
 cargo install --locked trunk
 rustup target add wasm32-unknown-unknown
 
-# Build for deployment
-trunk build --release
-# Output: dist-egui/index-egui.html, dist-egui/*.wasm, dist-egui/*.js
-```
+# Development
+trunk serve  # Opens at http://127.0.0.1:8083
 
-**Tauri Desktop:**
-```bash
-cd tauri-workspace
-cargo tauri build
-```
-
-### Build Verification
-
-```bash
-# Native terminal
-cargo build --release --features native
-
-# Web browser
-trunk build --release
-
-# Tauri desktop
-cd tauri-workspace && cargo tauri build
+# Production
+trunk build --release  # Output in dist-egui/
 ```
 
 ---
 
-## Release
+## Testing
 
-One-button release automation that runs all checks, builds all targets, and creates tagged release:
+### Web E2E Smoke Tests (Playwright)
+
+End-to-end tests verify the Web target works without WASM panics, keyboard/mouse input functions correctly, and clipboard copy operates.
+
+**Prerequisites:**
+- Node.js/npm installed
+- Web target dependencies (`trunk`, `wasm32-unknown-unknown` target)
+
+**Setup (one-time):**
 
 ```bash
-# Cut version 0.9.0 (runs preflight, clippy, tests, builds Web + Tauri)
-tools/release.sh 0.9.0
+# Install dependencies
+npm install
+
+# Install Playwright browsers
+npm run e2e:install
 ```
 
-**Artifacts:**
-- Webview WASM for Tauri: `dist-egui/nearx-web.js`, `dist-egui/nearx-web_bg.wasm`
-- Tauri bundles: `tauri-workspace/src-tauri/target/release/bundle/`
+**Run tests:**
 
-**Notes:**
-- Preflight enforces theme discipline + wasm-bindgen parity + loader sanity
-- Deep links: `nearx://v1/...` registered via plugin; single-instance forward enabled
-- Debugging UI: `?nxdebug=all`, overlay: **Ctrl+Shift+D**
+```bash
+# Run tests headless (default)
+npm run e2e
+
+# Run with visible browser (watch test execution)
+npm run e2e:headed
+
+# Interactive debug mode (step through tests)
+npm run e2e:debug
+
+# Strict mode: require valid JSON in clipboard (when RPC data is flowing)
+NEARX_E2E_REQUIRE_DATA=1 npm run e2e
+```
+
+**What it tests:**
+- ✅ No WASM runtime errors or panics
+- ✅ Canvas renders and is visible
+- ✅ Keyboard: Tab/Shift+Tab cycling works
+- ✅ Mouse: Click into Blocks/Tx/Details regions
+- ✅ Copy: Press 'c' key, verify clipboard readable
+- ✅ Optional: Clipboard contains valid JSON (strict mode)
+
+**Port usage:**
+- E2E tests run on `http://127.0.0.1:5173` (via `trunk serve --release --port 5173`)
+- Development server runs on `http://127.0.0.1:8083` (default from `Trunk.toml`)
+- This separation allows running tests while development server is active
+
+**Test configuration:**
+- `playwright.config.ts` - Playwright settings
+- `e2e/smoke.spec.ts` - Smoke test suite
 
 ---
 
-## Web Build Technical Details
+## Development
 
-The web build uses **eframe** (egui's app framework) with **egui_ratatui** to render terminal UI in browser via WebGL.
+### General Development (UI, features, logic)
 
-**Key Configuration:**
-
-`Trunk.toml` is pre-configured:
-```toml
-[build.rust]
-no_default_features = true
-features = ["egui-web"]
-bin = "nearx-web"
-```
-
-`index-egui.html` specifies the binary and disables default features:
-```html
-<link data-trunk rel="rust" data-bin="nearx-web" data-cargo-no-default-features data-cargo-features="egui-web" />
-```
-
-**Why `--no-default-features`:**
-- Disables native-only dependencies (crossterm, copypasta, rusqlite)
-- Disables NEAR SDK crates with C dependencies (near-primitives, near-crypto)
-- Disables full tokio runtime (incompatible with WASM)
-
-**Web Authentication:**
-
-Three methods (priority order):
-1. **URL Parameter**: `http://127.0.0.1:8080?token=your_token`
-2. **localStorage**: `localStorage.setItem('RPC_BEARER', 'your_token')`
-3. **Compile-time**: `FASTNEAR_AUTH_TOKEN=xxx trunk build --release`
-
-**Note:** WASM cannot access runtime environment variables - token must be set when **building** for compile-time method.
-
----
-
-## Tauri Desktop App
-
-Native desktop application with deep link support for `near://` protocol URLs.
-
-### Development Modes
-
-**For General Development (UI, features, logic):**
 ```bash
 cd tauri-workspace
 cargo tauri dev
@@ -374,178 +261,131 @@ cargo tauri dev
 - DevTools: `Cmd+Option+I` (macOS) or `F12` (Windows/Linux)
 - **Note:** Deep links won't work in dev mode (see below)
 
-**For Deep Link Testing:**
+### For Deep Link Testing (macOS only)
 
 macOS caches URL scheme registrations, so `cargo tauri dev` often runs old code when opened via deep links. Use the helper script instead:
 
 ```bash
-cd tauri-workspace
-
 # Build debug bundle and register for deep links
-./dev-deep-links.sh
+./tauri-dev.sh
 
 # Or build, register, AND test with sample URL
-./dev-deep-links.sh test
+./tauri-dev.sh test
 
 # Clean up old registrations only
-./dev-deep-links.sh clean
+./tauri-dev.sh clean
+
+# Show help
+./tauri-dev.sh --help
 ```
 
 **What the script does:**
 1. Kills old app instances
-2. Builds fresh debug bundle with `cargo tauri build --debug`
+2. Builds fresh debug .app bundle (includes symbols, faster than release)
 3. Clears macOS Launch Services cache
-4. Registers the new bundle for `near://` URLs
-5. Optionally tests with a sample deep link
+4. Copies bundle to /Applications
+5. Registers the app from /Applications for `nearx://` URLs
+6. Optionally tests with `nearx://v1/tx/ABC123`
 
 **Manual Deep Link Testing:**
 ```bash
-# After running dev-deep-links.sh, test with:
-open 'near://tx/ABC123?network=mainnet'
+# After running tauri-dev.sh, test with:
+open 'nearx://v1/tx/ABC123'
 
 # Monitor logs:
-tail -f ~/Library/Logs/com.ratacat.fast/Ratacat.log
+tail -f ~/Library/Logs/com.fastnear.nearx/NEARx.log
 ```
 
 ### Key Features
-- Deep link handler for `near://tx/HASH?network=mainnet` URLs
+- Deep link handler for `nearx://v1/tx/HASH` URLs
 - Single-instance enforcement (prevents duplicate launches)
 - Native performance with desktop integration
 - Comprehensive debug logging waterfall for deep link tracing
 
 ### Configuration
-- **Bundle ID:** `com.ratacat.fast`
-- **URL Scheme:** `near://`
-- **Log Location:** `~/Library/Logs/com.ratacat.fast/` (macOS)
-- **Dev Bundle:** `target/debug/bundle/macos/Ratacat.app`
-- **Release Bundle:** `target/release/bundle/macos/Ratacat.app`
+
+Set environment variables or copy `.env.example` to `.env`:
+
+```bash
+cp .env.example .env
+```
+
+Key settings:
+- `NEAR_NODE_URL`: RPC endpoint (default: `https://rpc.mainnet.fastnear.com/`)
+- `FASTNEAR_AUTH_TOKEN`: Authentication token to avoid rate limits
+- `WATCH_ACCOUNTS`: Comma-separated account list (default: `intents.near`)
+- `ARCHIVAL_RPC_URL`: Archival RPC for unlimited history navigation
 
 ---
 
-## Troubleshooting
+## Architecture
 
-### Connection Issues
+**Quad-Mode Design**: Write once, run everywhere
+- **Native Terminal**: Crossterm backend with SQLite persistence
+- **Web Browser**: egui_ratatui bridge renders terminal UI in WebGL canvas
+- **Tauri Desktop**: Same egui_ratatui bridge with native window chrome
+- **Shared Core**: Same `ui.rs`, `app.rs`, `theme.rs` across all targets
 
-**"Connection refused" with SOURCE=ws:**
-- Ensure Node WebSocket server is running on port 63736
-- Check `WS_URL` matches your configuration
+**Key Technologies**:
+- [Ratatui](https://ratatui.rs) - Terminal UI framework
+- [egui_ratatui](https://github.com/gold-silver-copper/egui_ratatui) - Bridge for web/Tauri
+- [Tauri v2](https://tauri.app) - Desktop app framework
+- [Trunk](https://trunkrs.dev) - WASM build tool
 
-**RPC timeouts:**
-```bash
-RPC_TIMEOUT_MS=15000 POLL_CHUNK_CONCURRENCY=2 cargo run --release
+---
+
+## Project Structure
+
 ```
-
-### Performance
-
-**High CPU usage:**
-```bash
-RENDER_FPS=20 KEEP_BLOCKS=50 cargo run --release
-```
-
-### Web Build Errors
-
-**`zstd-sys` or `secp256k1-sys` compilation failed:**
-- Ensure `Trunk.toml` has `no_default_features = true`
-- Verify `index-egui.html` has `data-cargo-no-default-features` attribute
-
-**Connection refused to localhost:**
-- Configure RPC endpoint via URL: `?rpc=https://rpc.mainnet.fastnear.com`
-
-### macOS Deep Link Issues
-
-**Problem: Deep links open old version of the app**
-
-This is a common macOS issue where Launch Services caches URL scheme registrations and doesn't update when you rebuild.
-
-**Symptoms:**
-- `cargo tauri dev` runs, but deep links open a different (old) instance
-- Deep links work but execute old code
-- Multiple app icons in dock when opening deep links
-
-**Solution 1: Use the helper script (recommended)**
-```bash
-cd tauri-workspace
-./dev-deep-links.sh test
-```
-
-**Solution 2: Manual cleanup**
-```bash
-# Kill all instances
-killall nearx-tauri
-killall NEARx
-
-# Find old app locations
-mdfind "kMDItemCFBundleIdentifier == 'com.ratacat.fast'"
-
-# Clear Launch Services cache
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -kill -r -domain local -domain system -domain user
-
-# Remove old bundles from /Applications if present
-rm -rf /Applications/Ratacat.app
-
-# Build and register fresh debug bundle
-cd tauri-workspace
-cargo tauri build --debug
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f target/debug/bundle/macos/Ratacat.app
-
-# Wait a few seconds for cache to rebuild
-sleep 3
-
-# Test
-open 'near://tx/ABC123?network=mainnet'
-```
-
-**Why this happens:**
-- macOS caches app→URL associations for performance
-- `cargo tauri dev` creates temporary builds that aren't stable locations
-- Launch Services prefers the first registered app for a URL scheme
-- The cache doesn't auto-update when you rebuild
-
-**Best practices:**
-- Use `cargo tauri dev` for general development (no deep links needed)
-- Use `./dev-deep-links.sh` when working on deep link features
-- Run `./dev-deep-links.sh clean` if you see stale registrations
-- Production bundles in `/Applications` are most stable for deep links
-
-**Verify current registration:**
-```bash
-# Show all apps registered for com.ratacat.fast
-mdfind "kMDItemCFBundleIdentifier == 'com.ratacat.fast'"
-
-# Check which app will handle near:// URLs
-# (Look for "near" in the output)
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump | grep -A 3 "near:"
+ratacat/
+├── src/
+│   ├── bin/
+│   │   ├── nearx.rs          # Native terminal binary
+│   │   ├── nearx-web.rs      # Web browser binary (WASM)
+│   │   └── ratacat-proxy.rs  # RPC proxy (development)
+│   ├── app.rs                # Application state (shared)
+│   ├── ui.rs                 # Ratatui rendering (shared)
+│   ├── theme.rs              # Unified theme system (shared)
+│   └── ...                   # Other shared modules
+├── tauri-workspace/
+│   └── src-tauri/            # Tauri desktop app
+├── web/
+│   ├── platform.js           # Unified clipboard bridge
+│   ├── auth.js               # OAuth popup manager
+│   └── router_shim.js        # Hash router for auth callbacks
+├── tauri-dev.sh              # Deep link testing helper (macOS)
+├── index-egui.html           # Web app entry point
+├── Trunk.toml                # Web build configuration
+└── .env.example              # Configuration template
 ```
 
 ---
 
-## Tips
+## Contributing
 
-1. **Use WebSocket mode during development** - connects to your Node server for real-time updates
-2. **Use RPC mode for production** - direct NEAR connection, more reliable
-3. **Press `Spacebar` for fullscreen** - maximize space for complex transaction inspection
-4. **Filter with `/`** - syntax like `acct:alice.near action:FunctionCall`
-5. **Owned-only view with `Ctrl+U`** - see only your transactions (auto-detected from `~/.near-credentials`)
-6. **Bookmark with `m`** - use `Ctrl+P` to pin important marks permanently
-7. **Enable archival RPC** - explore unlimited blockchain history with `ARCHIVAL_RPC_URL`
-8. **Adjust FPS with `Ctrl+O`** - lower FPS on CPU-constrained systems
-9. **Copy with `c`** - paste transaction details anywhere
+See **[COLLABORATION.md](COLLABORATION.md)** for detailed development guidelines.
+
+Key points:
+- All UI changes should work across all targets (native, web, Tauri)
+- Test with `cargo check --all-targets --all-features`
+- Run formatters: `cargo fmt` and `cargo clippy`
+- For deep link changes, test with `./tauri-dev.sh test`
 
 ---
 
-## Built with Official NEAR Infrastructure
+## Documentation
 
-Uses official NEAR Protocol crates:
-- **`near-primitives`** (0.27.0) - Core blockchain data structures
-- **`near-jsonrpc-client`** (0.15.0) - Official RPC client
-- **`near-crypto`** (0.27.0) - Cryptographic primitives
-- **`near-gas`** (0.2) - Gas formatting utilities
-- **`near-token`** (0.2) - NEAR token formatting
-
-This ensures compatibility with NEAR protocol changes and benefits from upstream improvements.
+- **[CLAUDE.md](CLAUDE.md)** - Comprehensive technical documentation
+- **[COLLABORATION.md](COLLABORATION.md)** - Development guidelines
+- **[docs/KEYMAP.md](docs/KEYMAP.md)** - Keyboard and mouse shortcuts
+- **[.env.example](.env.example)** - Configuration options
 
 ---
 
-Built with [Ratatui](https://ratatui.rs), [Tokio](https://tokio.rs), and Rust. Designed for NEAR Protocol monitoring.
+## License
 
-For detailed technical documentation, see `CLAUDE.md` and `COLLABORATION.md`.
+[Your License Here]
+
+---
+
+Built with ❤️ using Ratatui, Tokio, and Rust. Designed for NEAR Protocol monitoring.

@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeepLink {
     Ratacat,
@@ -10,6 +11,7 @@ pub enum DeepLink {
     Session { id: String, read_only: bool },
 }
 
+#[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
 pub enum ParseError {
     #[error("invalid scheme")]

@@ -1,12 +1,14 @@
 use crate::app::{App, InputMode};
 use crate::history::HistoryHit;
 use crate::json_syntax::colorize_json;
+use crate::theme::tokens;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Tabs, Wrap,
+        Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph, Tabs,
+        Wrap,
     },
     Frame,
 };
@@ -299,10 +301,15 @@ fn body(f: &mut Frame, area: Rect, app: &mut App) {
         render_txs_pane(f, rows[1], app);
         render_details_pane(f, rows[2], app);
     } else {
-        // Wide layout: (Blocks + Txs) 30% top, Details 70% bottom
+        // Wide layout: Use tokens for consistent split across targets
+        let top_ratio = (tokens::tokens().layout.top_ratio * 100.0).round() as u16; // percent
+        let bot_ratio = 100u16.saturating_sub(top_ratio);
         let rows = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Ratio(3, 10), Constraint::Ratio(7, 10)])
+            .constraints([
+                Constraint::Percentage(top_ratio),
+                Constraint::Percentage(bot_ratio),
+            ])
             .split(area);
 
         // Top row: split horizontally (40% blocks, 60% txs - tx pane needs more width for signer→receiver)
@@ -366,29 +373,38 @@ fn render_blocks_pane(f: &mut Frame, area: Rect, app: &App) {
     let blocks_widget = List::new(items_blocks)
         .highlight_style(get_sel_style().add_modifier(Modifier::BOLD))
         .highlight_symbol("› ")
-        .block(
-            Block::default()
+        .block({
+            let mut b = Block::default()
                 .title(blocks_title)
-                .borders(Borders::ALL)
-                .border_type(if blocks_focused {
-                    BorderType::QuadrantOutside
-                } else {
-                    BorderType::Rounded
-                })
-                .border_style(
-                    Style::default()
-                        .fg(if blocks_focused {
-                            get_accent_strong()
-                        } else {
-                            get_border()
-                        })
-                        .add_modifier(if blocks_focused {
-                            Modifier::BOLD
-                        } else {
-                            Modifier::empty()
-                        }),
-                ),
-        );
+                .borders(Borders::TOP | Borders::RIGHT);
+
+            // Use tokens to determine border thickness
+            if blocks_focused && tokens::tokens().rat.focused_thick_border {
+                b = b.border_type(BorderType::Thick);
+            } else {
+                b = b.border_type(BorderType::Rounded);
+            }
+
+            b.border_style(
+                Style::default()
+                    .fg(if blocks_focused {
+                        get_accent_strong()
+                    } else {
+                        get_border()
+                    })
+                    .add_modifier(if blocks_focused {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
+            )
+            .padding(Padding {
+                left: 1,
+                right: 1,
+                top: 0,
+                bottom: 0,
+            })
+        });
 
     f.render_stateful_widget(blocks_widget, area, &mut st_blocks);
 }
@@ -443,29 +459,38 @@ fn render_txs_pane(f: &mut Frame, area: Rect, app: &App) {
     let tx_widget = List::new(tx_items)
         .highlight_style(get_sel_style().add_modifier(Modifier::BOLD))
         .highlight_symbol("› ")
-        .block(
-            Block::default()
+        .block({
+            let mut b = Block::default()
                 .title(title)
-                .borders(Borders::ALL)
-                .border_type(if txs_focused {
-                    BorderType::QuadrantOutside
-                } else {
-                    BorderType::Rounded
-                })
-                .border_style(
-                    Style::default()
-                        .fg(if txs_focused {
-                            get_accent_strong()
-                        } else {
-                            get_border()
-                        })
-                        .add_modifier(if txs_focused {
-                            Modifier::BOLD
-                        } else {
-                            Modifier::empty()
-                        }),
-                ),
-        );
+                .borders(Borders::LEFT | Borders::TOP | Borders::RIGHT);
+
+            // Use tokens to determine border thickness
+            if txs_focused && tokens::tokens().rat.focused_thick_border {
+                b = b.border_type(BorderType::Thick);
+            } else {
+                b = b.border_type(BorderType::Rounded);
+            }
+
+            b.border_style(
+                Style::default()
+                    .fg(if txs_focused {
+                        get_accent_strong()
+                    } else {
+                        get_border()
+                    })
+                    .add_modifier(if txs_focused {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
+            )
+            .padding(Padding {
+                left: 1,
+                right: 1,
+                top: 0,
+                bottom: 0,
+            })
+        });
 
     f.render_stateful_widget(tx_widget, area, &mut st_txs);
 }
@@ -473,20 +498,14 @@ fn render_txs_pane(f: &mut Frame, area: Rect, app: &App) {
 // Helper function to render details pane
 fn render_details_pane(f: &mut Frame, area: Rect, app: &mut App) {
     // Update viewport height for accurate scroll clamping
-    // Subtract 2 for top/bottom borders (even though we removed bottom border, title takes space)
-    app.set_details_viewport_height(area.height.saturating_sub(2));
+    // Subtract 1 for top border/title (no bottom border)
+    app.set_details_viewport_height(area.height.saturating_sub(1));
 
     let details_focused = app.pane() == 2;
     let theme = app.theme();
 
-    // csli-style background fill
-    // When focused: use darker json_bg for better syntax highlighting contrast
-    // When unfocused: use standard panel color
-    let bg_color = if details_focused {
-        Color::Rgb(theme.json_bg.0, theme.json_bg.1, theme.json_bg.2)
-    } else {
-        get_panel(false)
-    };
+    // Always use darker json_bg for better syntax highlighting contrast
+    let bg_color = Color::Rgb(theme.json_bg.0, theme.json_bg.1, theme.json_bg.2);
     f.render_widget(Clear, area);
     f.render_widget(
         Paragraph::new("").style(Style::default().bg(bg_color)),
@@ -511,26 +530,47 @@ fn render_details_pane(f: &mut Frame, area: Rect, app: &mut App) {
         app.details().to_string()
     };
 
-    // Apply JSON syntax highlighting when focused (skip loading messages)
+    // Always apply JSON syntax highlighting (skip loading messages)
     let is_loading = app.loading_block().is_some();
-    let details_widget = if details_focused && !is_loading {
-        // JSON highlighting when focused
+    let details_widget = if !is_loading {
+        // Always apply JSON highlighting
         let colored_lines = colorize_json(&details_text, theme);
         Paragraph::new(colored_lines)
             .wrap(Wrap { trim: false })
             .scroll((app.details_scroll(), 0))
             .style(Style::default().bg(bg_color))
-            .block(
-                Block::default()
+            .block({
+                let mut b = Block::default()
                     .title(title)
-                    .borders(Borders::TOP | Borders::RIGHT)
-                    .border_type(BorderType::QuadrantOutside)
-                    .border_style(
-                        Style::default()
-                            .fg(get_accent_strong())
-                            .add_modifier(Modifier::BOLD),
-                    ),
-            )
+                    .borders(Borders::TOP | Borders::RIGHT);
+
+                // Use tokens to determine border thickness
+                if details_focused && tokens::tokens().rat.focused_thick_border {
+                    b = b.border_type(BorderType::Thick);
+                } else {
+                    b = b.border_type(BorderType::Rounded);
+                }
+
+                b.border_style(
+                    Style::default()
+                        .fg(if details_focused {
+                            get_accent_strong()
+                        } else {
+                            get_border()
+                        })
+                        .add_modifier(if details_focused {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
+                )
+                .padding(Padding {
+                    left: 1,
+                    right: 1,
+                    top: 0,
+                    bottom: 0,
+                })
+            })
     } else {
         // Plain text when unfocused or loading
         Paragraph::new(details_text)
@@ -541,11 +581,7 @@ fn render_details_pane(f: &mut Frame, area: Rect, app: &mut App) {
                 Block::default()
                     .title(title)
                     .borders(Borders::TOP | Borders::RIGHT)
-                    .border_type(if details_focused {
-                        BorderType::QuadrantOutside
-                    } else {
-                        BorderType::Rounded
-                    })
+                    .border_type(BorderType::Rounded)
                     .border_style(
                         Style::default()
                             .fg(if details_focused {
@@ -558,7 +594,13 @@ fn render_details_pane(f: &mut Frame, area: Rect, app: &mut App) {
                             } else {
                                 Modifier::empty()
                             }),
-                    ),
+                    )
+                    .padding(Padding {
+                        left: 1,
+                        right: 1,
+                        top: 0,
+                        bottom: 0,
+                    }),
             )
     };
 

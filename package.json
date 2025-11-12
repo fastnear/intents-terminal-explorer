@@ -1,0 +1,16 @@
+{
+  "name": "nearx",
+  "version": "0.4.0",
+  "private": true,
+  "description": "NEARx - NEAR Blockchain Explorer (Web E2E Tests)",
+  "scripts": {
+    "e2e:install": "npx playwright install --with-deps",
+    "e2e": "playwright test",
+    "e2e:web": "NEARX_BASE_URL=http://127.0.0.1:8083 playwright test",
+    "e2e:headed": "playwright test --headed",
+    "e2e:debug": "PWDEBUG=1 playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.2"
+  }
+}

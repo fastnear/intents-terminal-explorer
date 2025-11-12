@@ -6,6 +6,8 @@
 //! - WCAG AA compliant contrast ratios
 //! - Helpers for both ratatui and egui
 
+pub mod tokens;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rgb(pub u8, pub u8, pub u8);
 
@@ -44,7 +46,7 @@ impl Default for Theme {
             text_dim: Rgb(0xa2, 0xad, 0xbd),      // #a2adbd - secondary text
             border: Rgb(0x1e, 0x24, 0x30),        // #1e2430 - unfocused borders
             accent: Rgb(0x66, 0xb3, 0xff),        // #66b3ff - links/highlights
-            accent_strong: Rgb(0x33, 0x99, 0xff), // #3399ff - focused borders
+            accent_strong: Rgb(0xff, 0xcc, 0x00), // #ffcc00 - focused borders (yellow)
             sel_bg: Rgb(0x1e, 0x2a, 0x3a),        // #1e2a3a - selection background
             success: Rgb(0x6b, 0xdc, 0x96),       // #6bdc96 - success
             warn: Rgb(0xff, 0xcc, 0x66),          // #ffcc66 - warnings
@@ -120,9 +122,11 @@ pub mod eg {
     /// Apply theme to egui context (call once at startup)
     /// Tuned to match TUI feel: low-chrome panels, strong focus/selection, AA contrast
     pub fn apply(ctx: &egui::Context, t: &Theme) {
-        use egui::{CornerRadius, Shadow};
+        use crate::theme::tokens;
+        use egui::{CornerRadius, Shadow, TextStyle, FontId};
 
         let mut v = egui::Visuals::dark();
+        let tok = tokens::tokens();
 
         // Override text color for consistency
         v.override_text_color = Some(c(t.text));
@@ -130,17 +134,19 @@ pub mod eg {
         // Panels & backgrounds - flat and minimal like TUI
         v.panel_fill = c(t.panel);
         v.window_fill = c(t.panel); // Avoid window chrome
-        v.faint_bg_color = c(t.panel_alt); // Hovered backgrounds
+        v.faint_bg_color = c(t.panel_alt); // Hovered backgrounds + striped tables
                                            // IMPORTANT: eframe clears with extreme_bg_color. Use true bg, not panel.
         v.extreme_bg_color = c(t.bg);
 
-        // Corner radius & shadows - subtle like TUI
-        v.window_corner_radius = CornerRadius::same(4);
-        v.menu_corner_radius = CornerRadius::same(4);
-        v.widgets.noninteractive.corner_radius = CornerRadius::same(3);
-        v.widgets.inactive.corner_radius = CornerRadius::same(3);
-        v.widgets.hovered.corner_radius = CornerRadius::same(3);
-        v.widgets.active.corner_radius = CornerRadius::same(3);
+        // Corner radius & shadows - subtle like TUI (from tokens)
+        let window_radius = CornerRadius::same(tok.visuals.window_radius_px);
+        let widget_radius = CornerRadius::same(tok.visuals.widget_radius_px);
+        v.window_corner_radius = window_radius;
+        v.menu_corner_radius = window_radius;
+        v.widgets.noninteractive.corner_radius = widget_radius;
+        v.widgets.inactive.corner_radius = widget_radius;
+        v.widgets.hovered.corner_radius = widget_radius;
+        v.widgets.active.corner_radius = widget_radius;
         v.window_shadow = Shadow::NONE;
 
         // Widget fills - keep frames light and text readable
@@ -150,15 +156,16 @@ pub mod eg {
         v.widgets.active.bg_fill = c(t.panel_alt);
         v.widgets.open.bg_fill = c(t.panel_alt);
 
-        // Widget strokes (borders) - match TUI border tone; stronger on focus/active
-        let border = Stroke::new(1.0, c(t.border));
-        v.widgets.noninteractive.bg_stroke = border;
-        v.widgets.inactive.bg_stroke = border;
-        v.widgets.hovered.bg_stroke = Stroke::new(1.0, c(t.accent));
-        v.widgets.active.bg_stroke = Stroke::new(1.0, c(t.accent_strong));
+        // Widget strokes (borders) - token-driven widths, match TUI border tone
+        let unfocus_stroke = Stroke::new(tok.visuals.unfocus_stroke_px, c(t.border));
+        let focus_stroke = Stroke::new(tok.visuals.focus_stroke_px, c(t.accent_strong));
+        v.widgets.noninteractive.bg_stroke = unfocus_stroke;
+        v.widgets.inactive.bg_stroke = unfocus_stroke;
+        v.widgets.hovered.bg_stroke = Stroke::new(tok.visuals.unfocus_stroke_px, c(t.accent));
+        v.widgets.active.bg_stroke = focus_stroke;
 
-        // Selection highlight - same accent emphasis as TUI selection
-        v.selection.bg_fill = c(t.sel_bg);
+        // Selection highlight - match TUI row highlight (panel_alt bg + strong stroke)
+        v.selection.bg_fill = c(t.panel_alt);
         v.selection.stroke = Stroke::new(1.0, c(t.accent_strong));
 
         // Links & state colors aligned to theme
@@ -175,6 +182,10 @@ pub mod eg {
         style.spacing.button_padding = egui::vec2(8.0, 4.0);
         style.spacing.indent = 8.0;
         style.interaction.tooltip_delay = 0.05; // Snappy tooltips
+
+        // Font sizes: ensure readable monospace + body (from tokens)
+        style.text_styles.insert(TextStyle::Body, FontId::proportional(tok.visuals.ui_font_px));
+        style.text_styles.insert(TextStyle::Monospace, FontId::monospace(tok.visuals.code_font_px));
 
         ctx.set_style(style);
 

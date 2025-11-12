@@ -1,0 +1,21 @@
+{
+  "name": "nearx-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end tests for NEARx Tauri desktop app",
+  "scripts": {
+    "test": "mocha --timeout 60000",
+    "test:verbose": "mocha --timeout 60000 --reporter spec",
+    "test:watch": "mocha --timeout 60000 --watch"
+  },
+  "dependencies": {
+    "chai": "^5.2.1",
+    "mocha": "^11.7.1",
+    "selenium-webdriver": "^4.34.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

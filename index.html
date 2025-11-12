@@ -3,6 +3,19 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <!-- Security: Strict CSP for static app; allows inline <style> only (theme), blocks remote scripts. -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'none';
+        script-src 'self';
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' data:;
+        connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://rpc.mainnet.near.org https://rpc.testnet.near.org https://rpc.mainnet.fastnear.com https://rpc.testnet.fastnear.com https://archival-rpc.mainnet.fastnear.com https://archival-rpc.testnet.fastnear.com https://*.near.org http://localhost:* ws: wss:;
+        font-src 'self';
+        base-uri 'none';
+        frame-ancestors 'none';
+    ">
+
     <title>NEARx - NEAR Blockchain Viewer</title>
 
     <style>
@@ -113,26 +126,8 @@
     </style>
 </head>
 <body>
-    <div id="canvas_parent">
-        <!-- Info bar -->
-        <div class="info-bar">
-            <div class="status">
-                <span>🦀 <strong>Ratacat</strong> - NEAR Blockchain Viewer</span>
-                <span id="status">Loading...</span>
-                <span style="color: #888; font-size: 11px;" title="Add ?token=YOUR_TOKEN to avoid rate limits">💡 Tip: Add ?token= for auth</span>
-            </div>
-            <div>
-                <a href="https://github.com/yourrepo/ratacat" target="_blank">GitHub</a> |
-                <a href="https://docs.near.org" target="_blank">NEAR Docs</a>
-            </div>
-        </div>
-
-        <!-- Canvas for egui rendering -->
-        <canvas id="canvas"></canvas>
-
-        <!-- Loading indicator -->
-        <div class="loading">Loading Ratacat</div>
-    </div>
+    <!-- Canvas container for eframe WebRunner -->
+    <canvas id="nearx_canvas" style="width:100%;height:100%;position:fixed;inset:0;"></canvas>
 
     <!-- Hidden input for IME / composition events (future-proofing) -->
     <input id="ime" type="text" autocomplete="off" />
@@ -143,6 +138,14 @@
     <!-- Optional: allow browser builds to hand off to desktop app -->
     <link data-trunk rel="copy-file" href="web/open_desktop.js" />
     <script src="open_desktop.js"></script>
+
+    <!-- Authentication bridge (Google OAuth + Magic link) -->
+    <link data-trunk rel="copy-file" href="web/auth.js" />
+    <script defer src="auth.js"></script>
+
+    <!-- Router shim for auth callback handling (#/auth/callback?...) -->
+    <link data-trunk rel="copy-file" href="web/router_shim.js" />
+    <script defer src="router_shim.js"></script>
 
     <script>
         // Update status message

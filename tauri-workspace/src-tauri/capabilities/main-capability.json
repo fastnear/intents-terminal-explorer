@@ -1,0 +1,21 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Main window capabilities: deep links + opener + clipboard",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:default",
+    "deep-link:default",
+    "clipboard-manager:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://accounts.google.com/*" },
+        { "url": "https://oauth2.googleapis.com/*" },
+        { "url": "https://*.googleusercontent.com/*" },
+        { "url": "https://auth.nearx.app/*" },
+        { "url": "nearx:*" }
+      ]
+    }
+  ]
+}

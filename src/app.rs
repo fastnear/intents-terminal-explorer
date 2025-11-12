@@ -1301,15 +1301,14 @@ impl App {
         self.input_mode = InputMode::Marks;
     }
 
+    pub fn marks_list(&self) -> &[crate::types::Mark] {
+        &self.marks_list
+    }
+
     pub fn close_marks(&mut self) {
         self.input_mode = InputMode::Normal;
         self.marks_list.clear();
         self.marks_selection = 0;
-    }
-
-    #[allow(dead_code)]
-    pub fn marks_list(&self) -> &[crate::types::Mark] {
-        &self.marks_list
     }
 
     pub fn marks_selection(&self) -> usize {
@@ -1360,5 +1359,253 @@ impl App {
         if self.pane > 2 {
             self.pane = 0;
         }
+    }
+
+    // ----- Web/egui helper methods -----
+
+    /// Get count of blocks (for display)
+    pub fn blocks_len(&self) -> usize {
+        self.blocks.len()
+    }
+
+    /// Get count of transactions in current block
+    pub fn txs_len(&self) -> usize {
+        self.current_block().map_or(0, |b| b.transactions.len())
+    }
+
+    /// Get current block selection index (0-based)
+    pub fn sel_block(&self) -> usize {
+        if let Some(height) = self.sel_block_height {
+            self.find_block_index(Some(height)).unwrap_or(0)
+        } else {
+            0 // Auto-follow mode: newest block is at index 0
+        }
+    }
+
+    /// Select block by index with clamping
+    pub fn select_block_clamped(&mut self, idx: usize) {
+        if idx < self.blocks.len() {
+            self.select_block_row(idx);
+        }
+    }
+
+    /// Select transaction by index with clamping
+    pub fn select_tx_clamped(&mut self, idx: usize) {
+        if let Some(b) = self.current_block() {
+            if idx < b.transactions.len() {
+                self.select_tx_row(idx);
+            }
+        }
+    }
+
+    /// Set filter query and recompile
+    pub fn set_filter_query(&mut self, query: String) {
+        self.filter_query = query;
+        self.filter_compiled = compile_filter(&self.filter_query);
+        self.validate_and_refresh_tx(BlockChangeReason::FilterChange);
+    }
+
+    /// Get details as pretty-printed string
+    pub fn details_pretty_string(&self) -> String {
+        self.details.clone()
+    }
+
+    /// Get details as raw JSON string
+    pub fn details_raw_string(&self) -> String {
+        // For now, return the same as pretty (already contains JSON)
+        // TODO: Could add a separate raw JSON field if needed
+        self.details.clone()
+    }
+
+    /// Get JSON for currently focused pane (for copy operation)
+    pub fn focused_json_string(&self) -> Option<String> {
+        Some(self.get_copy_content())
+    }
+
+    /// Get display-ready list of blocks (filtered if filter active)
+    pub fn blocks_for_display(&self) -> Vec<&BlockRow> {
+        let (blocks, _sel, _total) = self.filtered_blocks();
+        blocks
+    }
+
+    /// Get display-ready list of transactions from current block (filtered)
+    pub fn txs_for_display(&self) -> Vec<&TxLite> {
+        if let Some(b) = self.current_block() {
+            b.transactions
+                .iter()
+                .filter(|tx| {
+                    // Apply owned-only filter first (if active)
+                    if self.owned_only_filter && !self.is_owned_tx(tx) {
+                        return false;
+                    }
+                    // Then apply text filter
+                    if filter::is_empty(&self.filter_compiled) {
+                        return true;
+                    }
+                    // Convert TxLite to JSON for filtering (same pattern as txs() method)
+                    let v = json!({
+                        "hash": tx.hash,
+                        "signer_id": tx.signer_id.as_deref().unwrap_or(""),
+                        "receiver_id": tx.receiver_id.as_deref().unwrap_or("")
+                    });
+                    tx_matches_filter(&v, &self.filter_compiled)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Get lightweight block data for display (owned copy)
+    /// Returns None if index out of bounds
+    pub fn block_lite(&self, idx: usize) -> Option<BlockLite> {
+        self.blocks_for_display().get(idx).map(|b| BlockLite {
+            height: b.height,
+            tx_count: b.tx_count,
+            when: b.when.clone(),
+            time_utc: format_timestamp_utc(b.timestamp),
+        })
+    }
+
+    /// Get lightweight transaction data for display (owned copy)
+    /// Returns None if index out of bounds
+    pub fn tx_lite(&self, idx: usize) -> Option<TxLite> {
+        self.txs_for_display().get(idx).map(|tx| (*tx).clone())
+    }
+
+    /// Get count of filtered blocks
+    pub fn filtered_blocks_len(&self) -> usize {
+        self.blocks_for_display().len()
+    }
+
+    /// Get count of filtered transactions in current block
+    pub fn filtered_txs_len(&self) -> usize {
+        self.txs_for_display().len()
+    }
+
+    /// Handle mouse click at terminal coordinates
+    pub fn handle_mouse_click(&mut self, col: u16, row: u16) {
+        // Determine which pane was clicked based on layout
+        // The layout is approximately:
+        // - Header: 2 rows
+        // - Filter bar: 1-3 rows (let's assume 2 average)
+        // - Top 30%: Blocks (left 50%) + Txs (right 50%)
+        // - Bottom 70%: Details
+
+        // Skip header and filter (approximately 4 rows)
+        if row < 4 {
+            return;
+        }
+
+        // Get terminal size from last draw (this is approximate)
+        // In real implementation, we'd pass the actual layout areas
+        let term_height: u16 = 40; // Default assumption, will be resized dynamically
+        let body_start: u16 = 4;
+        let body_height = term_height.saturating_sub(body_start + 1); // -1 for footer
+        let top_height = (body_height * 3) / 10; // 30%
+        let top_end = body_start + top_height;
+
+        if row < top_end {
+            // We're in the top row
+            if col < 60 {
+                // Left half - Blocks pane
+                self.pane = 0;
+                // Calculate which block was clicked
+                let block_idx = (row - body_start) as usize;
+                if block_idx < self.blocks_len() {
+                    self.select_block_clamped(block_idx);
+                }
+            } else {
+                // Right half - Transactions pane
+                self.pane = 1;
+                // Calculate which tx was clicked
+                let tx_idx = (row - body_start) as usize;
+                if tx_idx < self.txs_len() {
+                    self.select_tx_clamped(tx_idx);
+                }
+            }
+        } else {
+            // Bottom section - Details pane
+            self.pane = 2;
+        }
+    }
+
+    /// Check if coordinates are within details pane
+    pub fn is_details_pane_at(&self, _col: u16, row: u16) -> bool {
+        // Similar logic to handle_mouse_click
+        // This is approximate - in real implementation we'd use actual layout
+        let term_height: u16 = 40;
+        let body_start: u16 = 4;
+        let body_height = term_height.saturating_sub(body_start + 1);
+        let top_height = (body_height * 3) / 10;
+        let top_end = body_start + top_height;
+
+        row >= top_end
+    }
+
+    /// Handle scroll wheel events
+    pub fn handle_scroll(&mut self, col: u16, row: u16, lines: i32) {
+        // First determine which pane we're scrolling in
+        self.handle_mouse_click(col, row);
+
+        // Then apply the scroll
+        match self.pane {
+            0 => {
+                // Blocks pane
+                let current = self.sel_block() as i32;
+                let new_idx = (current + lines).max(0) as usize;
+                self.select_block_clamped(new_idx);
+            }
+            1 => {
+                // Transactions pane
+                let current = self.sel_tx() as i32;
+                let new_idx = (current + lines).max(0) as usize;
+                self.select_tx_clamped(new_idx);
+            }
+            2 => {
+                // Details pane
+                // Scrolling is handled separately via viewport
+                if lines > 0 {
+                    self.details_scroll = self
+                        .details_scroll
+                        .saturating_add(lines.unsigned_abs() as u16);
+                } else {
+                    self.details_scroll = self
+                        .details_scroll
+                        .saturating_sub(lines.unsigned_abs() as u16);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Lightweight block data for display
+#[derive(Debug, Clone)]
+pub struct BlockLite {
+    pub height: u64,
+    pub tx_count: usize,
+    pub when: String,     // Relative time ("2s ago")
+    pub time_utc: String, // UTC timestamp
+}
+
+/// Format timestamp as UTC string
+fn format_timestamp_utc(timestamp: u64) -> String {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use chrono::{TimeZone, Utc};
+        let secs = (timestamp / 1_000_000_000) as i64;
+        let nsecs = (timestamp % 1_000_000_000) as u32;
+        match Utc.timestamp_opt(secs, nsecs) {
+            chrono::LocalResult::Single(dt) => dt.format("%H:%M:%S").to_string(),
+            _ => format!("{}s", secs),
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Simplified timestamp for WASM (just show seconds)
+        let secs = (timestamp / 1_000_000_000) as i64;
+        format!("{}s", secs)
     }
 }

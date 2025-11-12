@@ -20,6 +20,7 @@ use serde_json::Value;
 /// # Examples
 /// ```
 /// use serde_json::json;
+/// use nearx::json_auto_parse::auto_parse_nested_json;
 /// let input = json!({"msg": "{\"action\":\"swap\"}"});
 /// let output = auto_parse_nested_json(input, 5, 0);
 /// // output: {"msg": {"action": "swap"}}

@@ -638,3 +638,9 @@ cfg_if! {
         }
     }
 }
+
+// Stub main for non-WASM targets (needed for --all-targets builds)
+#[cfg(not(target_arch = "wasm32"))]
+fn main() {
+    panic!("ratacat-web binary is only for wasm32 target. Use 'trunk build' to compile.");
+}
