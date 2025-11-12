@@ -30,7 +30,7 @@ ignore = ["dist/", "dist-egui/", "target/"]
 
 [serve]
 # Development server configuration
-address = "127.0.0.1"
+addresses = ["127.0.0.1"]
 port = 8083
 
 # Open browser automatically
@@ -38,8 +38,3 @@ open = true
 
 # Enable HTTPS for local development (optional)
 # tls = true
-
-[clean]
-# Directories to clean
-dist = "dist-egui"
-cargo = false  # Don't clean cargo target directory

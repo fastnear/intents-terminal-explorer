@@ -14,11 +14,6 @@ path = "src/bin/nearx.rs"
 required-features = ["native"]
 
 [[bin]]
-name = "ratacat-web"
-path = "src/bin/ratacat-web.rs"
-required-features = ["web"]
-
-[[bin]]
 name = "ratacat-proxy"
 path = "src/bin/ratacat-proxy.rs"
 required-features = ["proxy"]
@@ -31,8 +26,9 @@ required-features = ["egui-web"]
 [workspace]
 resolver = "2"
 members = [
-  "tauri-workspace/src-tauri",
-  "native-host"
+  ".",                       # ratacat root
+  "plugins/tx-analyzer",
+  "plugins/validator-monitor"
 ]
 
 [workspace.dependencies]
@@ -70,19 +66,6 @@ native = [
 ]
 near-gas = ["dep:near-gas"]
 near-token = ["dep:near-token"]
-web = [
-    "dep:ratzilla",
-    "dep:wasm-bindgen",
-    "dep:wasm-bindgen-futures",
-    "dep:js-sys",
-    "dep:web-sys",
-    "dep:getrandom",
-    "dep:console_error_panic_hook",
-    "dep:wasm-logger",
-    "dep:web-time",
-    "dep:gloo-timers",
-    "dep:gloo-render",
-]
 proxy = [
     "dep:axum",
     "dep:tower-http",
@@ -101,24 +84,20 @@ egui-web = [
     "dep:egui",
     "dep:eframe",
     "dep:egui_extras",
+    "dep:egui_ratatui",
+    "dep:soft_ratatui",
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
     "dep:js-sys",
     "dep:web-sys",
     "dep:getrandom",
-    "dep:console_error_panic_hook",
-    "dep:wasm-logger",
-    "dep:web-time",
-    "dep:gloo-timers",
 ]
-
 [dependencies]
 # Core dependencies (both platforms)
 anyhow = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
-dotenv = "0.15"
 clap = { version = "4.5", features = ["derive", "env"] }
 async-trait = "0.1"
 log = "0.4"
@@ -135,6 +114,9 @@ chrono = { version = "0.4", features = ["serde", "wasmbind"] }
 
 # HTTP client (shared, with rustls for both platforms)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Futures for async stream utilities (WASM needs for buffer_unordered)
+futures = { version = "0.3", default-features = false, features = ["async-await", "std"] }
 
 # NEAR Protocol crates
 # Note: All near-* crates are optional because they have C dependencies or depend on crates with C dependencies
@@ -160,10 +142,11 @@ futures-util = { version = "0.3", optional = true }
 rand = { version = "0.8", optional = true }
 
 # Web-only dependencies
-ratzilla = { version = "0.2", optional = true }
 egui = { version = "0.32", optional = true }
 eframe = { version = "0.32", optional = true, default-features = false, features = ["glow", "default_fonts"] }
 egui_extras = { version = "0.32", optional = true }
+egui_ratatui = { path = "vendor/egui_ratatui", optional = true }
+soft_ratatui = { path = "vendor/soft_ratatui", optional = true, features = ["embedded-graphics", "unicodefonts"] }
 wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 js-sys = { version = "0.3", optional = true }
@@ -176,11 +159,6 @@ web-sys = { version = "0.3", optional = true, features = [
     "History"
 ] }
 getrandom = { version = "0.2", optional = true, features = ["js"] }
-console_error_panic_hook = { version = "0.1", optional = true }
-wasm-logger = { version = "0.2", optional = true }
-web-time = { version = "1.0", optional = true }
-gloo-timers = { version = "0.3", optional = true, features = ["futures"] }
-gloo-render = { version = "0.2", optional = true }
 
 # Proxy-only dependencies (backend server)
 axum = { version = "0.7", optional = true }
@@ -189,6 +167,11 @@ tower-http = { version = "0.6", optional = true, features = ["cors"] }
 # Target-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { version = "1", default-features = false, features = ["sync", "macros", "time", "rt"] }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Navigator", "Clipboard", "Performance", "console"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
+copypasta = "0.10"

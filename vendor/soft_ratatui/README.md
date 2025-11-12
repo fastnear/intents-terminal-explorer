@@ -13,7 +13,7 @@
 Fast, portable, no-bloat.
 
 - Optimized for speed, generally faster than running ratatui inside a terminal with crossterm. 120+ fps on normal workloads.
-- Choose your own rendering backend: embedded-graphics, embedded-ttf, cosmic-text, bdf-parser
+- Choose your own rendering backend: embedded-graphics, embedded-ttf, cosmic-text<!-- `bdf-parser` disabled in vendored copy -->
 - Custom portable pixel rasterizer, outputs RGB/RGBA pixmaps, color-to-alpha support
 
 ## Feature Flags
@@ -24,7 +24,7 @@ soft_ratatui is highly modular. Enable only the backends and features you need t
 |---------|---------|-------------|
 | `unicodefonts` | [`embedded_graphics_unicodefonts`] | Embedded-graphics fonts with Unicode support. Automatically enables `embedded-graphics`. Enabled by default. |
 | `embedded-graphics` | [`EmbeddedGraphics`] | Uses embedded-graphics font atlases for TUI rendering. |
-| `bdf-parser` | [`Bdf`] | Bitmap Distribution Format font support. |
+| `bdf-parser` | _(disabled in this vendored copy)_ | Requires the upstream `copper-bdf-parser` crate. |
 | `embedded-ttf` | [`EmbeddedTTF`] | TrueType font rendering via RustType. Automatically enables `embedded-graphics`. |
 | `cosmic-text` | [`CosmicText`] | Advanced text shaping, layout, and Unicode support using CosmicText engine. |
 

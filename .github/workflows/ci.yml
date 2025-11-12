@@ -39,17 +39,16 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy (native features)
-        run: cargo clippy --features native --all-targets -- -D warnings
+        run: cargo clippy -p ratacat -p ref-arb-scanner --features native --all-targets -- -D warnings
 
       - name: Clippy (web features)
-        run: cargo clippy --features web --target wasm32-unknown-unknown --all-targets -- -D warnings
-        continue-on-error: true  # WASM builds may have different warnings
+        run: cargo clippy -p ratacat --features egui-web --target wasm32-unknown-unknown -- -D warnings
 
       - name: Test (native)
         run: cargo test --features native --all
 
       - name: Test (web)
-        run: cargo test --features web --target wasm32-unknown-unknown
+        run: cargo test -p ratacat --features egui-web --target wasm32-unknown-unknown
         continue-on-error: true  # WASM tests may not all pass yet
 
   native-host-build:
@@ -181,7 +180,7 @@ jobs:
         run: cargo install --locked trunk
 
       - name: Build web app
-        run: trunk build --release --no-default-features --features web
+        run: trunk build --release
 
       - name: Upload web artifacts
         uses: actions/upload-artifact@v4

@@ -105,6 +105,10 @@ pub struct CliArgs {
     /// Takes precedence over DEFAULT_FILTER
     #[arg(long, env = "WATCH_ACCOUNTS")]
     pub watch_accounts: Option<String>,
+
+    /// Color theme: nord, dos-blue, amber-crt, green-phosphor
+    #[arg(long, env = "THEME")]
+    pub theme: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -126,6 +130,7 @@ pub struct Config {
     pub rpc_retries: u32,
     pub fastnear_auth_token: Option<String>,
     pub default_filter: String,
+    pub theme: crate::theme::Theme,
 }
 
 /// Validate that a value is within a given range (inclusive)
@@ -280,6 +285,13 @@ pub fn load() -> Result<Config> {
             .unwrap_or_else(|| "acct:intents.near".to_string())
     };
 
+    // Parse theme
+    let theme = args.theme
+        .or_else(|| env::var("THEME").ok())
+        .map(|s| crate::theme::Theme::from_str(&s).map_err(|e| anyhow!("{}", e)))
+        .transpose()?
+        .unwrap_or_default();
+
     // Build and return config
     Ok(Config {
         source,
@@ -305,6 +317,7 @@ pub fn load() -> Result<Config> {
         rpc_retries,
         fastnear_auth_token: args.fastnear_auth_token.or_else(fastnear_token),
         default_filter,
+        theme,
     })
 }
 
