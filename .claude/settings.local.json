@@ -153,7 +153,14 @@
       "Bash(pgrep:*)",
       "Bash(pkill:*)",
       "Bash(npm install)",
-      "Bash(npm run e2e:*)"
+      "Bash(npm run e2e:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git symbolic-ref:*)",
+      "Bash(git rev-list:*)",
+      "Bash(git fetch:*)",
+      "Bash(git merge:*)",
+      "Bash(git diff:*)"
     ],
     "deny": [],
     "ask": [],

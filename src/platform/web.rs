@@ -8,7 +8,7 @@ use anyhow::Result;
 
 /// Clipboard support for web using web-sys
 pub fn copy_to_clipboard(content: &str) -> bool {
-    #[cfg(any(feature = "web", feature = "egui-web"))]
+    #[cfg(feature = "egui-web")]
     {
         if let Some(window) = web_sys::window() {
             let clipboard = window.navigator().clipboard();
@@ -22,7 +22,7 @@ pub fn copy_to_clipboard(content: &str) -> bool {
         }
     }
 
-    #[cfg(not(any(feature = "web", feature = "egui-web")))]
+    #[cfg(not(feature = "egui-web"))]
     false
 }
 

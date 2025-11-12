@@ -285,12 +285,8 @@ pub fn load() -> Result<Config> {
             .unwrap_or_else(|| "acct:intents.near".to_string())
     };
 
-    // Parse theme
-    let theme = args.theme
-        .or_else(|| env::var("THEME").ok())
-        .map(|s| crate::theme::Theme::from_str(&s).map_err(|e| anyhow!("{}", e)))
-        .transpose()?
-        .unwrap_or_default();
+    // Use default theme (theme selection not implemented yet)
+    let theme = crate::theme::Theme::default();
 
     // Build and return config
     Ok(Config {
@@ -345,7 +341,7 @@ fn validate_url(url: &str, name: &str) -> Result<()> {
 /// Avoids runtime env reads on WASM (which cause panics).
 pub fn fastnear_token() -> Option<String> {
     // Highest priority: user auth (web/tauri) if present
-    #[cfg(any(feature = "egui-web", feature = "web"))]
+    #[cfg(feature = "egui-web")]
     {
         if let Some(t) = crate::auth::token_string() {
             if !t.is_empty() {

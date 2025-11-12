@@ -35,7 +35,10 @@ use nearx::{
 #[tokio::main]
 async fn main() -> Result<()> {
     // Load .env file if it exists (safe to ignore if not found)
-    dotenv::dotenv().ok();
+    #[cfg(feature = "native")]
+    {
+        let _ = dotenvy::dotenv();
+    }
 
     let cfg = load().context("Failed to load configuration")?;
 

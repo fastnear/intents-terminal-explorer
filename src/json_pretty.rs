@@ -1,10 +1,11 @@
-use serde_json::Value;
+use crate::theme::Theme;
 use ratatui::text::Line;
+use serde_json::Value;
 
 /// Format JSON with syntax highlighting (colored Spans)
-pub fn pretty_colored(v: &Value, space: usize) -> Vec<Line<'static>> {
+pub fn pretty_colored(v: &Value, space: usize, theme: &Theme) -> Vec<Line<'static>> {
     let json_str = pretty(v, space);
-    crate::json_syntax::colorize_json(&json_str)
+    crate::json_syntax::colorize_json(&json_str, theme)
 }
 
 /// Format JSON as plain text (no colors)

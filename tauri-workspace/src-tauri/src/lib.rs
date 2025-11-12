@@ -311,7 +311,10 @@ fn handle_urls<R: Runtime>(app: &tauri::AppHandle<R>, raws: &[String]) {
 #[tauri::command]
 async fn copy_text(text: String, handle: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
-    handle.clipboard().write_text(text).map_err(|e| e.to_string())
+    handle
+        .clipboard()
+        .write_text(text)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

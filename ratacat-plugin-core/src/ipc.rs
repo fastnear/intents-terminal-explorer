@@ -1,10 +1,10 @@
-use anyhow::{Result, anyhow};
-use crate::types::{PluginMessage, PluginConfig};
-use tokio::net::{UnixStream, UnixListener, TcpStream, TcpListener};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use std::path::Path;
+use crate::types::{PluginConfig, PluginMessage};
+use anyhow::{anyhow, Result};
 use bincode;
+use std::path::Path;
 use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::{timeout, Duration};
 
@@ -51,7 +51,8 @@ impl Transport {
         }
 
         let len = u32::from_be_bytes(len_bytes) as usize;
-        if len > 1024 * 1024 * 10 { // 10MB max message size
+        if len > 1024 * 1024 * 10 {
+            // 10MB max message size
             return Err(anyhow!("Message too large: {} bytes", len));
         }
 
@@ -291,12 +292,17 @@ mod tests {
 
         // Send ping
         let timestamp = chrono::Utc::now();
-        client.send(PluginMessage::Ping { timestamp }).await.unwrap();
+        client
+            .send(PluginMessage::Ping { timestamp })
+            .await
+            .unwrap();
 
         // Receive pong
         let response = client.recv().await.unwrap();
         match response {
-            PluginMessage::Pong { timestamp: pong_time } => {
+            PluginMessage::Pong {
+                timestamp: pong_time,
+            } => {
                 assert_eq!(timestamp, pong_time);
             }
             _ => panic!("Expected Pong message"),

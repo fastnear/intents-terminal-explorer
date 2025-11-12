@@ -126,7 +126,11 @@ impl NearxWeb {
         // Dynamic row sizing: expand when focused or non-empty (like TUI's 3-line bar)
         let has_focus = ui.ctx().memory(|m| m.has_focus(self.filter_id));
         let expanded = has_focus || !self.filter_text.trim().is_empty();
-        let rows = if expanded { tok.filter_rows } else { tok.filter_rows_collapsed };
+        let rows = if expanded {
+            tok.filter_rows
+        } else {
+            tok.filter_rows_collapsed
+        };
 
         ui.add_space(2.0);
         ui.horizontal_wrapped(|ui| {
@@ -207,14 +211,19 @@ impl NearxWeb {
                                                 .inner_margin(egui::Margin::symmetric(4, 2))
                                         };
 
-                                        let resp = frame.show(ui, |ui| {
-                                            let text = if selected {
-                                                egui::RichText::new(&label).strong()
-                                            } else {
-                                                egui::RichText::new(&label)
-                                            };
-                                            ui.add(egui::Label::new(text).sense(egui::Sense::click()))
-                                        }).inner;
+                                        let resp = frame
+                                            .show(ui, |ui| {
+                                                let text = if selected {
+                                                    egui::RichText::new(&label).strong()
+                                                } else {
+                                                    egui::RichText::new(&label)
+                                                };
+                                                ui.add(
+                                                    egui::Label::new(text)
+                                                        .sense(egui::Sense::click()),
+                                                )
+                                            })
+                                            .inner;
 
                                         if resp.hovered() {
                                             ui.ctx()
@@ -278,14 +287,19 @@ impl NearxWeb {
                                                 .inner_margin(egui::Margin::symmetric(4, 2))
                                         };
 
-                                        let resp = frame.show(ui, |ui| {
-                                            let text = if selected {
-                                                egui::RichText::new(&label).strong()
-                                            } else {
-                                                egui::RichText::new(&label)
-                                            };
-                                            ui.add(egui::Label::new(text).sense(egui::Sense::click()))
-                                        }).inner;
+                                        let resp = frame
+                                            .show(ui, |ui| {
+                                                let text = if selected {
+                                                    egui::RichText::new(&label).strong()
+                                                } else {
+                                                    egui::RichText::new(&label)
+                                                };
+                                                ui.add(
+                                                    egui::Label::new(text)
+                                                        .sense(egui::Sense::click()),
+                                                )
+                                            })
+                                            .inner;
 
                                         // Show full hash on hover (tooltip)
                                         let resp = resp.on_hover_ui(|ui| {
@@ -341,8 +355,8 @@ impl NearxWeb {
 
     /// JSON syntax highlighter → LayoutJob using theme colors.
     fn highlight_json_job(&self, s: &str) -> egui::text::LayoutJob {
-        use serde_json::Value;
         use egui::text::{LayoutJob, TextFormat};
+        use serde_json::Value;
 
         let t = *self.app.theme();
         let tok = theme::tokens::tokens().visuals;
@@ -357,7 +371,15 @@ impl NearxWeb {
         let mut job = LayoutJob::default();
 
         fn push(job: &mut LayoutJob, text: &str, font: egui::FontId, color: egui::Color32) {
-            job.append(text, 0.0, TextFormat { font_id: font, color, ..Default::default() });
+            job.append(
+                text,
+                0.0,
+                TextFormat {
+                    font_id: font,
+                    color,
+                    ..Default::default()
+                },
+            );
         }
 
         fn render(
@@ -649,7 +671,7 @@ impl NearxWeb {
                         // Use StripBuilder for top row to add spacing between Blocks/Transactions
                         egui_extras::StripBuilder::new(ui)
                             .size(egui_extras::Size::relative(0.5))
-                            .size(egui_extras::Size::exact(6.0))  // Gap between columns
+                            .size(egui_extras::Size::exact(6.0)) // Gap between columns
                             .size(egui_extras::Size::relative(0.5))
                             .horizontal(|mut strip| {
                                 // Left column: Blocks
@@ -683,7 +705,10 @@ impl NearxWeb {
                                         if resp.clicked() {
                                             self.app.set_pane_direct(1);
                                         }
-                                        ui.heading(format!("Transactions ({})", self.app.txs_len()));
+                                        ui.heading(format!(
+                                            "Transactions ({})",
+                                            self.app.txs_len()
+                                        ));
                                         ui.separator();
                                         self.draw_txs(ui);
                                     });
@@ -800,6 +825,7 @@ pub fn start() {
         rpc_retries: 2,
         fastnear_auth_token: nearx::config::fastnear_token(), // Check localStorage first
         default_filter: default_filter.clone(),
+        theme: nearx::theme::Theme::default(),
     };
 
     let app = App::new(

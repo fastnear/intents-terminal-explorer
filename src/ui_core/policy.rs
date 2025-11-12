@@ -9,14 +9,21 @@ pub struct InputPolicy {
 
 impl Default for InputPolicy {
     fn default() -> Self {
-        Self { tab_cycles_panes: true, tab_focus_inputs: false }
+        Self {
+            tab_cycles_panes: true,
+            tab_focus_inputs: false,
+        }
     }
 }
 
 // Web/Tauri default: panes only.
 #[cfg(target_arch = "wasm32")]
-pub fn default_policy() -> InputPolicy { InputPolicy::default() }
+pub fn default_policy() -> InputPolicy {
+    InputPolicy::default()
+}
 
 // Native TUI default: also panes only.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn default_policy() -> InputPolicy { InputPolicy::default() }
+pub fn default_policy() -> InputPolicy {
+    InputPolicy::default()
+}

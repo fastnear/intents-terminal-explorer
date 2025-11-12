@@ -1,6 +1,6 @@
-use async_trait::async_trait;
+use crate::types::{Capability, PluginInfo, PluginMessage, SubscriptionTopic};
 use anyhow::Result;
-use crate::types::{PluginMessage, PluginInfo, Capability, SubscriptionTopic};
+use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

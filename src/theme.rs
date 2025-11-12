@@ -123,7 +123,7 @@ pub mod eg {
     /// Tuned to match TUI feel: low-chrome panels, strong focus/selection, AA contrast
     pub fn apply(ctx: &egui::Context, t: &Theme) {
         use crate::theme::tokens;
-        use egui::{CornerRadius, Shadow, TextStyle, FontId};
+        use egui::{CornerRadius, FontId, Shadow, TextStyle};
 
         let mut v = egui::Visuals::dark();
         let tok = tokens::tokens();
@@ -184,8 +184,14 @@ pub mod eg {
         style.interaction.tooltip_delay = 0.05; // Snappy tooltips
 
         // Font sizes: ensure readable monospace + body (from tokens)
-        style.text_styles.insert(TextStyle::Body, FontId::proportional(tok.visuals.ui_font_px));
-        style.text_styles.insert(TextStyle::Monospace, FontId::monospace(tok.visuals.code_font_px));
+        style.text_styles.insert(
+            TextStyle::Body,
+            FontId::proportional(tok.visuals.ui_font_px),
+        );
+        style.text_styles.insert(
+            TextStyle::Monospace,
+            FontId::monospace(tok.visuals.code_font_px),
+        );
 
         ctx.set_style(style);
 

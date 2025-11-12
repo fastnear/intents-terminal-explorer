@@ -13,7 +13,11 @@ pub struct LayoutSpec {
 
 impl Default for LayoutSpec {
     fn default() -> Self {
-        Self { top_ratio: 0.52, min_px: 48.0, min_rows: 3 }
+        Self {
+            top_ratio: 0.52,
+            min_px: 48.0,
+            min_rows: 3,
+        }
     }
 }
 
@@ -31,8 +35,14 @@ pub fn split_rows(total_rows: u16, spec: LayoutSpec) -> (u16, u16) {
     let mut top = ((total_rows as f32) * r).round() as i32;
     let mut bottom = (total_rows as i32) - top;
     let min = spec.min_rows as i32;
-    if top < min { top = min; bottom = (total_rows as i32 - top).max(min); }
-    if bottom < min { bottom = min; top = (total_rows as i32 - bottom).max(min); }
+    if top < min {
+        top = min;
+        bottom = (total_rows as i32 - top).max(min);
+    }
+    if bottom < min {
+        bottom = min;
+        top = (total_rows as i32 - bottom).max(min);
+    }
     (cmp::max(0, top) as u16, cmp::max(0, bottom) as u16)
 }
 

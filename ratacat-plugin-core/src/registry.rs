@@ -1,12 +1,12 @@
-use anyhow::{Result, anyhow};
-use crate::traits::{Plugin, PluginHost, PluginFactory, LogLevel};
-use crate::types::{PluginMessage, PluginInfo, SubscriptionTopic, Capability};
-use crate::ipc::{IPCServer, IPCConnection};
+use crate::ipc::{IPCConnection, IPCServer};
+use crate::traits::{LogLevel, Plugin, PluginFactory, PluginHost};
+use crate::types::{Capability, PluginInfo, PluginMessage, SubscriptionTopic};
+use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
 use tokio::sync::mpsc;
-use async_trait::async_trait;
+use tokio::sync::{Mutex, RwLock};
 
 /// Plugin instance with metadata
 struct PluginInstance {
@@ -88,7 +88,9 @@ impl PluginRegistry {
 
         // Subscribe to topics
         for topic in &subscriptions {
-            self.message_bus.subscribe(id.clone(), topic.clone()).await?;
+            self.message_bus
+                .subscribe(id.clone(), topic.clone())
+                .await?;
         }
 
         let instance = PluginInstance {
@@ -275,14 +277,12 @@ impl PluginHost for RegistryHost {
         // Route query to appropriate plugin based on message type
         // This is a simplified implementation
         match message {
-            PluginMessage::Query { id, query: _ } => {
-                Ok(PluginMessage::Response {
-                    id,
-                    data: serde_json::Value::Null,
-                    success: false,
-                    error: Some("Query routing not implemented".to_string()),
-                })
-            }
+            PluginMessage::Query { id, query: _ } => Ok(PluginMessage::Response {
+                id,
+                data: serde_json::Value::Null,
+                success: false,
+                error: Some("Query routing not implemented".to_string()),
+            }),
             _ => Err(anyhow!("Invalid query message")),
         }
     }

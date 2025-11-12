@@ -59,10 +59,6 @@ pub mod debug;
 // History module (has native-only implementation internally)
 pub mod history;
 
-// Clipboard module (native-only)
-#[cfg(feature = "native")]
-pub mod clipboard;
-
 // Platform-specific modules
 #[cfg(feature = "native")]
 pub mod source_ws;
