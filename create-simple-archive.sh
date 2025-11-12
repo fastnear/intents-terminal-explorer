@@ -28,6 +28,8 @@ zip -r "${ARCHIVE_NAME}" . \
     -x "native-host/*" \
     -x "tauri-workspace/*" \
     -x "dist/*" \
+    -x "dist-egui/*" \
+    -x "node_modules/*" \
     -x "Trunk.toml" \
     -x "index.html" \
     -x "debug.log" \
