@@ -1887,26 +1887,4 @@ RPC_TIMEOUT_MS=15000 POLL_CHUNK_CONCURRENCY=2 cargo run --bin ratacat --features
 
 ---
 
-## Arbitrage Engine (Moved)
-
-**Note**: The arbitrage scanning engine has been moved to a separate workspace.
-
-The `ref-arb-scanner` crate is now an independent workspace member located in the `ref-arb-scanner/` directory. This allows it to be developed, tested, and versioned independently from the main Ratacat TUI application.
-
-**To use the arbitrage scanner:**
-
-```bash
-# Navigate to the scanner directory
-cd ref-arb-scanner
-
-# Build and run (see ref-arb-scanner/README.md for full documentation)
-cargo run --release
-```
-
-For complete documentation, see:
-- `ref-arb-scanner/README.md` - Full usage guide
-- `REF_ARB_SCANNER_REVERSAL.md` - Instructions for re-integrating if needed
-
----
-
 Built with ❤️ using Ratatui, Tokio, and Rust. Designed for NEAR Protocol monitoring.

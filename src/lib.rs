@@ -101,22 +101,6 @@ pub mod copy_payload;
 // Temporarily disabled - needs API updates for egui 0.32
 // #[cfg(feature = "egui-web")]
 // pub mod egui_extra;
-
-// Arbitrage engine modules - MOVED to ref-arb-scanner workspace
-// These modules are no longer part of the main crate since ref-arb-scanner
-// has been extracted to a separate workspace member.
-// See: ref-arb-scanner/ directory
-//
-// #[cfg(feature = "native")]
-// pub mod arb_engine;
-// #[cfg(feature = "native")]
-// pub mod ref_finance_client;
-// #[cfg(feature = "native")]
-// pub mod price_discovery;
-// #[cfg(feature = "native")]
-// pub mod arb_config;
-// #[cfg(feature = "native")]
-// pub mod slippage;
 // #[cfg(feature = "native")]
 // pub mod risk_manager;
 // #[cfg(feature = "native")]
