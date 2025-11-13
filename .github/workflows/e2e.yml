@@ -79,6 +79,15 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version '^2.0.0' --locked
 
+      - name: Install Trunk
+        run: cargo install --locked trunk
+
+      - name: Add WASM target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Build web frontend
+        run: trunk build --release
+
       - name: Build Tauri app with e2e features
         working-directory: tauri-workspace
         run: |
