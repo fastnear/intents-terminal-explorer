@@ -5,6 +5,9 @@
 //! without exposing these capabilities in production builds.
 
 #[cfg(feature = "e2e")]
+use tauri::Emitter;
+
+#[cfg(feature = "e2e")]
 #[tauri::command]
 pub async fn nearx_test_emit_deeplink(app: tauri::AppHandle, url: String) -> Result<(), String> {
     log::info!("🧪 [E2E-TEST] Emitting deep link: {}", url);
@@ -25,7 +28,7 @@ pub async fn nearx_test_get_last_route() -> Result<String, String> {
 
 #[cfg(feature = "e2e")]
 #[tauri::command]
-pub async fn nearx_test_clear_storage(window: tauri::Window) -> Result<(), String> {
+pub async fn nearx_test_clear_storage(window: tauri::WebviewWindow) -> Result<(), String> {
     log::info!("🧪 [E2E-TEST] Clearing storage");
     window
         .eval("localStorage.clear(); sessionStorage.clear();")
