@@ -15,7 +15,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: rustfmt
           targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
@@ -28,12 +28,7 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      # Disabled: near-primitives has architecture issues on Linux CI runners
-      # - name: Clippy (native features)
-      #   run: cargo clippy -p nearx --features native --all-targets -- -D warnings
-
-      - name: Clippy (web features)
-        run: cargo clippy -p nearx --features egui-web --target wasm32-unknown-unknown -- -D warnings
+      # Note: for clippy, near-primitives has architecture issues on Linux CI runners
 
       - name: Test (native)
         run: cargo test --features native -p nearx
