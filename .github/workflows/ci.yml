@@ -16,6 +16,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -39,16 +40,16 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy (native features)
-        run: cargo clippy -p ratacat --features native --all-targets -- -D warnings
+        run: cargo clippy -p nearx --features native --all-targets -- -D warnings
 
       - name: Clippy (web features)
-        run: cargo clippy -p ratacat --features egui-web --target wasm32-unknown-unknown -- -D warnings
+        run: cargo clippy -p nearx --features egui-web --target wasm32-unknown-unknown -- -D warnings
 
       - name: Test (native)
-        run: cargo test --features native -p ratacat
+        run: cargo test --features native -p nearx
 
       - name: Test (web)
-        run: cargo test -p ratacat --features egui-web --target wasm32-unknown-unknown
+        run: cargo test -p nearx --features egui-web --target wasm32-unknown-unknown
         continue-on-error: true  # WASM tests may not all pass yet
 
   native-host-build:

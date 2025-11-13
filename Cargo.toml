@@ -28,7 +28,13 @@ resolver = "2"
 members = [
   ".",                       # ratacat root
   "plugins/tx-analyzer",
-  "plugins/validator-monitor"
+  "plugins/validator-monitor",
+  "ratacat-plugin-core",
+]
+exclude = [
+  "vendor",
+  "tauri-workspace",
+  "native-host",
 ]
 
 [workspace.dependencies]
