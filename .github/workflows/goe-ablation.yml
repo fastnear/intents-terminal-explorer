@@ -12,6 +12,7 @@ on:
 
 jobs:
   ablation:
+    if: false  # Disabled - GOE scripts not in repo yet
     runs-on: ubuntu-latest
     env:
       GOECHECK_MODE: ${{ github.event.inputs.mode || 'warn' }}   # warn | strict

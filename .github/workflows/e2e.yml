@@ -76,6 +76,9 @@ jobs:
           which tauri-driver
           tauri-driver --version || echo "tauri-driver installed but version check failed"
 
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version '^2.0.0' --locked
+
       - name: Build Tauri app with e2e features
         working-directory: tauri-workspace
         run: |
