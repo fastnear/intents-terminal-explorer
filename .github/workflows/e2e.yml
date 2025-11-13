@@ -1,0 +1,143 @@
+name: E2E Tests (Linux)
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'tauri-workspace/**'
+      - 'e2e-tests/**'
+      - 'src/**'
+      - '.github/workflows/e2e.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'tauri-workspace/**'
+      - 'e2e-tests/**'
+      - 'src/**'
+      - '.github/workflows/e2e.yml'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  e2e-linux:
+    name: E2E Tests on Linux
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            tauri-workspace -> target
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            webkit2gtk-driver \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            xvfb \
+            libxdo-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: e2e-tests/package-lock.json
+
+      - name: Install E2E test dependencies
+        working-directory: e2e-tests
+        run: npm ci || npm install
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      - name: Verify tauri-driver installation
+        run: |
+          which tauri-driver
+          tauri-driver --version || echo "tauri-driver installed but version check failed"
+
+      - name: Build Tauri app with e2e features
+        working-directory: tauri-workspace
+        run: |
+          cargo tauri build --debug --no-bundle --features e2e
+          ls -la src-tauri/target/debug/
+
+      - name: Verify binary exists
+        run: |
+          if [ -f "tauri-workspace/src-tauri/target/debug/nearx-tauri" ]; then
+            echo "✅ Binary found"
+            file tauri-workspace/src-tauri/target/debug/nearx-tauri
+          else
+            echo "❌ Binary not found!"
+            ls -la tauri-workspace/src-tauri/target/debug/
+            exit 1
+          fi
+
+      - name: Run E2E tests with xvfb
+        working-directory: e2e-tests
+        run: |
+          # Start xvfb virtual display for headless testing
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1280x720x24 &
+          sleep 2
+
+          # Run tests
+          npm test
+        env:
+          CI: true
+
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-artifacts
+          path: |
+            e2e-tests/*.log
+            tauri-workspace/src-tauri/target/debug/*.log
+          retention-days: 7
+
+  # Optional: Run web build tests on macOS (since Tauri WebDriver isn't supported)
+  e2e-web-macos:
+    name: Web E2E Tests on macOS (Playwright)
+    runs-on: macos-latest
+    if: false # Disabled by default - enable if you have Playwright tests
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: |
+          cd web-e2e-tests  # If you have separate Playwright tests
+          npm install
+          npx playwright install --with-deps
+
+      - name: Run Playwright tests
+        run: |
+          cd web-e2e-tests
+          npm test

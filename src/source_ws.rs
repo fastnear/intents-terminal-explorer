@@ -2,14 +2,16 @@
 //!
 //! This module is only available on native targets (not WASM).
 
-#![cfg(feature = "native")]
-
+use crate::{
+    config::Config,
+    rpc_utils::fetch_block_with_txs,
+    types::{AppEvent, WsPayload},
+};
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio_tungstenite::connect_async;
 use tungstenite::protocol::Message;
-use crate::{types::{AppEvent, WsPayload}, config::Config, rpc_utils::fetch_block_with_txs};
-use tokio::sync::mpsc::UnboundedSender;
 
 /// Detect NEAR network from block height
 /// Mainnet blocks are > 100M, testnet blocks are < 100M
@@ -35,11 +37,18 @@ pub async fn run_ws(cfg: &Config, tx: UnboundedSender<AppEvent>) -> Result<()> {
     let (mut ws_write, mut ws_read) = ws.split();
 
     // Optional: identify as Ratacat client
-    let _ = ws_write.send(Message::Text(r#"{"ratacat":"hello"}"#.into())).await;
+    let _ = ws_write
+        .send(Message::Text(r#"{"ratacat":"hello"}"#.into()))
+        .await;
 
     while let Some(msg) = ws_read.next().await {
-        let msg = match msg { Ok(m)=>m, Err(_)=>break };
-        if !msg.is_text() { continue; }
+        let msg = match msg {
+            Ok(m) => m,
+            Err(_) => break,
+        };
+        if !msg.is_text() {
+            continue;
+        }
         let text = msg.into_text().unwrap_or_default();
         if let Ok(payload) = serde_json::from_str::<WsPayload>(&text) {
             match payload {
@@ -61,14 +70,23 @@ pub async fn run_ws(cfg: &Config, tx: UnboundedSender<AppEvent>) -> Result<()> {
                     let concurrency = cfg.poll_chunk_concurrency;
                     let auth_token = cfg.fastnear_auth_token.clone();
                     tokio::spawn(async move {
-                        match fetch_block_with_txs(&url, height, timeout, concurrency, auth_token.as_deref()).await {
+                        match fetch_block_with_txs(
+                            &url,
+                            height,
+                            timeout,
+                            concurrency,
+                            auth_token.as_deref(),
+                        )
+                        .await
+                        {
                             Ok(row) => {
                                 let _ = tx_clone.send(AppEvent::NewBlock(row));
                             }
                             Err(_e) => {
                                 // Silently fail (logging would break TUI)
                                 // Fallback: send empty block notification
-                                let _ = tx_clone.send(AppEvent::FromWs(WsPayload::Block { data: height }));
+                                let _ = tx_clone
+                                    .send(AppEvent::FromWs(WsPayload::Block { data: height }));
                             }
                         }
                     });

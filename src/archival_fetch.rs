@@ -1,6 +1,6 @@
+use crate::{config::Config, rpc_utils::fetch_block_with_txs, types::AppEvent};
 use anyhow::Result;
 use tokio::sync::mpsc::UnboundedReceiver;
-use crate::{types::AppEvent, config::Config, rpc_utils::fetch_block_with_txs};
 
 /// Background task that fetches historical blocks from archival RPC endpoint
 /// Receives block height requests and fetches them on demand
@@ -17,18 +17,42 @@ pub async fn run_archival_fetch(
 
     eprintln!("[Archival] Starting archival fetch task with URL: {archival_url}");
 
+    // Get effective auth token with priority: User token (from auth module) → Config token → None
+    let get_token = || -> Option<String> {
+        // Try user token first (from authenticated login via auth module)
+        if let Some(token) = crate::auth::token_string() {
+            eprintln!("[Archival] Using user FastNEAR token (from auth)");
+            return Some(token);
+        }
+        // Fall back to config token (from env or URL param)
+        if let Some(ref token) = cfg.fastnear_auth_token {
+            eprintln!("[Archival] Using config FastNEAR token (env/URL)");
+            Some(token.clone())
+        } else {
+            eprintln!("[Archival] ⚠️ No FastNEAR token (may hit rate limits on archival endpoint)");
+            None
+        }
+    };
+
     while let Some(height) = fetch_rx.recv().await {
         eprintln!("[Archival] Received request to fetch block #{height}");
+
+        let token = get_token(); // Get current token (may have been updated)
 
         match fetch_block_with_txs(
             &archival_url,
             height,
             cfg.rpc_timeout_ms,
             cfg.poll_chunk_concurrency,
-            cfg.fastnear_auth_token.as_deref(),
-        ).await {
+            token.as_deref(),
+        )
+        .await
+        {
             Ok(block) => {
-                eprintln!("[Archival] Successfully fetched block #{} ({} txs)", height, block.tx_count);
+                eprintln!(
+                    "[Archival] Successfully fetched block #{} ({} txs)",
+                    height, block.tx_count
+                );
                 // Send block via existing event channel
                 if let Err(e) = block_tx.send(AppEvent::NewBlock(block)) {
                     eprintln!("[Archival] Failed to send block: {e}");

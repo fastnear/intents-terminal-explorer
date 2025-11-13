@@ -1,10 +1,10 @@
+use base64::{engine::general_purpose, Engine as _};
+use chrono::{DateTime, Utc};
 use ratacat_plugin_core::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use base64::{Engine as _, engine::general_purpose};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TransactionPattern {
@@ -57,7 +57,7 @@ pub struct TransactionAnalyzerPlugin {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AnalyzerConfig {
-    high_value_threshold: u128, // in yoctoNEAR
+    high_value_threshold: u128,    // in yoctoNEAR
     pattern_detection_window: u64, // in seconds
     max_recent_txs: usize,
     risk_thresholds: RiskThresholds,
@@ -78,7 +78,7 @@ impl TransactionAnalyzerPlugin {
             recent_txs: Arc::new(Mutex::new(Vec::new())),
             config: AnalyzerConfig {
                 high_value_threshold: 1_000_000_000_000_000_000_000_000, // 1 NEAR
-                pattern_detection_window: 3600, // 1 hour
+                pattern_detection_window: 3600,                          // 1 hour
                 max_recent_txs: 1000,
                 risk_thresholds: RiskThresholds {
                     gas_spike_multiplier: 2.0,
@@ -116,8 +116,10 @@ impl TransactionAnalyzerPlugin {
                 if let Ok(amount) = deposit.parse::<u128>() {
                     if amount > self.config.high_value_threshold {
                         patterns_detected.push(PatternType::HighValueTransfer);
-                        insights.push(format!("High value transfer detected: {} NEAR",
-                            amount / 1_000_000_000_000_000_000_000_000));
+                        insights.push(format!(
+                            "High value transfer detected: {} NEAR",
+                            amount / 1_000_000_000_000_000_000_000_000
+                        ));
                         risk_score += 20;
                     }
                 }
@@ -125,7 +127,10 @@ impl TransactionAnalyzerPlugin {
         }
 
         // Check for contract deployment
-        if decoded_actions.iter().any(|a| a.action_type == "DeployContract") {
+        if decoded_actions
+            .iter()
+            .any(|a| a.action_type == "DeployContract")
+        {
             patterns_detected.push(PatternType::ContractDeployment);
             insights.push("New contract deployment detected".to_string());
             risk_score += 10;
@@ -156,7 +161,7 @@ impl TransactionAnalyzerPlugin {
             action_type: action.r#type.clone(),
             method_name: action.method.clone(),
             args_decoded: self.try_decode_args(action).await,
-            gas_attached: None, // Would need full tx data
+            gas_attached: None,     // Would need full tx data
             deposit_attached: None, // Would need full tx data
         }
     }
@@ -181,11 +186,11 @@ impl TransactionAnalyzerPlugin {
         // - Arbitrage patterns
         // - Front-running indicators
 
-        let has_swap = actions.iter().any(|a|
-            a.method_name.as_ref().map_or(false, |m|
-                m.contains("swap") || m.contains("exchange")
-            )
-        );
+        let has_swap = actions.iter().any(|a| {
+            a.method_name
+                .as_ref()
+                .map_or(false, |m| m.contains("swap") || m.contains("exchange"))
+        });
 
         let has_multiple_contracts = tx.actions.len() > 1;
 
@@ -194,12 +199,14 @@ impl TransactionAnalyzerPlugin {
 
     async fn update_pattern_stats(&self, pattern: PatternType, tx_hash: String) {
         let mut patterns = self.patterns.lock().await;
-        let entry = patterns.entry(pattern.clone()).or_insert(TransactionPattern {
-            pattern_type: pattern,
-            frequency: 0,
-            examples: Vec::new(),
-            last_seen: Utc::now(),
-        });
+        let entry = patterns
+            .entry(pattern.clone())
+            .or_insert(TransactionPattern {
+                pattern_type: pattern,
+                frequency: 0,
+                examples: Vec::new(),
+                last_seen: Utc::now(),
+            });
 
         entry.frequency += 1;
         entry.last_seen = Utc::now();
@@ -227,21 +234,31 @@ impl Plugin for TransactionAnalyzerPlugin {
     }
 
     async fn init(&mut self) -> Result<()> {
-        self.host.log(LogLevel::Info, "Transaction Analyzer plugin initialized");
+        self.host
+            .log(LogLevel::Info, "Transaction Analyzer plugin initialized");
         Ok(())
     }
 
     async fn handle_message(&mut self, message: PluginMessage) -> Result<Option<PluginMessage>> {
         match message {
-            PluginMessage::InterestingTransaction { hash, reason, signer, receiver, actions } => {
+            PluginMessage::InterestingTransaction {
+                hash,
+                reason,
+                signer,
+                receiver,
+                actions,
+            } => {
                 let tx_summary = TxSummary {
                     hash: hash.clone(),
                     signer: Some(signer),
                     receiver: Some(receiver),
-                    actions: actions.into_iter().map(|a| TxAction {
-                        r#type: a,
-                        method: None,
-                    }).collect(),
+                    actions: actions
+                        .into_iter()
+                        .map(|a| TxAction {
+                            r#type: a,
+                            method: None,
+                        })
+                        .collect(),
                 };
 
                 let analysis = self.analyze_transaction(&tx_summary).await;
@@ -255,14 +272,18 @@ impl Plugin for TransactionAnalyzerPlugin {
 
                 // Update pattern statistics
                 for pattern in &analysis.patterns_detected {
-                    self.update_pattern_stats(pattern.clone(), hash.clone()).await;
+                    self.update_pattern_stats(pattern.clone(), hash.clone())
+                        .await;
                 }
 
                 // Log high-risk transactions
                 if analysis.risk_score > 70 {
                     self.host.log(
                         LogLevel::Warn,
-                        &format!("High-risk transaction detected: {} (score: {})", hash, analysis.risk_score)
+                        &format!(
+                            "High-risk transaction detected: {} (score: {})",
+                            hash, analysis.risk_score
+                        ),
                     );
                 }
 
@@ -275,7 +296,10 @@ impl Plugin for TransactionAnalyzerPlugin {
                 }));
             }
 
-            PluginMessage::Query { id, query: QueryType::GetRecentTransactions { limit } } => {
+            PluginMessage::Query {
+                id,
+                query: QueryType::GetRecentTransactions { limit },
+            } => {
                 let recent = self.recent_txs.lock().await;
                 let txs: Vec<_> = recent.iter().take(limit).cloned().collect();
 
@@ -293,7 +317,8 @@ impl Plugin for TransactionAnalyzerPlugin {
     }
 
     async fn cleanup(&mut self) -> Result<()> {
-        self.host.log(LogLevel::Info, "Transaction Analyzer plugin shutting down");
+        self.host
+            .log(LogLevel::Info, "Transaction Analyzer plugin shutting down");
         Ok(())
     }
 
@@ -312,7 +337,10 @@ impl Plugin for TransactionAnalyzerPlugin {
             if pattern_data.frequency > 100 {
                 self.host.log(
                     LogLevel::Info,
-                    &format!("Pattern {:?} detected {} times", pattern_type, pattern_data.frequency)
+                    &format!(
+                        "Pattern {:?} detected {} times",
+                        pattern_type, pattern_data.frequency
+                    ),
                 );
             }
         }

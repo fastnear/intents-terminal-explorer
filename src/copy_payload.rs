@@ -1,143 +1,161 @@
+//! Copy payload construction for clipboard operations.
+//!
+//! This module builds JSON payloads for different panes based on blockchain data.
+//! It's used by `copy_api` to provide consistent copy behavior across all targets.
+//!
+//! ## Payload Formats
+//!
+//! **Block Summary** (Pane 0):
+//! ```json
+//! {
+//!   "network": "mainnet",
+//!   "block_height": 12345,
+//!   "block_hash": "...",
+//!   "timestamp": 1234567890,
+//!   "tx_count": 5,
+//!   "txs": [...]
+//! }
+//! ```
+//!
+//! **Transaction Summary** (Pane 1 - Dual Format):
+//! ```json
+//! {
+//!   "network": "mainnet",
+//!   "block_height": 12345,
+//!   "block_timestamp": 1234567890,
+//!   "tx_hash": "...",
+//!   "chain": {...},    // Raw transaction data
+//!   "human": {...}     // Human-readable formatted data
+//! }
+//! ```
+
+use crate::types::{ActionSummary, BlockRow, TxLite};
 use serde_json::{json, Value};
-use crate::types::{BlockRow, TxLite, ActionSummary};
-use crate::util_text::{format_gas, format_near};
 
-pub fn block_json(block: &BlockRow, txs_override: Option<&[TxLite]>) -> Value {
-    let txs: Vec<&TxLite> = if let Some(slice) = txs_override {
-        slice.iter().collect()
-    } else {
-        block.transactions.iter().collect()
-    };
-    let transactions: Vec<Value> = txs.into_iter()
-        .map(|tx| tx_summary_json(Some(block), tx))
-        .collect();
-
+/// Build a JSON value representing a block summary with all transactions.
+///
+/// Used when copying from the Blocks pane (pane 0).
+pub fn block_summary_json(block: &BlockRow, transactions: &[TxLite]) -> Value {
     json!({
-        "block": {
-            "height": block.height,
-            "hash": block.hash,
-            "timestamp": block.timestamp,
-            "when": block.when,
-            "tx_count": block.tx_count,
-            "transactions": transactions
-        }
+        "network": "mainnet",  // TODO: Make configurable
+        "block_height": block.height,
+        "block_hash": block.hash,
+        "timestamp": block.timestamp,
+        "tx_count": transactions.len(),
+        "txs": transactions
     })
 }
 
-pub fn tx_summary_json(block: Option<&BlockRow>, tx: &TxLite) -> Value {
-    let mut v = json!({ "hash": tx.hash });
-    if let Some(b) = block {
-        v["block_height"] = json!(b.height);
-        v["block_hash"]  = json!(b.hash.clone());
-        v["timestamp"]   = json!(b.timestamp);
-        v["when"]        = json!(b.when.clone());
-    }
-    if let Some(ref signer)   = tx.signer_id   { v["signer"]   = json!(signer); }
-    if let Some(ref receiver) = tx.receiver_id { v["receiver"] = json!(receiver); }
-    if let Some(nonce) = tx.nonce { v["nonce"] = json!(nonce); }
+/// Build a JSON value representing a transaction summary (dual format: chain + human).
+///
+/// Used when copying from the Transactions pane (pane 1).
+pub fn tx_summary_json(block: &BlockRow, tx: &TxLite) -> Value {
+    // Build human-readable view
+    let mut human = json!({
+        "hash": tx.hash
+    });
 
+    if let Some(ref signer) = tx.signer_id {
+        human["signer"] = json!(signer);
+    }
+    if let Some(ref receiver) = tx.receiver_id {
+        human["receiver"] = json!(receiver);
+    }
+    if let Some(nonce) = tx.nonce {
+        human["nonce"] = json!(nonce);
+    }
     if let Some(ref actions) = tx.actions {
-        let arr: Vec<Value> = actions.iter().map(|a| {
-            let mut obj = json!({
-                "type": action_type(a),
-                "description": action_description(a),
-            });
-            if let Some(extra) = action_extra(a) {
-                if let Value::Object(map) = &mut obj {
-                    for (k, vv) in extra.as_object().unwrap().iter() {
-                        map.insert(k.clone(), vv.clone());
-                    }
-                }
-            }
-            obj
-        }).collect();
-        v["actions"] = json!(arr);
+        let formatted_actions: Vec<_> = actions.iter().map(format_action).collect();
+        human["actions"] = json!(formatted_actions);
     }
-    v
+
+    // Dual format: chain (raw) + human (processed)
+    json!({
+        "network": "mainnet",  // TODO: Make configurable
+        "block_height": block.height,
+        "block_timestamp": block.timestamp,
+        "tx_hash": tx.hash,
+        "chain": tx,      // Raw chain data
+        "human": human    // Human-readable formatted data
+    })
 }
 
-fn action_type(a: &ActionSummary) -> &'static str {
-    use ActionSummary::*;
-    match a {
-        CreateAccount => "CreateAccount",
-        DeployContract { .. } => "DeployContract",
-        FunctionCall   { .. } => "FunctionCall",
-        Transfer       { .. } => "Transfer",
-        Stake          { .. } => "Stake",
-        AddKey         { .. } => "AddKey",
-        DeleteKey      { .. } => "DeleteKey",
-        DeleteAccount  { .. } => "DeleteAccount",
-        Delegate       { .. } => "Delegate",
-    }
-}
-
-fn action_description(a: &ActionSummary) -> String {
-    use ActionSummary::*;
-    match a {
-        CreateAccount => "CreateAccount".into(),
-        DeployContract { code_len } =>
-            format!("DeployContract ({} bytes)", code_len),
-        FunctionCall { method_name, gas, deposit, .. } =>
-            format!("FunctionCall: {}() [gas: {}, deposit: {}]", method_name, format_gas(*gas), format_near(*deposit)),
-        Transfer { deposit } =>
-            format!("Transfer: {}", format_near(*deposit)),
-        Stake { stake, public_key } =>
-            format!("Stake: {} ({})", format_near(*stake), public_key),
-        AddKey { public_key, .. } =>
-            format!("AddKey: {}", public_key),
-        DeleteKey { public_key } =>
-            format!("DeleteKey: {}", public_key),
-        DeleteAccount { beneficiary_id } =>
-            format!("DeleteAccount → {}", beneficiary_id),
-        Delegate { sender_id, receiver_id, actions } =>
-            format!("Delegate: {} → {} ({} actions)", sender_id, receiver_id, actions.len()),
-    }
-}
-
-fn action_extra(a: &ActionSummary) -> Option<Value> {
+/// Recursively format an action for human-readable display.
+///
+/// This is the exact same formatter from app.rs for consistency.
+pub fn format_action(action: &ActionSummary) -> Value {
     use crate::near_args::DecodedArgs;
-    use ActionSummary::*;
-    match a {
-        FunctionCall { method_name, args_decoded, gas, deposit, .. } => {
+    use crate::util_text::{format_gas, format_near};
+
+    match action {
+        ActionSummary::CreateAccount => json!({"type": "CreateAccount"}),
+        ActionSummary::DeployContract { code_len } => {
+            json!({"type": "DeployContract", "code_size": format!("{} bytes", code_len)})
+        }
+        ActionSummary::FunctionCall {
+            method_name,
+            args_decoded,
+            gas,
+            deposit,
+            ..
+        } => {
             let args_display = match args_decoded {
-                DecodedArgs::Json(v)        => crate::json_auto_parse::auto_parse_nested_json(v.clone(), 5, 0),
-                DecodedArgs::Text(t)        => json!(t),
+                DecodedArgs::Json(v) => {
+                    // Auto-parse nested JSON-serialized strings for better readability
+                    crate::json_auto_parse::auto_parse_nested_json(v.clone(), 5, 0)
+                }
+                DecodedArgs::Text(t) => json!(t),
                 DecodedArgs::Bytes { preview, .. } => json!(format!("[binary: {}]", preview)),
-                DecodedArgs::Empty          => json!({}),
-                DecodedArgs::Error(e)       => json!(format!("<decode error: {}>", e)),
+                DecodedArgs::Empty => json!({}),
+                DecodedArgs::Error(e) => json!(format!("<decode error: {}>", e)),
             };
-            Some(json!({
+
+            json!({
+                "type": "FunctionCall",
                 "method": method_name,
                 "args": args_display,
                 "gas": format_gas(*gas),
-                "deposit": format_near(*deposit)
-            }))
+                "deposit": format_near(*deposit),
+            })
         }
-        Transfer { deposit } => Some(json!({ "amount": format_near(*deposit) })),
-        Stake { stake, public_key } => Some(json!({ "amount": format_near(*stake), "public_key": public_key })),
-        AddKey { public_key, access_key } => {
-            let parsed = serde_json::from_str::<Value>(access_key)
-                .map(|v| crate::json_auto_parse::auto_parse_nested_json(v, 5, 0))
-                .unwrap_or_else(|_| json!(access_key));
-            Some(json!({ "public_key": public_key, "access_key": parsed }))
+        ActionSummary::Transfer { deposit } => {
+            json!({"type": "Transfer", "amount": format_near(*deposit)})
         }
-        DeleteKey { public_key } => Some(json!({ "public_key": public_key })),
-        DeleteAccount { beneficiary_id } => Some(json!({ "beneficiary": beneficiary_id })),
-        DeployContract { code_len } => Some(json!({ "code_size": format!("{} bytes", code_len) })),
-        Delegate { sender_id, receiver_id, actions } => {
-            let nested: Vec<Value> = actions.iter().map(|a| {
-                let mut obj = json!({ "type": action_type(a), "description": action_description(a) });
-                if let Some(extra) = action_extra(a) {
-                    if let Value::Object(map) = &mut obj {
-                        for (k, vv) in extra.as_object().unwrap().iter() {
-                            map.insert(k.clone(), vv.clone());
-                        }
-                    }
-                }
-                obj
-            }).collect();
-            Some(json!({ "sender": sender_id, "receiver": receiver_id, "actions": nested }))
+        ActionSummary::Stake { stake, public_key } => {
+            json!({"type": "Stake", "amount": format_near(*stake), "public_key": public_key})
         }
-        CreateAccount => None,
+        ActionSummary::AddKey {
+            public_key,
+            access_key,
+        } => {
+            // Parse access_key if it's stringified JSON (same pattern as FunctionCall args)
+            let parsed_access_key = if let Ok(json_val) = serde_json::from_str::<Value>(access_key)
+            {
+                crate::json_auto_parse::auto_parse_nested_json(json_val, 5, 0)
+            } else {
+                json!(access_key) // Fallback to string if not valid JSON
+            };
+            json!({"type": "AddKey", "public_key": public_key, "access_key": parsed_access_key})
+        }
+        ActionSummary::DeleteKey { public_key } => {
+            json!({"type": "DeleteKey", "public_key": public_key})
+        }
+        ActionSummary::DeleteAccount { beneficiary_id } => {
+            json!({"type": "DeleteAccount", "beneficiary": beneficiary_id})
+        }
+        ActionSummary::Delegate {
+            sender_id,
+            receiver_id,
+            actions,
+        } => {
+            // Recursively format nested actions
+            let nested_formatted: Vec<Value> = actions.iter().map(format_action).collect();
+            json!({
+                "type": "Delegate",
+                "sender": sender_id,
+                "receiver": receiver_id,
+                "actions": nested_formatted
+            })
+        }
     }
 }

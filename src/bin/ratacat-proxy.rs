@@ -27,10 +27,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tower_http::cors::{Any, CorsLayer};
 
-use ratacat::{
-    rpc_utils::fetch_block_with_txs,
-    types::BlockRow,
-};
+use nearx::{rpc_utils::fetch_block_with_txs, types::BlockRow};
 
 /// Application state shared across handlers
 #[derive(Clone)]
@@ -95,7 +92,14 @@ async fn main() -> anyhow::Result<()> {
 
     log::info!("🦀 Ratacat Proxy Server");
     log::info!("NEAR RPC: {}", rpc_url);
-    log::info!("Auth token: {}", if auth_token.is_some() { "configured" } else { "none" });
+    log::info!(
+        "Auth token: {}",
+        if auth_token.is_some() {
+            "configured"
+        } else {
+            "none"
+        }
+    );
     log::info!("RPC timeout: {}ms", timeout_ms);
     log::info!("Chunk concurrency: {}", chunk_concurrency);
     log::info!("Port: {}", port);
@@ -148,11 +152,10 @@ async fn rpc_proxy_handler(
     log::debug!("Proxying JSON-RPC request");
 
     // Parse the incoming JSON to validate it
-    let _json: serde_json::Value = serde_json::from_str(&body)
-        .map_err(|e| {
-            log::error!("Invalid JSON in request body: {}", e);
-            StatusCode::BAD_REQUEST
-        })?;
+    let _json: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
+        log::error!("Invalid JSON in request body: {}", e);
+        StatusCode::BAD_REQUEST
+    })?;
 
     // Create HTTP client
     let client = reqwest::Client::new();
@@ -170,19 +173,17 @@ async fn rpc_proxy_handler(
     }
 
     // Forward request to NEAR RPC
-    let resp = req.send().await
-        .map_err(|e| {
-            log::error!("Failed to forward RPC request: {}", e);
-            StatusCode::BAD_GATEWAY
-        })?;
+    let resp = req.send().await.map_err(|e| {
+        log::error!("Failed to forward RPC request: {}", e);
+        StatusCode::BAD_GATEWAY
+    })?;
 
     // Get response status and body
     let status = resp.status();
-    let body_bytes = resp.bytes().await
-        .map_err(|e| {
-            log::error!("Failed to read RPC response: {}", e);
-            StatusCode::BAD_GATEWAY
-        })?;
+    let body_bytes = resp.bytes().await.map_err(|e| {
+        log::error!("Failed to read RPC response: {}", e);
+        StatusCode::BAD_GATEWAY
+    })?;
 
     // Build response with same status code
     let response = Response::builder()
@@ -208,37 +209,38 @@ async fn get_latest_handler(
     // Create a simple HTTP client to query finality=final
     let client = reqwest::Client::new();
 
-    let mut req = client.post(&state.rpc_url)
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": "latest",
-            "method": "block",
-            "params": {
-                "finality": "final"
-            }
-        }));
+    let mut req = client.post(&state.rpc_url).json(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": "latest",
+        "method": "block",
+        "params": {
+            "finality": "final"
+        }
+    }));
 
     // Add auth token if configured
     if let Some(ref token) = state.auth_token {
         req = req.header("Authorization", format!("Bearer {}", token));
     }
 
-    let resp = req.send().await
-        .map_err(|e| {
-            log::error!("Failed to fetch latest block: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let resp = req.send().await.map_err(|e| {
+        log::error!("Failed to fetch latest block: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
-    let json: serde_json::Value = resp.json().await
-        .map_err(|e| {
-            log::error!("Failed to parse latest block response: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| {
+        log::error!("Failed to parse latest block response: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // FastNEAR sometimes returns height as Number, sometimes as String
     let height = json["result"]["header"]["height"]
         .as_u64()
-        .or_else(|| json["result"]["header"]["height"].as_str().and_then(|s| s.parse::<u64>().ok()))
+        .or_else(|| {
+            json["result"]["header"]["height"]
+                .as_str()
+                .and_then(|s| s.parse::<u64>().ok())
+        })
         .ok_or_else(|| {
             log::error!("Missing or invalid height in response: {:?}", json);
             StatusCode::INTERNAL_SERVER_ERROR
@@ -269,7 +271,11 @@ async fn get_block_handler(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    log::debug!("Fetched block {} with {} txs", height, block.transactions.len());
+    log::debug!(
+        "Fetched block {} with {} txs",
+        height,
+        block.transactions.len()
+    );
 
     Ok(Json(block))
 }

@@ -1,11 +1,10 @@
 [package]
-name = "explorer-tauri"
+name = "nearx-tauri"
 version = "0.1.0"
 edition = "2021"
-default-run = "explorer-tauri"
 
 [lib]
-name = "explorer_tauri"
+name = "nearx_tauri"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
@@ -26,7 +25,8 @@ rand = "0.8"
 tauri-plugin-deep-link = { workspace = true }
 tauri-plugin-single-instance = { workspace = true }
 tauri-plugin-log = "2"
-tauri-plugin-clipboard-manager = "2.0"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
 
 # Utilities
 chrono = "0.4"
@@ -39,11 +39,10 @@ soft_ratatui = { version = "0.1", features = ["embedded-graphics", "unicodefonts
 embedded-graphics-unicodefonts = { version = "0.2", optional = true }
 ratatui = { version = "0.29", optional = true }
 
-# Path dependency to main ratacat crate
-ratacat = { path = "../..", optional = true, features = ["native"] }
-tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"], optional = true }
+# Path dependency to main nearx crate (with egui-web feature for theme support)
+nearx = { path = "../..", optional = true, features = ["egui-web"] }
+tokio = { version = "1", features = ["sync", "rt"], optional = true }
 anyhow = { version = "1", optional = true }
-web-sys = { version = "0.3", optional = true, features = ["Window", "Navigator", "Clipboard"] }
 
 [target.'cfg(desktop)'.dependencies]
 
@@ -52,4 +51,19 @@ winreg = "0.52"
 
 [features]
 default = []
-egui-ui = ["dep:egui", "dep:eframe", "dep:egui_ratatui", "dep:soft_ratatui", "dep:embedded-graphics-unicodefonts", "dep:ratatui", "dep:ratacat", "dep:tokio", "dep:anyhow", "dep:web-sys"]
+
+# E2E testing support - exposes test-only IPC commands for Selenium/WebDriver tests
+e2e = []
+
+# Disabled - using Tauri webview instead of native eframe
+# egui-ui = ["dep:egui", "dep:eframe", "dep:egui_ratatui", "dep:soft_ratatui", "dep:embedded-graphics-unicodefonts", "dep:ratatui", "dep:nearx", "dep:tokio", "dep:anyhow"]
+
+[[bin]]
+name = "nearx-tauri"
+path = "src/main.rs"
+
+# Disabled - now using src/main.rs with Tauri window manager instead
+# [[bin]]
+# name = "nearx-tauri-eframe"
+# path = "src/bin/nearx-tauri.rs"
+# required-features = ["egui-ui"]

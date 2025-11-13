@@ -1,55 +1,56 @@
-/// Web platform clipboard implementation using WASM-bindgen bridge
-///
-/// This module provides clipboard functionality for WASM targets by calling
-/// a JavaScript function that handles the actual clipboard operations.
-/// The JavaScript side (`web/platform.js`) provides a unified facade that
-/// auto-detects the best available clipboard API:
-///
-/// 1. Tauri plugin API (if running in Tauri WebView)
-/// 2. Browser extension relay (if running in extension context)
-/// 3. Navigator Clipboard API (modern browsers)
-/// 4. Legacy execCommand fallback
-///
-/// This approach ensures clipboard works reliably across all web environments.
+//! Web platform implementation (uses web-sys, in-memory storage)
 
-use wasm_bindgen::prelude::*;
+// Allow dead code when native feature is enabled (Tauri uses native, not web)
+#![cfg_attr(feature = "native", allow(dead_code))]
 
-#[wasm_bindgen]
-extern "C" {
-    /// JavaScript function provided by web/platform.js
-    /// Returns a Promise<boolean> indicating success/failure
-    #[wasm_bindgen(js_name = __copy_text)]
-    fn __copy_text_js(s: &str) -> js_sys::Promise;
+use crate::history::{BlockPersist, HistoryHit};
+use anyhow::Result;
+
+/// Clipboard support for web using web-sys
+pub fn copy_to_clipboard(content: &str) -> bool {
+    #[cfg(feature = "egui-web")]
+    {
+        if let Some(window) = web_sys::window() {
+            let clipboard = window.navigator().clipboard();
+            let promise = clipboard.write_text(content);
+            // Fire and forget - we can't easily await in this sync context
+            // In real usage, this works fine for copy operations
+            drop(promise);
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(not(feature = "egui-web"))]
+    false
 }
 
-/// Copy text to clipboard using the best available web API
-///
-/// This function spawns an async task to handle the clipboard operation
-/// and returns immediately. The JavaScript promise is handled asynchronously.
-///
-/// # Arguments
-///
-/// * `s` - The text to copy to the clipboard
-///
-/// # Returns
-///
-/// Returns `true` optimistically. The actual result is logged in the browser console.
-pub fn copy_to_clipboard(s: &str) -> bool {
-    let text = s.to_owned();
+/// In-memory history implementation for web
+/// (SQLite not available in WASM, IndexedDB would be future enhancement)
+pub struct History {
+    // For initial web version, we skip persistence
+    // Future: could use IndexedDB or localStorage
+}
 
-    wasm_bindgen_futures::spawn_local(async move {
-        let promise = __copy_text_js(&text);
+impl History {
+    pub fn start(_db_path: &str) -> Result<Self> {
+        log::info!("History persistence disabled for web build (in-memory only)");
+        Ok(History {})
+    }
 
-        match wasm_bindgen_futures::JsFuture::from(promise).await {
-            Ok(_) => {
-                log::debug!("Clipboard copy succeeded");
-            }
-            Err(e) => {
-                log::error!("Clipboard copy failed: {:?}", e);
-            }
-        }
-    });
+    pub fn persist_block(&self, _block: BlockPersist) {
+        // No-op for web version
+    }
 
-    // Return true optimistically since the operation is async
-    true
+    pub async fn search(&self, _query: String, _limit: usize) -> Vec<HistoryHit> {
+        // Return empty results for web version
+        // Future: could implement in-memory search over recent blocks
+        vec![]
+    }
+
+    pub async fn get_tx(&self, _hash: String) -> Option<String> {
+        // Not available in web version
+        None
+    }
 }

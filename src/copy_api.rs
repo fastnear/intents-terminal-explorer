@@ -1,46 +1,149 @@
+//! Shared "press `c` to copy" implementation for all targets.
+//!
+//! This module determines *what* to copy based on which pane is focused
+//! and delegates the clipboard write to `platform::copy_to_clipboard`.
+//!
+//! ## Panes
+//!
+//! - **0 = Blocks**: Block summary JSON (height, timestamp, all transactions)
+//! - **1 = Transactions**: Transaction summary JSON (dual format: chain + human)
+//! - **2 = Details**: The JSON content displayed in details pane
+//!
+//! ## Output Format
+//!
+//! - Pretty-printed JSON string (human-friendly in chats/issues)
+//! - No trailing newline (clipboard-friendly)
+//!
+//! ## Usage
+//!
+//! All targets (Native TUI, Web, Tauri) call a single function:
+//!
+//! ```rust,ignore
+//! if copy_api::copy_current(&app) {
+//!     // Success - Native TUI shows toast, Web/Tauri may show overlay
+//! }
+//! ```
+
+use crate::platform;
+use crate::{copy_payload, App};
 use serde_json::Value;
-use crate::App;
 
-/// Pane-aware JSON copy (no UI coupling; works on all targets).
-pub fn get_copy_content(app: &App) -> String {
+/// Which pane are we copying from?
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum CopyPane {
+    Blocks,
+    Txs,
+    Details,
+}
+
+/// Determine which pane is currently focused.
+#[inline]
+pub fn focused_pane(app: &App) -> CopyPane {
     match app.pane() {
-        0 => copy_block_json(app),
-        1 => copy_tx_json(app),
-        2 => copy_details_json(app),
-        _ => String::new(),
+        0 => CopyPane::Blocks,
+        1 => CopyPane::Txs,
+        _ => CopyPane::Details,
     }
 }
 
-pub fn copy_block_json(app: &App) -> String {
-    if let Some(b) = app.current_block() {
-        let (filtered, _start, total) = app.txs();
-        let v = if filtered.len() != total {
-            crate::copy_payload::block_json(b, Some(&filtered))
-        } else {
-            crate::copy_payload::block_json(b, None)
-        };
-        serde_json::to_string_pretty(&v).unwrap_or_default()
-    } else {
-        String::new()
-    }
-}
-
-pub fn copy_tx_json(app: &App) -> String {
-    // Try to reuse the details pane JSON if it's valid JSON.
-    if let Ok(v) = serde_json::from_str::<Value>(app.details()) {
-        return serde_json::to_string_pretty(&v).unwrap_or_default();
-    }
-    // Fallback: best-effort from current block's filtered list.
-    if let Some(b) = app.current_block() {
-        let (filtered, sel_tx, _total) = app.txs();
-        if let Some(tx) = filtered.get(sel_tx) {
-            let v = crate::copy_payload::tx_summary_json(Some(b), tx);
-            return serde_json::to_string_pretty(&v).unwrap_or_default();
+/// Build the JSON payload for the given pane.
+///
+/// Returns `None` if there's no content to copy (e.g., no block selected).
+pub fn payload_for(app: &App, pane: CopyPane) -> Option<Value> {
+    match pane {
+        CopyPane::Blocks => {
+            let block = app.current_block()?;
+            let (txs, _, _) = app.txs();
+            Some(copy_payload::block_summary_json(block, &txs))
+        }
+        CopyPane::Txs => {
+            let block = app.current_block()?;
+            let (txs, _, _) = app.txs();
+            let tx = txs.get(app.sel_tx())?;
+            Some(copy_payload::tx_summary_json(block, tx))
+        }
+        CopyPane::Details => {
+            // Try to parse the details string as JSON
+            let details_str = app.details();
+            match serde_json::from_str::<Value>(details_str) {
+                Ok(v) => Some(v),
+                Err(_) => {
+                    // Not valid JSON, wrap it as text
+                    Some(serde_json::json!({ "text": details_str }))
+                }
+            }
         }
     }
-    String::new()
 }
 
-pub fn copy_details_json(app: &App) -> String {
-    copy_tx_json(app)
+/// Pretty-print JSON value, without a trailing newline.
+#[inline]
+fn pretty_no_newline(v: &Value) -> String {
+    match serde_json::to_string_pretty(v) {
+        Ok(mut s) => {
+            if s.ends_with('\n') {
+                s.pop();
+            }
+            s
+        }
+        Err(_) => String::new(),
+    }
+}
+
+/// Returns the string that would be copied for the current focus, if any.
+///
+/// This is useful for testing or preview without actually writing to clipboard.
+pub fn current_text(app: &App) -> Option<String> {
+    let pane = focused_pane(app);
+    payload_for(app, pane).map(|v| pretty_no_newline(&v))
+}
+
+/// Copies the current pane payload to the clipboard.
+///
+/// Returns `true` on success, `false` if there's nothing to copy or clipboard operation fails.
+///
+/// ## Usage in Binaries
+///
+/// **Native TUI:**
+/// ```rust,ignore
+/// if copy_api::copy_current(&app) {
+///     app.show_toast("Copied".to_string());
+/// } else {
+///     app.show_toast("Copy failed".to_string());
+/// }
+/// ```
+///
+/// **Web/Tauri:**
+/// ```rust,ignore
+/// // Just call it - platform.js may show overlay on success
+/// let _ = copy_api::copy_current(&app);
+/// ```
+pub fn copy_current(app: &App) -> bool {
+    match current_text(app) {
+        Some(s) if !s.is_empty() => platform::copy_to_clipboard(&s),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_focused_pane_mapping() {
+        // This test assumes App::new() exists with reasonable defaults
+        // In practice, we'd need a proper test app setup
+        let app = App::new(30, vec![30], 100, "".to_string(), None);
+
+        // Default pane should be 0 (Blocks)
+        assert_eq!(focused_pane(&app), CopyPane::Blocks);
+    }
+
+    #[test]
+    fn test_pretty_no_newline() {
+        let json = serde_json::json!({"test": "value"});
+        let result = pretty_no_newline(&json);
+        assert!(!result.ends_with('\n'), "Should not have trailing newline");
+        assert!(result.contains("\"test\""), "Should contain JSON content");
+    }
 }

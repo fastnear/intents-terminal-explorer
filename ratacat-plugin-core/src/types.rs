@@ -1,13 +1,12 @@
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 /// Core message types for plugin communication
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PluginMessage {
-
     // Blockchain Dashboard Messages
     TransactionFailed {
         hash: String,

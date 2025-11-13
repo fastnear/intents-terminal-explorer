@@ -1,5 +1,8 @@
-[build]
-target-dir = "target"
-
-[env]
-RUST_LOG = "info"
+# Target-specific hardening for Web (wasm32)
+[target.wasm32-unknown-unknown]
+# Abort on panic (no unwinding) - avoids "unreachable" traps escalating.
+# Note: LTO and opt-level are applied via Trunk.toml for release builds to avoid
+# conflicts with cargo check/dev builds.
+rustflags = [
+  "-C", "panic=abort"
+]

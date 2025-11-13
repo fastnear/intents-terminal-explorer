@@ -1,9 +1,9 @@
+use chrono::{DateTime, Duration, Utc};
 use ratacat_plugin_core::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use chrono::{DateTime, Utc, Duration};
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ValidatorStats {
@@ -123,17 +123,19 @@ impl ValidatorMonitorPlugin {
         let mut validators = self.validators.lock().await;
         let now = Utc::now();
 
-        let stats = validators.entry(validator.clone()).or_insert(ValidatorStats {
-            name: validator.clone(),
-            last_block_height: block_height,
-            last_block_time: now,
-            blocks_produced: 0,
-            blocks_expected: 0,
-            uptime_percentage: 100.0,
-            avg_block_time_ms: 0,
-            missed_blocks: Vec::new(),
-            alerts: Vec::new(),
-        });
+        let stats = validators
+            .entry(validator.clone())
+            .or_insert(ValidatorStats {
+                name: validator.clone(),
+                last_block_height: block_height,
+                last_block_time: now,
+                blocks_produced: 0,
+                blocks_expected: 0,
+                uptime_percentage: 100.0,
+                avg_block_time_ms: 0,
+                missed_blocks: Vec::new(),
+                alerts: Vec::new(),
+            });
 
         // Update block production stats
         stats.blocks_produced += 1;
@@ -142,7 +144,8 @@ impl ValidatorMonitorPlugin {
 
         // Calculate uptime
         if stats.blocks_expected > 0 {
-            stats.uptime_percentage = (stats.blocks_produced as f64 / stats.blocks_expected as f64) * 100.0;
+            stats.uptime_percentage =
+                (stats.blocks_produced as f64 / stats.blocks_expected as f64) * 100.0;
         }
     }
 }
@@ -165,13 +168,19 @@ impl Plugin for ValidatorMonitorPlugin {
     }
 
     async fn init(&mut self) -> Result<()> {
-        self.host.log(LogLevel::Info, "Validator Monitor plugin initialized");
+        self.host
+            .log(LogLevel::Info, "Validator Monitor plugin initialized");
         Ok(())
     }
 
     async fn handle_message(&mut self, message: PluginMessage) -> Result<Option<PluginMessage>> {
         match message {
-            PluginMessage::BlockProduced { height, validator, tx_count, timestamp } => {
+            PluginMessage::BlockProduced {
+                height,
+                validator,
+                tx_count,
+                timestamp,
+            } => {
                 self.update_stats(validator.clone(), height).await;
 
                 // Check validator health
@@ -191,7 +200,10 @@ impl Plugin for ValidatorMonitorPlugin {
                 }
             }
 
-            PluginMessage::Query { id, query: QueryType::GetValidatorStats(validator) } => {
+            PluginMessage::Query {
+                id,
+                query: QueryType::GetValidatorStats(validator),
+            } => {
                 let validators = self.validators.lock().await;
                 let data = if let Some(stats) = validators.get(&validator) {
                     serde_json::to_value(stats)?
@@ -213,7 +225,8 @@ impl Plugin for ValidatorMonitorPlugin {
     }
 
     async fn cleanup(&mut self) -> Result<()> {
-        self.host.log(LogLevel::Info, "Validator Monitor plugin shutting down");
+        self.host
+            .log(LogLevel::Info, "Validator Monitor plugin shutting down");
         Ok(())
     }
 

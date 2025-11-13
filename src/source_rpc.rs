@@ -1,28 +1,54 @@
+use crate::{
+    config::Config,
+    rpc_utils::{fetch_block_with_txs, get_latest_block},
+    types::AppEvent,
+};
 use anyhow::Result;
-use crate::{types::AppEvent, config::Config, rpc_utils::{get_latest_block, fetch_block_with_txs}};
-use crate::platform::{Duration, Instant, sleep};
 use tokio::sync::mpsc::UnboundedSender;
 
-pub async fn run_rpc(cfg:&Config, tx: UnboundedSender<AppEvent>) -> Result<()> {
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::time::{sleep, Duration};
+
+#[cfg(target_arch = "wasm32")]
+use web_time::Duration;
+
+#[cfg(target_arch = "wasm32")]
+async fn sleep(duration: Duration) {
+    // Use gloo-timers for reliable WASM sleep
+    gloo_timers::future::sleep(std::time::Duration::from_millis(duration.as_millis() as u64)).await;
+}
+
+pub async fn run_rpc(cfg: &Config, tx: UnboundedSender<AppEvent>) -> Result<()> {
     let mut last_height: u64 = 0;
-    log::info!("🚀 RPC polling loop started - endpoint: {}", cfg.near_node_url);
+    log::info!(
+        "🚀 RPC polling loop started - endpoint: {}",
+        cfg.near_node_url
+    );
 
-    // ═══════════════════════════════════════════════════════════════
-    // HTTP CLIENT WARM-UP: Pre-warm DNS/TLS/HTTP connection pool
-    // ═══════════════════════════════════════════════════════════════
-    log::info!("🔥 Warming up HTTP client (DNS/TLS/connection pool)...");
-    match get_latest_block(&cfg.near_node_url, cfg.rpc_timeout_ms, cfg.fastnear_auth_token.as_deref()).await {
-        Ok(_) => log::info!("✅ HTTP client warmed up successfully"),
-        Err(e) => log::warn!("⚠️  HTTP warm-up failed (continuing anyway): {}", e),
-    }
-
-    let mut last_poll_time = Instant::now();
+    // Get effective auth token with priority: User token (from auth module) → Config token → None
+    let get_token = || -> Option<String> {
+        // Try user token first (from authenticated login via auth module)
+        if let Some(token) = crate::auth::token_string() {
+            log::debug!("🔑 Using user FastNEAR token (from auth)");
+            return Some(token);
+        }
+        // Fall back to config token (from env or URL param)
+        if let Some(ref token) = cfg.fastnear_auth_token {
+            log::debug!("🔑 Using config FastNEAR token (env/URL)");
+            Some(token.clone())
+        } else {
+            log::debug!("⚠️ No FastNEAR token available (may hit rate limits)");
+            None
+        }
+    };
 
     loop {
         log::debug!("📡 RPC loop tick - polling for latest block...");
 
+        let token = get_token();
+
         // non-overlapping loop, catch-up limited (guide's pattern).
-        match get_latest_block(&cfg.near_node_url, cfg.rpc_timeout_ms, cfg.fastnear_auth_token.as_deref()).await {
+        match get_latest_block(&cfg.near_node_url, cfg.rpc_timeout_ms, token.as_deref()).await {
             Ok(latest) => {
                 let latest_h = latest["header"]["height"].as_u64().unwrap_or(0);
                 log::debug!("✅ Got latest block height: {latest_h}");
@@ -35,30 +61,35 @@ pub async fn run_rpc(cfg:&Config, tx: UnboundedSender<AppEvent>) -> Result<()> {
                 if latest_h > last_height {
                     let start = last_height + 1;
                     let end = (start + cfg.poll_max_catchup - 1).min(latest_h);
-                    log::info!("📦 Fetching blocks {} to {} ({} blocks)", start, end, end - start + 1);
+                    log::info!(
+                        "📦 Fetching blocks {} to {} ({} blocks)",
+                        start,
+                        end,
+                        end - start + 1
+                    );
 
                     for h in start..=end {
+                        let token = get_token(); // Refresh token for each block fetch
                         if let Ok(row) = fetch_block_with_txs(
                             &cfg.near_node_url,
                             h,
                             cfg.rpc_timeout_ms,
                             cfg.poll_chunk_concurrency,
-                            cfg.fastnear_auth_token.as_deref()
-                        ).await {
-                            log::info!("🔔 Sending NewBlock event - height: {}, txs: {}", h, row.tx_count);
+                            token.as_deref(),
+                        )
+                        .await
+                        {
+                            log::info!(
+                                "🔔 Sending NewBlock event - height: {}, txs: {}",
+                                h,
+                                row.tx_count
+                            );
                             let _ = tx.send(AppEvent::NewBlock(row));
                             last_height = h;
-
-                            // Yield to UI between blocks for responsiveness (200ms)
-                            sleep(Duration::from_millis(200)).await;
                         } else {
                             log::warn!("⚠️ Failed to fetch block {h}");
                         }
                     }
-
-                    // We just did catch-up work - skip sleep and immediately check for more
-                    last_poll_time = Instant::now();
-                    continue;
                 } else {
                     log::debug!("💤 No new blocks (latest: {latest_h}, last: {last_height})");
                 }
@@ -68,19 +99,8 @@ pub async fn run_rpc(cfg:&Config, tx: UnboundedSender<AppEvent>) -> Result<()> {
             }
         }
 
-        // Smart sleep: only wait remaining time in poll interval
-        let elapsed = last_poll_time.elapsed();
-        let elapsed_ms = elapsed.as_millis() as u64;
-        let remaining_ms = cfg.poll_interval_ms.saturating_sub(elapsed_ms);
-
-        if remaining_ms > 0 {
-            log::debug!("😴 Sleeping for {}ms (elapsed: {}ms)...", remaining_ms, elapsed_ms);
-            sleep(Duration::from_millis(remaining_ms)).await;
-        } else {
-            log::debug!("⏭️  Skipping sleep - already past interval (elapsed: {}ms)", elapsed_ms);
-        }
-
-        last_poll_time = Instant::now();
+        log::debug!("😴 Sleeping for {}ms...", cfg.poll_interval_ms);
+        sleep(Duration::from_millis(cfg.poll_interval_ms)).await;
         log::debug!("⏰ Woke up from sleep!");
     }
 }

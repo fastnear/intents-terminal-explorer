@@ -1,8 +1,10 @@
 # Ratacat - NEAR Blockchain Transaction Viewer
 
-**Version 0.4.0** - High-performance **quad-mode** application for monitoring NEAR Protocol blockchain transactions. Runs in terminal (native), web browser (WASM), desktop app (Tauri), AND integrates with browsers via 1Password-style extension!
+**Version 0.4.2** - High-performance **quad-mode** application for monitoring NEAR Protocol blockchain transactions. Runs in terminal (native), web browser (WASM), desktop app (Tauri), AND integrates with browsers via 1Password-style extension!
 
 **🆕 October 2025 Update**: Production-ready browser integration with auto-installing Native Messaging host supporting Chrome, Edge, Chromium, and **Firefox**.
+
+**🔧 November 2025**: OAuth + Appearance refactor delivers production-ready authentication (Google OAuth + Magic links), unified theme system (WCAG AA compliant), and full mouse/keyboard parity across all targets with XSS-hardened CSP security.
 
 ## Quad-Mode Architecture Overview
 
@@ -30,7 +32,6 @@ Ratacat v0.4.0 features a revolutionary **quad-deployment architecture** - write
 │              │  • UI rendering (ratatui)           │                    │
 │              │  • RPC client & polling             │                    │
 │              │  • Filter & search (SQLite/memory)  │                    │
-│              │  • Archival fetcher (native-only)   │                    │
 │              └──────────┬──────────────────────────┘                    │
 │                         ▼                                               │
 │              ┌─────────────────────────────────────┐                    │
@@ -64,6 +65,70 @@ Ratacat v0.4.0 features a revolutionary **quad-deployment architecture** - write
 3. **Catch-Up Limits** - RPC mode limits blocks per poll to prevent cascade failures
 4. **Async Everything** - Tokio-based async runtime keeps UI responsive
 5. **Soft-Wrapped Tokens** - ZWSP insertion for clean line breaking of long hashes
+6. **Feature Toggles** - UI enhancements gated by runtime flags for easy rollback if needed
+
+## UI Feature Toggles (`UiFlags`)
+
+Ratacat uses a feature flag system to control enhanced UI behaviors introduced for Web/Tauri targets. This allows quick disable of new features without code surgery.
+
+### Available Flags
+
+```rust
+pub struct UiFlags {
+    /// Consume Tab/Shift+Tab after cycling panes (prevents egui focus hijack)
+    /// Default: true (stable, production-ready)
+    pub consume_tab: bool,
+
+    /// Snap egui pixels_per_point to devicePixelRatio (crisp Hi-DPI rendering)
+    /// Default: true (stable, production-ready)
+    pub dpr_snap: bool,
+
+    /// Mouse/trackpad click mapping to pane focus + row select
+    /// Default: true (stable, production-ready)
+    pub mouse_map: bool,
+
+    /// Double-click in Details toggles fullscreen overlay
+    /// Default: true (stable, production-ready)
+    pub dblclick_details: bool,
+}
+```
+
+### Usage Examples
+
+**Default behavior (production-safe):**
+```rust
+let app = App::new(fps, fps_choices, keep_blocks, filter, archival_tx);
+// consume_tab=true, dpr_snap=true, others=false
+```
+
+**Disable all enhancements (maximum stability):**
+```rust
+let mut app = App::new(fps, fps_choices, keep_blocks, filter, archival_tx);
+app.set_ui_flags(UiFlags::all_disabled());
+```
+
+**Enable only keyboard features:**
+```rust
+let mut app = App::new(fps, fps_choices, keep_blocks, filter, archival_tx);
+app.set_ui_flags(UiFlags::keyboard_only());
+```
+
+**Custom configuration:**
+```rust
+let mut app = App::new(fps, fps_choices, keep_blocks, filter, archival_tx);
+let mut flags = app.ui_flags();
+flags.consume_tab = false;  // Let egui handle Tab normally
+flags.dpr_snap = true;      // Keep crisp rendering
+app.set_ui_flags(flags);
+```
+
+### Implementation Details
+
+- **Location**: `src/flags.rs` (module), `src/app.rs` (App field)
+- **Gating**: Web binary (`src/bin/nearx-web.rs`) checks flags before applying behaviors
+- **Runtime Toggleable**: Can be changed via `app.set_ui_flags()` at any time
+- **Zero Cost**: Flags are copied on each use (cheap), no performance impact
+- **Native Unaffected**: Feature flags exist on native builds but aren't used (TUI has no egui)
 
 ## Core Components
 
@@ -371,8 +436,14 @@ For complete documentation of all options, see `.env.example`.
 ### Filtering & Search
 - `/` or `f` - Enter filter mode (real-time filtering)
 - `Ctrl+F` - Open history search (SQLite-backed)
-- `Esc` - Clear filter/search or exit mode
+- `Esc` - Close details overlay (if open), clear filter, or exit mode (priority order)
 - `Ctrl+U` - Toggle owned-only filter (shows only txs from your accounts)
+
+### Mouse Navigation (Web/Tauri)
+- **Click** - Focus pane and select row (Blocks/Tx) or focus Details
+- **Double-click Details** - Toggle fullscreen overlay (when `dblclick_details` flag enabled)
+- **Wheel scroll** - Navigate through focused pane (Blocks/Tx lists or Details scrolling)
+- **Wheel mapping**: ~3 lines per scroll notch (40px scroll delta)
 
 ### Bookmarks (Jump Marks)
 - `m` - Set mark at current position (auto-labeled)
@@ -411,6 +482,199 @@ Press `c` to copy pane-specific content to clipboard:
 - **Blocks pane**: All transactions in selected block (structured format with metadata)
 - **Transactions pane**: Human-readable view + raw JSON payload
 - **Details pane**: Full JSON content (what you see in the pane)
+
+## OAuth & Authentication
+
+Ratacat v0.4.2 introduces production-ready OAuth integration for Web and Tauri targets, enabling secure user authentication with Google OAuth and Magic link providers.
+
+### Architecture
+
+**Token Storage**: All targets use webview localStorage with key `nearx.token`
+- **Web**: Browser localStorage (persists across sessions)
+- **Tauri**: Webview storage shared with native backend
+- **Priority**: User token → Environment token → None
+
+**Authentication Flow**:
+1. User clicks "Sign in with Google" or "Magic link"
+2. **Web**: OAuth popup window opens
+3. **Tauri**: System browser opens via Opener plugin (isolates OAuth from app)
+4. Provider redirects to callback: `#/auth/callback?token=<jwt>` (Web) or `nearx://auth/callback?token=<jwt>` (Tauri)
+5. Router shim extracts token, persists to localStorage
+6. URL scrubbed to `#/` (prevents token leaks via browser history/sharing)
+
+### Implementation (`src/auth.rs`)
+
+```rust
+pub struct AuthState {
+    pub token: Option<String>,
+    pub email: Option<String>,      // Optional, if backend returns it
+    pub provider: Option<String>,   // "google" | "magic"
+}
+
+// Core API
+pub fn set_token(token: String, provider: Option<String>, email: Option<String>);
+pub fn clear();
+pub fn has_token() -> bool;        // Returns true for non-empty tokens
+pub fn token_string() -> Option<String>;
+pub fn attach_auth(rb: RequestBuilder) -> RequestBuilder;  // Adds Bearer token to requests
+
+// Callback handler (supports token= or code= query params)
+pub fn handle_auth_callback_query(qs: &str);
+```
+
+### Router Shim (`web/router_shim.js`)
+
+Listens for hash changes and processes auth callbacks:
+
+```javascript
+// Triggered on: window.location.hash = "#/auth/callback?token=..."
+if (hash.startsWith('#/auth/callback')) {
+    const qs = hash.split('?')[1] || '';
+    window.NEARxAuth?.handleCallback(qs);  // Calls Rust auth::handle_auth_callback_query()
+
+    // Scrub URL to prevent leaks
+    history.replaceState(null, '', '#/');
+}
+```
+
+**Tauri Deep Link**: `nearx://auth/callback?token=...` handled by deep link system, routed to same callback logic.
+
+### OAuth Providers
+
+**Google OAuth (PKCE Flow)**:
+- Client ID configured in auth backend
+- Scopes: `openid email profile`
+- Redirect URI: `https://your-app.com/#/auth/callback` (Web) or `nearx://auth/callback` (Tauri)
+
+**Magic Links**:
+- Backend sends passwordless email link
+- User clicks link → callback with `token=<jwt>`
+
+### Security Features
+
+**Token Handling**:
+- ✅ Never logged or exposed in console (verified via git grep)
+- ✅ URL scrubbed immediately after extraction (prevents history leaks)
+- ✅ Stored in localStorage only (secure, HttpOnly not needed for client-side apps)
+- ✅ CSP headers block XSS attacks (see Security section below)
+
+**Tauri Isolation**:
+- System browser used for OAuth (Opener plugin)
+- Prevents credential phishing via fake webview
+- Deep link callback returns control to app after authentication
+
+### Usage Example
+
+```rust
+use ratacat::auth;
+
+// Check if authenticated
+if auth::has_token() {
+    // Attach token to API requests
+    let client = reqwest::Client::new();
+    let req = client.get("https://api.nearx.app/me");
+    let req = auth::attach_auth(req);  // Adds "Authorization: Bearer <token>"
+    let resp = req.send().await?;
+}
+
+// Clear session
+auth::clear();
+```
+
+### Testing
+
+**Web (Deterministic Test)**:
+```bash
+trunk serve --open
+# In browser: paste URL
+http://localhost:8080/#/auth/callback?token=smoke-token
+
+# Expected:
+# - Hash scrubs to #/
+# - localStorage.getItem('nearx.token') === 'smoke-token'
+# - Console: [NEARx][auth] token set
+```
+
+**Tauri (Live OAuth)**:
+```bash
+cargo tauri dev
+# Click "Sign in with Google"
+# Complete OAuth flow in system browser
+# Deep link returns to app, token persisted
+```
+
+**E2E Tests**: See `e2e-tests/test/smoke.spec.mjs` for automated OAuth flow validation.
+
+## Security
+
+Ratacat v0.4.2 implements defense-in-depth security with CSP headers, XSS hardening, and secure token handling.
+
+### Content Security Policy (CSP)
+
+**Web (`index.html`)**:
+```html
+<meta http-equiv="Content-Security-Policy" content="
+    default-src 'none';
+    script-src 'self';
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data:;
+    connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com
+                https://rpc.mainnet.near.org https://rpc.testnet.near.org
+                https://rpc.mainnet.fastnear.com https://rpc.testnet.fastnear.com
+                https://archival-rpc.mainnet.fastnear.com
+                https://archival-rpc.testnet.fastnear.com
+                https://*.near.org http://localhost:* ws: wss:;
+    font-src 'self';
+    base-uri 'none';
+    frame-ancestors 'none';
+">
+```
+
+**Tauri (`tauri.conf.json`)**:
+```json
+{
+  "app": {
+    "security": {
+      "csp": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://rpc.mainnet.near.org https://rpc.testnet.near.org https://rpc.mainnet.fastnear.com https://rpc.testnet.fastnear.com https://archival-rpc.mainnet.fastnear.com https://archival-rpc.testnet.fastnear.com https://*.near.org http://localhost:* ws: wss:; font-src 'self'; base-uri 'none'; frame-ancestors 'none';"
+    }
+  }
+}
+```
+
+**CSP Directives**:
+- `default-src 'none'` - Deny by default, explicit allow only
+- `script-src 'self'` - Only scripts from same origin (blocks inline scripts, eval, remote scripts)
+- `style-src 'self' 'unsafe-inline'` - Allows inline styles for theme system
+- `connect-src` - Whitelisted OAuth providers, NEAR RPCs, WebSocket (ws:/wss:)
+- `frame-ancestors 'none'` - Prevents clickjacking
+- `base-uri 'none'` - Prevents base tag injection
+
+**Development vs Production**:
+- Development: `http://localhost:*` allowed for local testing
+- Production: Remove localhost, keep `https:` + `wss:` only
+
+### XSS Mitigation
+
+**Token Protection**:
+- CSP blocks inline scripts (prevents `<script>` injection)
+- CSP blocks `eval()` and `Function()` (prevents code injection)
+- URL scrubbing prevents token leaks via browser history
+
+**Input Sanitization**:
+- Filter queries validated before execution
+- JSON rendering uses syntax highlighting (no raw HTML injection)
+- All user input escaped in UI rendering
+
+### Verification
+
+```bash
+# Check for token leaks in logs
+git grep -nE 'Authorization:|x-api-key|token=' -- ':!tests/*' || echo "✅ Clean"
+
+# Verify CSP in production build
+trunk build --release
+grep 'Content-Security-Policy' dist/index.html
+```
 
 ## Building & Running
 
@@ -513,8 +777,8 @@ trunk build --release
 **Critical Build Details:**
 - `--no-default-features` - **REQUIRED** - Configured in `Trunk.toml` to prevent NEAR SDK crates (C dependencies)
 - `--features egui-web` - Enables eframe, egui_ratatui, soft_ratatui, wasm-bindgen, web-sys
-- Binary: `ratacat-egui-web` (specified in `Trunk.toml`)
-- HTML: `index-egui.html` (specifies `data-bin="ratacat-egui-web"`)
+- Binary: `nearx-web` (specified in `Trunk.toml`)
+- HTML: `index-egui.html` (specifies `data-bin="nearx-web"`)
 
 **Common Build Errors & Solutions:**
 
@@ -528,7 +792,7 @@ trunk build --release
 
 3. **Error: Entry symbol `main` declared multiple times**
    - **Cause:** WASM binaries need `#![no_main]` attribute
-   - **Fix:** Already in `src/bin/ratacat-egui-web.rs`:
+   - **Fix:** Already in `src/bin/nearx-web.rs`:
      ```rust
      #![cfg_attr(target_arch = "wasm32", no_main)]
      ```
@@ -537,7 +801,7 @@ trunk build --release
    - **Cause:** Trunk doesn't know which binary to build
    - **Fix:** Already in `index-egui.html`:
      ```html
-     <link data-trunk rel="rust" data-bin="ratacat-egui-web" />
+     <link data-trunk rel="rust" data-bin="nearx-web" />
      ```
 
 **Verifying the Build:**
@@ -680,13 +944,51 @@ cargo tauri dev
 
 #### Testing Deep Links
 
-**Test from command line**:
+**🎯 Recommended: Use the tauri-dev.sh script (macOS only)**
+
+The `tauri-dev.sh` script (at project root) solves the common issue where deep links open old app versions due to macOS Launch Services caching:
+
+```bash
+# Build debug bundle and register with Launch Services
+./tauri-dev.sh
+
+# Build, register, AND test with sample deep link
+./tauri-dev.sh test
+
+# Clear old registrations (useful if multiple versions installed)
+./tauri-dev.sh clean
+
+# Show help
+./tauri-dev.sh --help
+```
+
+**What it does**:
+1. Kills any running instances of NEARx
+2. Builds a debug .app bundle (includes symbols, faster than release)
+3. Clears macOS Launch Services cache
+4. Copies bundle to /Applications
+5. Registers the app from /Applications for `nearx://` URLs
+6. Optionally tests with `nearx://v1/tx/ABC123`
+
+**When to use this script**:
+- ✅ Testing deep link handling (`nearx://` URLs)
+- ✅ After changing `CFBundleURLTypes` in Info.plist
+- ✅ When deep links open wrong app version
+
+**When NOT to use**:
+- ❌ General UI development → use `cargo tauri dev` instead
+- ❌ Building for release → use `cargo tauri build --release`
+
+---
+
+**Manual testing (if not using the script)**:
+
 ```bash
 # Open the app with a deep link
-open 'near://tx/ABC123?network=mainnet'
+open 'nearx://v1/tx/ABC123'
 
 # Or with multiple paths
-open 'near://account/alice.near/history?from=100'
+open 'nearx://v1/account/alice.near'
 ```
 
 **Verify in logs**:
@@ -695,7 +997,20 @@ open 'near://account/alice.near/history?from=100'
 # Check browser DevTools console
 
 # View production logs (macOS)
-tail -f ~/Library/Logs/com.ratacat.fast/Ratacat.log
+tail -f ~/Library/Logs/com.fastnear.nearx/NEARx.log
+```
+
+**DevTools Verification** (for Tauri builds):
+
+Open Chrome DevTools (Cmd+Option+I or F12) and run:
+```javascript
+// 1. Verify WASM loaded correctly (no-modules target)
+typeof wasm_bindgen === 'function' && 'nearx:// bridge ready'
+// Should return: "nearx:// bridge ready"
+
+// 2. Test deep link warm start (app running)
+window.__TAURI__?.event.emit('nearx://open', 'nearx://v1/tx/ABC123')
+// Should update location.hash and trigger router
 ```
 
 **Expected Behavior**:
@@ -707,21 +1022,31 @@ tail -f ~/Library/Logs/com.ratacat.fast/Ratacat.log
 
 #### Registering Deep Links with macOS
 
-**Fresh Registration** (after moving app to /Applications):
+**🎯 Recommended**: Use the `./tauri-dev.sh` script (see above) which handles all registration automatically.
+
+**Manual Registration** (if not using the script):
+
 ```bash
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/Ratacat.app
+# Register app with Launch Services (after moving to /Applications)
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/NEARx.app
 ```
 
 **Verify Registration**:
 ```bash
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump | grep -A 3 "near:"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump | grep -A 3 "nearx:"
 ```
 
 **Reset Deep Link Association** (if pointing to old app):
-1. Kill all instances: `killall explorer-tauri`
-2. Remove old app: `rm -rf /Applications/Ratacat.app`
-3. Copy fresh build: `cp -r target/release/bundle/macos/Ratacat.app /Applications/`
-4. Re-register: Run `lsregister -f` command above
+```bash
+# Option 1: Use the script (easiest)
+./tauri-dev.sh clean
+
+# Option 2: Manual cleanup
+killall nearx-tauri
+rm -rf /Applications/NEARx.app
+cp -r target/release/bundle/macos/NEARx.app /Applications/
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/NEARx.app
+```
 
 #### File Structure
 
@@ -742,7 +1067,7 @@ tauri-workspace/
             └── Contents/
                 ├── Info.plist       # Auto-generated, includes CFBundleURLTypes
                 └── MacOS/
-                    └── explorer-tauri  # Binary executable
+                    └── nearx-tauri  # Binary executable
 ```
 
 #### Deep Link Event Structure
@@ -770,7 +1095,7 @@ pub struct DeepLinkEvent {
 #### Known Issues & Workarounds
 
 **Issue 1**: Tauri bundler tries to copy `.rs` files instead of binaries
-- **Error**: `Failed to copy binary from "target/release/ratacat-egui-tauri.rs"`
+- **Error**: `Failed to copy binary from "target/release/nearx-tauri.rs"`
 - **Workaround**: Manual binary copy (see Build Process above)
 - **Prevention**: Keep `src/bin/` clean, move unused binaries to `.bak`
 
@@ -812,6 +1137,276 @@ This enables the browser extension to send `near://` deep links to the desktop a
 - Code signing automation
 - DMG installer with drag-to-Applications
 
+### End-to-End Testing (E2E)
+
+**Technology Stack**: Selenium WebDriver + tauri-driver for desktop automation
+
+**Overview**: Production-ready E2E test suite that validates critical integration points without brittle canvas pixel inspection. Uses Tauri's official WebDriver stack for Linux/Windows desktop testing.
+
+**Platform Support**:
+- ✅ **Linux**: WebKitWebDriver via webkit2gtk-driver (primary CI target)
+- ✅ **Windows**: EdgeDriver (supported, CI optional)
+- ❌ **macOS**: Not supported (WKWebView lacks WebDriver) - use Playwright for web target instead
+
+#### Test Architecture
+
+The E2E system uses a **three-layer testing API**:
+
+1. **Test-only IPC commands** (`e2e` feature flag)
+   - `nearx_test_emit_deeplink` - Inject deep link events without OS registration
+   - `nearx_test_get_last_route` - Query routing state
+   - `nearx_test_clear_storage` - Reset localStorage/sessionStorage
+
+2. **JavaScript test bridge** (`window.NEARxTest`)
+   - Route tracking, clipboard simulation, keyboard events
+   - Deep link event history
+   - OAuth token management
+
+3. **Selenium WebDriver** (standard DOM/script execution)
+   - Canvas size verification
+   - Event dispatch and assertions
+   - Async command invocation
+
+**Key Design Decision**: State-based assertions (route, token, clipboard content) instead of pixel-based canvas inspection avoid brittle tests while still validating real integration paths.
+
+#### Quick Start
+
+```bash
+# Install dependencies
+cd e2e-tests
+npm install
+
+# Install tauri-driver (once per machine)
+cargo install tauri-driver --locked
+
+# Linux: Install WebKit driver
+sudo apt-get install webkit2gtk-driver xvfb
+
+# Run tests
+npm test
+```
+
+#### Test Suites
+
+The `e2e-tests/test/smoke.spec.mjs` suite covers:
+
+**1. Rendering & Layout**
+- Canvas renders and fills viewport (>400x300px)
+- NEARxTest bridge availability
+
+**2. OAuth Router**
+```javascript
+// Simulates: user lands on #/auth/callback?token=e2e-token
+// Validates:
+// - URL scrubbed to #/
+// - Token persisted in localStorage
+// - Token retrievable via NEARxTest.getToken()
+```
+
+**3. Deep Link Bridge**
+```javascript
+// Uses test IPC to inject: nearx://v1/tx/HASH
+// Validates:
+// - Event emitted successfully
+// - Event appears in NEARxTest.getDeepLinkHistory()
+// - Route updated to deep link URL
+```
+
+**4. Clipboard Integration**
+```javascript
+// Simulates: user presses 'c' to copy focused pane
+// Validates:
+// - NEARxTest.copyFocused() succeeds
+// - Tauri clipboard plugin reads non-empty string
+// - Roundtrip copy→read works
+```
+
+**5. Keyboard & Mouse Navigation**
+- Tab key cycling through panes
+- Cursor state tracking (pointer affordance)
+
+**6. Storage & State**
+- Clear storage via test API
+- Verify localStorage persistence
+
+**7. Error Handling**
+- Malformed deep links don't crash app
+- Graceful degradation
+
+#### Test-Only API Reference
+
+**Rust IPC Commands** (only when built with `--features e2e`):
+
+```rust
+// tauri-workspace/src-tauri/src/test_api.rs
+
+#[tauri::command]
+async fn nearx_test_emit_deeplink(app: AppHandle, url: String) -> Result<(), String>
+
+#[tauri::command]
+async fn nearx_test_get_last_route() -> Result<String, String>
+
+#[tauri::command]
+async fn nearx_test_clear_storage(window: Window) -> Result<(), String>
+```
+
+**JavaScript Bridge** (`window.NEARxTest`):
+
+```javascript
+// Route tracking
+getLastRoute()              // Returns last navigated route
+waitForRoute(route, ms)     // Async wait for specific route
+
+// Deep links
+getDeepLinkHistory()        // Array of {timestamp, url}
+clearDeepLinkHistory()      // Reset history
+
+// Clipboard
+copyFocused()               // Simulate 'c' key press
+
+// OAuth
+getToken()                  // Get from localStorage
+setToken(token)             // Set in localStorage
+
+// Keyboard
+pressKey('Tab')             // Dispatch KeyboardEvent
+
+// Cursor
+cursorIsPointer()           // Check hover state
+
+// Tauri commands
+invoke(cmd, args)           // Wrapper for __TAURI__.invoke
+```
+
+#### Running Tests Locally
+
+**Standard workflow**:
+```bash
+cd e2e-tests
+npm test  # Builds app + runs tests
+```
+
+**Manual control** (two terminals):
+```bash
+# Terminal 1: Build app with e2e features
+cd tauri-workspace
+cargo tauri build --debug --no-bundle --features e2e
+
+# Terminal 2: Start tauri-driver
+tauri-driver
+
+# Terminal 3: Run tests
+cd e2e-tests
+npm test
+```
+
+**Linux headless** (CI simulation):
+```bash
+xvfb-run -a npm test
+```
+
+#### CI Integration
+
+See `.github/workflows/e2e.yml` for GitHub Actions configuration.
+
+**Key steps**:
+1. Install webkit2gtk-driver + xvfb (Linux)
+2. Build app: `cargo tauri build --debug --no-bundle --features e2e`
+3. Install tauri-driver: `cargo install tauri-driver --locked`
+4. Run tests: `xvfb-run -a npm test`
+
+**Why Linux-only in CI?**
+- macOS WKWebView has no WebDriver support
+- Windows EdgeDriver works but adds CI cost
+- Linux webkit2gtk-driver is free, fast, and reliable
+
+For macOS development, test the web build with Playwright instead.
+
+#### Debugging E2E Tests
+
+**View tauri-driver logs**:
+```bash
+# Run in foreground to see WebDriver requests
+tauri-driver
+```
+
+**App logs** (8-point waterfall):
+```
+🧪 [E2E-TEST] Emitting deep link: nearx://v1/tx/HASH
+🟢 [HANDLE-URLS] Processing 1 URL(s)
+🔵 [NORMALIZE] Input raw: "nearx://v1/tx/HASH"
+🟣 [PARSE-EVENT] ✅ Created DeepLinkEvent
+🟤 [EMIT-OR-QUEUE] Frontend ready - emitting to window
+⚫ [ROUTE-EVENT] Received event: {"host":"tx","path":["HASH"]}
+```
+
+**Interactive debugging**:
+```bash
+# Build and run app manually
+cargo tauri build --debug --no-bundle --features e2e
+./tauri-workspace/src-tauri/target/debug/nearx-tauri
+
+# Open DevTools (auto-opens in debug builds)
+# Cmd+Option+I or F12
+
+# Test commands in console
+await window.__TAURI__.invoke('nearx_test_emit_deeplink', {
+  url: 'nearx://v1/tx/DEBUG_TEST'
+})
+
+window.NEARxTest.getDeepLinkHistory()
+// → [{timestamp: 1699..., url: "nearx://v1/tx/DEBUG_TEST"}]
+
+window.NEARxTest.getLastRoute()
+// → "nearx://v1/tx/DEBUG_TEST"
+```
+
+**Common issues**:
+
+| Error | Solution |
+|-------|----------|
+| `tauri-driver not found` | `cargo install tauri-driver --locked` |
+| `Application binary not found` | Verify path in smoke.spec.mjs, rebuild with `--features e2e` |
+| `Connection refused :4444` | Start `tauri-driver` in background |
+| Tests hang/timeout | Check xvfb is running (Linux), increase timeout in test |
+| Deep links not received | Verify `e2e` feature enabled, check for `🧪` logs |
+
+#### Production Safety
+
+**Zero risk to production**:
+- Test commands only compiled with `--features e2e`
+- NEARxTest bridge only loaded in test builds
+- Feature flag checked at compile time via `#[cfg(feature = "e2e")]`
+- No performance or binary size impact on release builds
+
+**Build verification**:
+```bash
+# Production build (no e2e)
+cargo tauri build --release
+
+# Test build (with e2e)
+cargo tauri build --debug --no-bundle --features e2e
+
+# Verify test commands absent in production
+strings target/release/nearx-tauri | grep nearx_test
+# → (should be empty)
+```
+
+#### Comparison: E2E vs Unit vs Integration Tests
+
+| Test Type | Scope | Speed | When to Use |
+|-----------|-------|-------|-------------|
+| **Unit** | Single function/module | ⚡ Instant | Logic validation, edge cases |
+| **Integration** | Multiple modules | 🟡 Fast | API contracts, module interactions |
+| **E2E (this)** | Full app + OS | 🔴 Slow | Deep links, clipboard, OAuth, rendering |
+
+**When to add E2E tests**:
+- ✅ System integration paths (deep links, clipboard, OAuth callbacks)
+- ✅ Platform-specific behaviors (Tauri plugins, OS APIs)
+- ✅ Critical user flows that cross multiple subsystems
+- ❌ Business logic (use unit tests)
+- ❌ Rendering pixel perfection (use visual regression if needed)
+
 ## Project Structure
 
 ```
@@ -820,12 +1415,14 @@ ratacat/
 ├── index-egui.html      # Web app entry point (egui + ratatui)
 ├── Trunk.toml           # Web build configuration
 ├── web/
-│   └── platform.js      # Unified clipboard bridge (Tauri/Extension/Navigator/execCommand)
+│   ├── platform.js      # Unified clipboard bridge (Tauri/Extension/Navigator/execCommand)
+│   ├── auth.js          # OAuth popup manager (Google + Magic)
+│   └── router_shim.js   # Hash change router for auth callback handling
 ├── src/
 │   ├── lib.rs           # Library exports (shared core)
 │   ├── bin/
-│   │   ├── ratacat.rs   # Native terminal binary
-│   │   ├── ratacat-egui-web.rs # Web browser binary (WASM + egui)
+│   │   ├── nearx.rs     # Native terminal binary
+│   │   ├── nearx-web.rs # Web browser binary (WASM + egui)
 │   │   └── ratacat-proxy.rs    # RPC proxy server (development)
 │   ├── platform/        # Platform abstraction layer
 │   │   ├── mod.rs       # Platform dispatch
@@ -837,6 +1434,9 @@ ratacat/
 │   ├── types.rs         # Data models (shared)
 │   ├── theme.rs         # Color themes (Nord/DosBlue/AmberCrt/GreenPhosphor)
 │   ├── json_syntax.rs   # JSON syntax highlighting (WCAG AAA colors)
+│   ├── auth.rs          # OAuth authentication state + token management (shared)
+│   ├── webshim.rs       # WASM JavaScript bridge for auth/UI (web-only)
+│   ├── debug.rs         # Categorized debug logging system (shared)
 │   ├── source_ws.rs     # WebSocket client (native-only)
 │   ├── source_rpc.rs    # NEAR RPC poller (shared)
 │   ├── archival_fetch.rs # Background archival RPC fetcher (shared)
@@ -856,7 +1456,7 @@ ratacat/
 │       │   ├── lib.rs   # Core logic + clipboard command
 │       │   ├── main.rs  # Entry point
 │       │   └── bin/
-│       │       └── ratacat-egui-tauri.rs # Tauri + egui integration
+│       │       └── nearx-tauri.rs # Tauri + egui integration
 │       └── tauri.conf.json # Tauri configuration
 ├── vendor/
 │   ├── egui_ratatui/    # egui + ratatui bridge (local patches)
@@ -874,6 +1474,48 @@ ratacat/
 
 ## Recent Improvements (v0.3.0)
 
+### OAuth + Appearance Refactor (v0.4.2)
+- **Problem**: No authentication system for Web/Tauri; inconsistent visual presentation across targets; mouse interactivity missing
+- **Solution**: Complete OAuth integration with unified theme system and full mouse/keyboard parity
+- **OAuth Features**:
+  - Google OAuth + Magic link authentication
+  - PKCE flow for Web; system browser isolation for Tauri (Opener plugin)
+  - Token persistence in localStorage (`nearx.token`)
+  - URL scrubbing after callback (prevents token leaks in browser history)
+  - Router shim handles `#/auth/callback?token=...` (Web) and `nearx://auth/callback?token=...` (Tauri)
+  - Zero token logging (verified via git grep)
+  - E2E test coverage for OAuth flow
+- **Appearance Features**:
+  - **Unified theme (ACP-12 palette)**: Consistent colors across CSS/egui/ratatui
+  - **WCAG AA compliance**: Text/panel ≥4.5:1, selection ≥4.5:1, focus ring ≥3.0:1
+  - **Crisp rendering**: DPR snap to 1.0/1.5/2.0 devicePixelRatio + `image-rendering: pixelated`
+  - **Flat TUI aesthetic**: No gradients/shadows, thin borders, monospace fonts
+- **Interactivity Features**:
+  - **Mouse support (Web/Tauri default ON)**:
+    - Click: Focus pane + select row (Blocks/Tx) or focus Details
+    - Double-click Details: Toggle fullscreen overlay
+    - Wheel: Scroll focused pane (~3 lines per notch, 40px delta)
+    - Hover: Pointer cursor on interactive elements
+  - **Keyboard parity**: Tab/Shift+Tab (pane cycling with egui focus hijack prevention), Space (fullscreen Details)
+  - **Smart Esc**: Priority-based (1: close fullscreen, 2: clear filter, 3: no-op)
+  - **TUI mouse**: Opt-in with Ctrl+M (preserves traditional TUI behavior)
+- **Security Features**:
+  - **CSP headers**: XSS-hardened for Web + Tauri
+  - **Whitelisted origins**: OAuth providers, NEAR RPCs, WebSocket (ws:/wss:)
+  - **Default-deny policy**: `default-src 'none'`, explicit allows only
+  - **Clickjacking protection**: `frame-ancestors 'none'`
+- **Implementation**:
+  - `src/auth.rs`: Core authentication state + token management
+  - `web/router_shim.js`: Hash change listener + callback handler
+  - `web/auth.js`: OAuth popup manager (Google + Magic)
+  - `index.html` + `tauri.conf.json`: Mirrored CSP policies
+  - `src/flags.rs`: All UI flags now production-ready (consume_tab, dpr_snap, mouse_map, dblclick_details default: true)
+- **Benefits**:
+  - Production-ready authentication for SaaS features
+  - Consistent, accessible UX across terminal/web/desktop
+  - XSS-hardened security posture
+  - Graceful degradation with runtime toggles
+
 ### Unified Clipboard System (v0.4.1)
 - **Problem**: Inline clipboard code duplicated across web and Tauri binaries, no fallback chain for reliability
 - **Solution**: Platform abstraction with JavaScript bridge and 4-tier fallback chain
@@ -885,7 +1527,7 @@ ratacat/
     3. Navigator Clipboard API (modern browsers, HTTPS/localhost only)
     4. Legacy execCommand fallback (older browsers/WebViews)
   - `tauri-plugin-clipboard-manager`: Official Tauri v2 clipboard plugin
-  - Removed code duplication from `ratacat-egui-web.rs` and `ratacat-egui-tauri.rs`
+  - Removed code duplication from `nearx-web.rs` and `nearx-tauri.rs`
   - All binaries now use `ratacat::platform::copy_to_clipboard()` abstraction
 - **Benefits**:
   - Maximum compatibility across all environments (web, Tauri, extension, legacy)
@@ -960,6 +1602,15 @@ ratacat/
 ### UI Optimizations
 - **70/30 layout split**: Details pane gets 70% of vertical space (was 50%), matching csli-dashboard
 - **No left border on details pane**: Makes it easy to click-and-drag with mouse to copy JSON
+- **Mouse wheel scrolling** (v0.4.1): Pane-aware scroll navigation for Web/Tauri targets
+  - Maps scroll events to line-based navigation (~3 lines per notch)
+  - Works with Blocks/Tx list navigation and Details scrolling
+  - Fully instrumented with debug logging (`[mouse] wheel dy=... -> lines=...`)
+- **Smart Esc handling** (v0.4.1): Priority-based UX for Web/Tauri
+  - **Priority 1**: Close details fullscreen if open
+  - **Priority 2**: Clear filter if non-empty
+  - **Priority 3**: No-op (prevents annoying behavior)
+  - Debug logging tracks which path was taken
 - **Dynamic chrome**: Filter bar and debug panel collapse when not in use, maximizing vertical space
 - **Ratio-based layouts**: Eliminates rounding gaps from percentage-based constraints
 - **Smart scroll clamping**: Details pane scrolling stops at actual content end (not u16::MAX)
@@ -1048,6 +1699,10 @@ egui-web = [
     "dep:js-sys",
     "dep:web-sys",
     "dep:getrandom",
+    "dep:console_error_panic_hook",
+    "dep:wasm-logger",
+    "dep:web-time",
+    "dep:gloo-timers",
 ]
 
 [dependencies]
@@ -1105,6 +1760,8 @@ wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 web-sys = { version = "0.3", optional = true, features = ["Window", "Navigator", "Clipboard", "Storage", "console"] }
 getrandom = { version = "0.2", optional = true, features = ["js"] }
+console_error_panic_hook = { version = "0.1", optional = true }
+wasm-logger = { version = "0.2", optional = true }
 ```
 
 ### WASM Compatibility Challenges & Solutions
@@ -1229,3 +1886,27 @@ RPC_TIMEOUT_MS=15000 POLL_CHUNK_CONCURRENCY=2 cargo run --bin ratacat --features
 - ✅ **Core functionality**: Block viewing, filtering, and navigation work perfectly
 
 ---
+
+## Arbitrage Engine (Moved)
+
+**Note**: The arbitrage scanning engine has been moved to a separate workspace.
+
+The `ref-arb-scanner` crate is now an independent workspace member located in the `ref-arb-scanner/` directory. This allows it to be developed, tested, and versioned independently from the main Ratacat TUI application.
+
+**To use the arbitrage scanner:**
+
+```bash
+# Navigate to the scanner directory
+cd ref-arb-scanner
+
+# Build and run (see ref-arb-scanner/README.md for full documentation)
+cargo run --release
+```
+
+For complete documentation, see:
+- `ref-arb-scanner/README.md` - Full usage guide
+- `REF_ARB_SCANNER_REVERSAL.md` - Instructions for re-integrating if needed
+
+---
+
+Built with ❤️ using Ratatui, Tokio, and Rust. Designed for NEAR Protocol monitoring.

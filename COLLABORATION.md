@@ -1,604 +1,548 @@
-# Ratacat Development - Technical Discussion
+# NEARx Development - Current Status & Architecture
 
-## Overview
-Ratacat is a high-performance terminal UI for monitoring NEAR Protocol blockchain transactions in real-time. Built with Ratatui and Rust, it provides a 3-pane dashboard for exploring blocks, transactions, and detailed transaction data with multiple viewing modes.
+## Executive Summary (2025-11-11 Update)
 
-## Architecture Decisions
+NEARx (formerly Ratacat) is a high-performance NEAR Protocol blockchain transaction viewer with **quad-mode deployment**: Terminal (TUI), Web (WASM), Desktop (Tauri), and Browser Extension integration.
 
-### 1. Dual Data Source Strategy
-We support both WebSocket and RPC polling modes to accommodate different use cases:
+**Current Status (All Targets Functional ✅)**:
+- ✅ Native Terminal: Fully functional, excellent performance
+- ✅ Web Browser: Working with relative WASM paths
+- ✅ Tauri Desktop: Working with fixed CSP + relative paths
+- ✅ Theme parity: Complete (unified tokens system)
+- ✅ Keyboard/Mouse: Full parity across all targets
 
-**WebSocket Mode (Development)**:
-- Real-time push notifications from Node breakout server
-- Hybrid mode: WS notifications trigger RPC fetches for complete block data
-- Network auto-detection based on block height (>100M = mainnet, <100M = testnet)
+---
 
-**RPC Polling Mode (Production)**:
-- Direct NEAR RPC connection with smart catch-up limits
-- Prevents cascade failures during network delays
-- Configurable concurrency for parallel chunk fetching
+## Recent Critical Fixes (2025-11-11)
 
-```rust
-// Key design: Auto-detect network to prevent mainnet/testnet mismatches
-fn detect_network_from_height(height: u64) -> &'static str {
-    if height > 100_000_000 { "mainnet" } else { "testnet" }
-}
-```
+### 1. Tauri WASM Loading Regression (FIXED)
 
-### 2. FPS-Capped Rendering
-Implemented coalesced rendering to prevent UI thrashing:
+**Problem**: Dark screen after "Loading NEARx" disappeared, WASM preload warnings in console.
 
-```rust
-// Target frame budget based on configurable FPS
-let frame_ms = 1000u32.saturating_div(app.fps()) as u64;
-let frame_budget = Duration::from_millis(frame_ms.max(1));
-
-// Only draw when budget elapsed
-if last_frame.elapsed() >= frame_budget {
-    terminal.draw(|f| ui::draw(f, &app))?;
-    last_frame = Instant::now();
-}
-```
-
-**Benefits**:
-- Prevents CPU thrashing during high-frequency updates
-- Maintains responsive input handling via event polling
-- User-controllable FPS at runtime (Ctrl+O cycles 20→30→60)
-
-### 3. Official NEAR Primitives Integration
-We use official NEAR Protocol crates for maximum compatibility:
-
-```rust
-// Human-readable formatting
-use near_gas::NearGas;
-use near_token::NearToken;
-
-pub fn format_gas(gas: u64) -> String {
-    let near_gas = NearGas::from_gas(gas);
-    format!("{}", near_gas)  // "30 TGas"
-}
-
-pub fn format_near(yoctonear: u128) -> String {
-    let token = NearToken::from_yoctonear(yoctonear);
-    format!("{}", token)  // "1 NEAR"
-}
-```
-
-**Action Type Coverage**:
-- CreateAccount
-- DeployContract (with code size)
-- FunctionCall (method name, args size, gas, deposit)
-- Transfer (deposit amount)
-- Stake (stake amount, public key)
-- AddKey (public key, access key)
-- DeleteKey (public key)
-- DeleteAccount (beneficiary)
-
-### 4. Vim-Style Jump Marks
-Persistent bookmark system with SQLite write-through caching:
-
-```rust
-pub struct JumpMarks {
-    marks: Vec<Mark>,        // In-memory cache
-    cursor: usize,           // Current position
-    history: History,        // SQLite persistence layer
-}
-
-// Write-through: Updates both memory and DB
-pub async fn add_or_replace(&mut self, label: String, ...) {
-    // Update in-memory
-    self.marks.push(mark);
-    // Write-through to SQLite
-    self.history.put_mark(persisted).await;
-}
-```
-
-**Auto-labels**: Numeric (1-9, 0) then alphabetic (a-z) for quick bookmarking.
-
-### 5. Transaction Filtering
-Powerful query syntax with AND/OR logic:
-
-```
-acct:alice.near              # Match signer OR receiver
-action:FunctionCall          # Match action type
-method:ft_transfer           # Match FunctionCall method name
-raw:some_text                # Search in raw JSON
-```
-
-Combined filters: `acct:alice.near action:Transfer` (Alice sending tokens)
-
-## Technical Challenges & Solutions
-
-### 1. Mainnet/Testnet Mismatch (Critical Bug Fix)
-**Problem**: WebSocket server sending mainnet blocks (168M+), but RPC defaulting to testnet URL, resulting in "0 txs" displayed.
-
-**Root Cause**: Height-based network detection was not implemented initially.
+**Root Cause**: Trunk.toml configured with `public_url = "/"` (absolute paths) which work for web servers but fail with Tauri's custom protocol handler (`tauri://localhost/`).
 
 **Solution**:
-```rust
-// Auto-detect network if URL not explicitly set
-let url = if cfg.near_node_url_explicit {
-    cfg.near_node_url.clone()
-} else {
-    let detected_network = detect_network_from_height(height);
-    let auto_url = get_rpc_url_for_network(detected_network);
-    eprintln!("[WS] Auto-detected {} network from block height {}",
-        detected_network, height);
-    auto_url.to_string()
-};
+```toml
+# Trunk.toml (line 13)
+public_url = "./"  # Changed from "/" to "./"
 ```
 
-**Impact**: Transactions now display correctly in WebSocket mode.
+**Why This Works**:
+- Web servers: Both `/nearx-web.js` and `./nearx-web.js` resolve correctly
+- Tauri protocol: `tauri://localhost/nearx-web.js` works, but `/nearx-web.js` tries to load from `tauri:///` (invalid)
 
-### 2. Rust Borrow Checker with Filtered Views
-**Challenge**: Maintaining both full transaction list and filtered view while allowing selection.
+**Files Modified**:
+- `Trunk.toml` - Changed public_url to relative
+- Rebuilt WASM with `trunk build --release`
+- Tauri bundle now loads correctly
 
-**Solution**: Store both vectors, use indices for coordination:
-```rust
-pub fn txs(&self) -> (Vec<TxLite>, usize, usize) {
-    if let Some(b) = self.blocks.get(self.sel_block) {
-        let total = b.transactions.len();
-        let filtered: Vec<TxLite> = b.transactions.iter()
-            .filter(|tx| tx_matches_filter(&tx, &self.filter_compiled))
-            .cloned()
-            .collect();
-        (filtered, self.sel_tx, total)
-    } else {
-        (vec![], 0, 0)
-    }
+---
+
+### 2. Tauri CSP Configuration (FIXED)
+
+**Problem**: Console errors about IPC protocol being blocked, causing fallback to postMessage.
+
+**Root Cause**: Content Security Policy missing required Tauri IPC directives.
+
+**Solution**:
+```json
+// tauri.conf.json (line 24)
+"csp": "default-src 'none'; script-src 'self'; ... connect-src 'self' ipc: http://ipc.localhost https://accounts.google.com ..."
+```
+
+**Added Directives**:
+- `ipc:` - Tauri's IPC protocol
+- `http://ipc.localhost` - Tauri's local IPC endpoint
+
+**Reference**: [Tauri v2 CSP Documentation](https://v2.tauri.app/concept/security/#content-security-policy)
+
+---
+
+### 3. Tauri Plugin Configuration (FIXED)
+
+**Problem**: App crashed immediately on launch with `PluginInitialization("opener", "Error deserializing 'plugins.opener'")`.
+
+**Root Cause**: Invalid `opener` plugin configuration with unsupported `scope` field.
+
+**Solution**: Removed invalid configuration block:
+```json
+// REMOVED FROM tauri.conf.json:
+"opener": {
+  "scope": [  // This field doesn't exist in opener plugin
+    "https://accounts.google.com/*",
+    ...
+  ]
 }
 ```
 
-### 3. Non-Blocking History Persistence
-**Architecture**: SQLite operations run on dedicated thread to avoid blocking UI.
+**Result**: Opener plugin works fine without explicit configuration.
 
-```rust
-// Unbounded channel for async writes
-let (tx, mut rx) = unbounded_channel::<HistoryMsg>();
+---
 
-// Dedicated worker thread
-tokio::spawn(async move {
-    while let Some(msg) = rx.recv().await {
-        // Process DB operations without blocking main thread
-    }
-});
+### 4. Theme Tokens Centralization (IMPLEMENTED)
+
+**Problem**: Visual design tokens (border thickness, layout ratios, spacing) hardcoded and duplicated across `src/ui.rs` (TUI) and `src/bin/nearx-web.rs` (Web/Tauri).
+
+**Solution**: Created `src/theme/tokens.rs` as single source of truth.
+
+**Architecture**:
+```
+src/theme/tokens.rs
+├── LayoutSpec (top_ratio: 0.52, gaps)
+├── VisualTokens (focus_stroke_px: 2.0, row_height_px: 22.0, radii)
+└── RatTokens (focused_thick_border: true)
 ```
 
-**Benefits**:
-- UI remains responsive during database writes
-- WAL mode enables concurrent reads during writes
-- Graceful degradation if DB operations fail
+**Implementation**:
 
-### 4. Soft-Wrapped Tokens for Terminal Display
-**Problem**: Long base58/base64 strings (transaction hashes, public keys) break terminal layout.
+1. **TUI (`src/ui.rs`)**:
+   - Layout ratio: Changed from hardcoded 30/70 to token-driven 52/48
+   - Focused borders: Use `BorderType::Thick` when `tokens().rat.focused_thick_border` is true
+   - Applied to all three panes: Blocks, Transactions, Details
 
-**Solution**: Insert zero-width space characters (ZWSP) for clean line breaking:
-```rust
-pub fn soft_wrap_tokens(s: &str, max_run: usize) -> String {
-    let mut out = String::with_capacity(s.len() + s.len()/64);
-    let mut run = 0usize;
-    for ch in s.chars() {
-        let token = ch.is_ascii_alphanumeric() || matches!(ch, '+'|'/'|'='|':'|'_'|'-');
-        if token {
-            run += 1;
-            out.push(ch);
-            if run >= max_run { out.push(ZWSP); run = 0; }
-        } else {
-            run = 0;
-            out.push(ch);
-        }
-    }
-    out
-}
+2. **Web/Tauri (`src/bin/nearx-web.rs`)**:
+   - Currently renders pure ratatui (no separate egui chrome)
+   - Uses same `src/ui.rs` rendering code
+   - Benefits from same token-driven design
+
+**Visual Consistency**:
+- TUI thick border = Web 2px stroke (both from tokens)
+- 52/48 layout split matches csli-dashboard feel
+- All spacing and gaps consistent
+
+**Accessibility**:
+- Included `audit_theme_for_contrast()` helper for WCAG AA compliance checking
+- Can be called from theme application code to log contrast ratios
+
+---
+
+## Architecture Overview
+
+### Quad-Mode Deployment
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              NEARx Deployment Architecture                   │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Terminal (TUI)    Web (WASM)      Tauri Desktop            │
+│  ├─ Crossterm     ├─ egui         ├─ Same as Web           │
+│  ├─ SQLite        ├─ RPC only     ├─ Deep links            │
+│  └─ WS + RPC      └─ In-memory    └─ Single instance       │
+│                                                              │
+│              ▼                                               │
+│  ┌────────────────────────────────────────────────────┐    │
+│  │          Shared Rust Core                          │    │
+│  │  • App state (src/app.rs)                          │    │
+│  │  • UI rendering (src/ui.rs - ratatui)              │    │
+│  │  • Theme tokens (src/theme/tokens.rs) ◄── NEW     │    │
+│  │  • RPC client (src/source_rpc.rs)                  │    │
+│  │  • Filter (src/filter.rs)                          │    │
+│  └────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Performance Optimizations
+### Key Files
 
-### 1. Parallel Chunk Fetching
-Configurable concurrency for fetching chunk data:
+**Binaries**:
+- `src/bin/nearx.rs` - Native terminal (Crossterm backend)
+- `src/bin/nearx-web.rs` - Web/Tauri (egui_ratatui bridge)
+- `tauri-workspace/src-tauri/src/main.rs` - Tauri wrapper
 
-```rust
-let chunk_futures = chunk_hashes.into_iter().map(|hash| {
-    let url = url.to_string();
-    async move { get_chunk(&url, hash, timeout).await }
-});
+**Shared Core**:
+- `src/app.rs` - Application state machine
+- `src/ui.rs` - Ratatui UI rendering (used by ALL targets)
+- `src/theme/` - Theme system
+  - `tokens.rs` - Design tokens (NEW)
+  - `mod.rs` - Theme definitions
+  - `rat.rs` - Ratatui helpers
+  - `eg.rs` - egui helpers
 
-let chunks = stream::iter(chunk_futures)
-    .buffer_unordered(concurrency)  // Parallel execution
-    .collect::<Vec<_>>()
-    .await;
+**Configuration**:
+- `Trunk.toml` - Web build config (public_url = "./")
+- `tauri-workspace/src-tauri/tauri.conf.json` - Tauri config (CSP, deep links)
+- `.env.example` - Runtime configuration template
+
+---
+
+## Development Workflows
+
+### 1. General UI Development (Recommended)
+
+```bash
+cd tauri-workspace
+cargo tauri dev
 ```
 
-**Configuration**: `POLL_CHUNK_CONCURRENCY=4` (default)
+**Features**:
+- Hot reload on Rust file changes
+- DevTools auto-open (Cmd+Option+I / F12)
+- Debug logging enabled
+- Fast iteration cycle
 
-### 2. Catch-Up Limits
-Prevents cascade failures during network delays:
+**When to Use**:
+- UI layout changes
+- Feature development
+- Theme tweaks
+- General debugging
 
-```rust
-let to_fetch = head_height.saturating_sub(cursor);
-if to_fetch > cfg.poll_max_catchup as u64 {
-    eprintln!("[RPC] Behind by {} blocks, skipping to catch up", to_fetch);
-    cursor = head_height.saturating_sub(cfg.poll_max_catchup as u64);
-}
+**Limitations**:
+- Deep links won't work (macOS Launch Services caches URL schemes)
+- Use dev-deep-links.sh for deep link testing instead
+
+---
+
+### 2. Deep Link Testing (macOS Only)
+
+```bash
+./tauri-dev.sh test
 ```
 
-**Configuration**: `POLL_MAX_CATCHUP=5` (default)
+**What It Does** (6 steps):
+1. Kills any running instances
+2. Builds debug binary (`cargo build` in tauri-workspace/src-tauri)
+3. Clears macOS Launch Services cache
+4. Creates .app bundle with Info.plist
+5. Copies bundle to /Applications
+6. Registers with Launch Services
+7. Tests with `nearx://v1/tx/ABC123` (optional)
 
-### 3. In-Memory Block Window
-Fixed-size rolling buffer to prevent unbounded memory growth:
+**Why Needed**:
+- macOS caches URL scheme registrations
+- `cargo tauri dev` doesn't update Launch Services
+- Fresh bundle required for deep link testing
 
-```rust
-fn push_block(&mut self, b: BlockRow) {
-    self.blocks.insert(0, b);
-    if self.blocks.len() > self.keep_blocks {
-        self.blocks.pop();
-    }
-}
+**When to Use**:
+- Testing deep link handling
+- After changing CFBundleURLTypes in Info.plist
+- When deep links open wrong app version
+
+**Script Location**: Project root (`/Users/mikepurvis/near/fn/ratacat/tauri-dev.sh`)
+
+---
+
+### 3. Web Development
+
+```bash
+trunk serve --open
+# Opens at http://127.0.0.1:8083
 ```
 
-**Configuration**: `KEEP_BLOCKS=100` (default)
+**Features**:
+- Auto-reload on changes
+- No bundle/registration overhead
+- Easy browser DevTools access
 
-## Code Quality Observations
+**When to Use**:
+- Web-specific features (auth callbacks, etc.)
+- Testing CORS/CSP
+- Performance profiling
 
-### 1. Comprehensive Action Type Support
-All 8 NEAR action types are properly parsed and displayed with human-readable formatting.
+---
 
-### 2. Dual View Modes
-- **PRETTY**: ANSI-colored JSON with formatted gas/deposits
-- **RAW**: Unformatted JSON for debugging/copy-paste
+### 4. Native Terminal Development
 
-### 3. Clipboard Integration
-Uses `copypasta` crate for cross-platform clipboard support (copy transaction details with `c` key).
-
-### 4. Idiomatic NEAR Types
-Proper use of `near-primitives`, `near-gas`, `near-token` matching official NEAR tooling patterns.
-
-### 5. Error Handling Strategy
-Current approach logs errors but keeps UI responsive:
-
-```rust
-match fetch_block_with_txs(&url, height, timeout, concurrency).await {
-    Ok(row) => {
-        let _ = tx_clone.send(AppEvent::NewBlock(row));
-    }
-    Err(e) => {
-        eprintln!("[WS] RPC fetch failed for block {}: {:?}", height, e);
-        // Fallback: send empty block notification
-        let _ = tx_clone.send(AppEvent::FromWs(WsPayload::Block { data: height }));
-    }
-}
+```bash
+cargo run --bin nearx --features native
 ```
 
-**Future Enhancement**: Add user-facing error notifications/toast system.
-
-## Feature Completeness
-
-### ✅ Implemented Features
-- [x] 3-pane dashboard (Blocks → Transactions → Details)
-- [x] Dual data sources (WebSocket + RPC)
-- [x] Network auto-detection
-- [x] FPS control (runtime adjustable)
-- [x] View mode toggle (PRETTY/RAW)
-- [x] Smooth scrolling with PgUp/PgDn/Home/End
-- [x] Transaction filtering (account, action, method, raw)
-- [x] Jump marks with persistence (m, M, ', [, ])
-- [x] SQLite history with non-blocking writes
-- [x] Human-readable gas/token formatting
-- [x] Clipboard integration
-- [x] Comprehensive action type parsing
-
-### 🚧 Potential Enhancements
-- [ ] Search history (Ctrl+R style)
-- [ ] Export transactions to JSON/CSV
-- [ ] Block/transaction bookmarking with tags
-- [ ] Multi-block comparison view
-- [ ] Gas consumption analytics
-- [ ] Custom color themes
-- [ ] Plugin system for custom analyzers
-
-### 🔧 Technical Debt
-- [ ] Add comprehensive test suite (especially for action parsing)
-- [ ] Formal benchmarking/profiling
-- [ ] Configuration file support (beyond env vars)
-- [ ] Better error recovery for network failures
-- [ ] User-facing status notifications
-
-## Security Considerations
-
-### 1. Parameterized SQL Queries
-All database operations use parameterized queries to prevent SQL injection:
-
-```rust
-let mut stmt = conn.prepare(
-    "INSERT OR REPLACE INTO marks(label, pane, height, tx, when_ms) VALUES(?,?,?,?,?)"
-)?;
-stmt.execute(params![label, pane, height, tx, when_ms])?;
-```
-
-### 2. Network Request Timeouts
-All RPC requests have configurable timeouts to prevent hanging:
-
-```rust
-let client = reqwest::Client::builder()
-    .timeout(Duration::from_millis(timeout_ms))
-    .build()?;
-```
-
-**Configuration**: `RPC_TIMEOUT_MS=8000` (default)
-
-### 3. Data Validation
-Transaction hashes and account IDs are validated by NEAR primitives parsing.
-
-## Performance Profiling Targets
-(To be measured in production)
-
-1. **Memory usage** at various `KEEP_BLOCKS` settings
-2. **CPU usage** at different FPS settings (20/30/60)
-3. **Network latency** impact on UI responsiveness
-4. **SQLite write throughput** for history persistence
-5. **Chunk fetch concurrency** optimal values
-
-## Architectural Patterns Worth Highlighting
-
-### 1. Event-Driven Architecture
-```rust
-pub enum AppEvent {
-    FromWs(WsPayload),    // WebSocket events
-    NewBlock(BlockRow),    // Parsed block data
-    Quit,                  // Shutdown signal
-}
-```
-
-Clean separation between data sources and application logic.
-
-### 2. Compile-Time Configuration
-Environment variables parsed at startup, not runtime:
-
-```rust
-pub struct Config {
-    pub source: DataSource,
-    pub ws_url: String,
-    pub ws_fetch_blocks: bool,
-    pub near_node_url: String,
-    pub near_node_url_explicit: bool,
-    // ... all configuration immutable after parse
-}
-```
-
-### 3. Zero-Copy String Manipulation
-Using `&str` references throughout rendering pipeline to minimize allocations.
-
-## Testing Strategy Recommendations
-
-1. **Unit Tests**: Action parsing, filtering logic, formatting functions
-2. **Integration Tests**: Mock RPC responses, test block processing pipeline
-3. **Snapshot Tests**: UI rendering output verification
-4. **Property Tests**: Quickcheck for action parsing edge cases
-5. **Load Tests**: High-frequency block arrival scenarios
-
-## Comparison with Original MVP
-Ratacat pivoted from a todo list application (v0.1.0) to a blockchain viewer (v0.2.0+). This represents a significant architectural shift but maintained core TUI patterns:
-
-**Retained**:
-- 3-pane layout concept
-- FPS-capped rendering
-- Vim-style keybindings
+**Features**:
+- Full TUI experience
 - SQLite persistence
+- WebSocket + RPC support
+- Fastest iteration for terminal-specific features
 
-**Added**:
-- Async networking (WebSocket + RPC)
-- NEAR blockchain integration
-- Real-time data streaming
-- Complex filtering/searching
-- Dual view modes
-
-## Recommendations for Next Steps
-
-### Immediate (Pre-Production)
-1. ✅ Complete gas/token formatting integration
-2. ✅ Verify mainnet transaction display
-3. ✅ Update documentation
-4. [ ] Add basic unit tests for action parsing
-5. [ ] Performance profiling with mainnet load
-
-### Short-Term (Production Readiness)
-1. [ ] Implement user-facing error notifications
-2. [ ] Add help overlay (`?` key)
-3. [ ] Export functionality (JSON/CSV)
-4. [ ] Configuration file support
-5. [ ] Logging to file (not just stderr)
-
-### Medium-Term (Feature Enhancement)
-1. [ ] Search history with fuzzy matching
-2. [ ] Block/transaction analytics
-3. [ ] Custom color themes
-4. [ ] Multi-account monitoring
-5. [ ] Gas consumption tracking
-
-### Long-Term (Ecosystem Integration)
-1. [ ] Plugin system for custom analyzers
-2. [ ] NEAR wallet integration
-3. [ ] Contract verification integration
-4. [ ] Multi-network support (mainnet + testnet + shards)
-5. [ ] Distributed monitoring (multiple nodes)
-
-## Recent Bug Fixes & UX Improvements (2025-01-XX)
-
-### Issue: Tab Navigation Not Visible
-**Problem**: User couldn't see which pane was focused when pressing Tab/Shift+Tab.
-
-**Root Cause**: Focus indicator was using subtle cyan color that wasn't visible enough against the terminal background.
-
-**Fix** (src/ui.rs:111):
-```rust
-// Changed from:
-let focus_color = Color::Cyan;
-
-// To:
-let focus_color = Color::Yellow;  // Bright yellow, highly visible
-```
-
-**Result**: Focused panes now have bright yellow borders, unfocused panes are gray. Tab cycling is now visually clear.
+**When to Use**:
+- Terminal-specific features
+- SQLite history debugging
+- Credential watching
+- Performance optimization
 
 ---
 
-### Issue: Missing Left/Right Page Scrolling in Details Pane
-**Problem**: Up/Down arrows scrolled 1 line (correct), but no way to page through long transaction details quickly.
+## Build Commands Reference
 
-**User Requirement**: Left/Right arrows should jump 6 lines at a time for faster navigation through large JSON payloads.
+### All Targets
 
-**Fix** (src/app.rs:280-290, src/main.rs:240-241):
-```rust
-// Added Left/Right key handlers
-pub fn left(&mut self) {
-    if self.pane == 2 {
-        self.scroll_details(-6);  // 6 lines up
-    }
-}
-pub fn right(&mut self) {
-    if self.pane == 2 {
-        self.scroll_details(6);   // 6 lines down
-    }
-}
+```bash
+# Check compilation (no binary)
+cargo check --features native --bin nearx
+cargo check --target wasm32-unknown-unknown --no-default-features --features egui-web --bin nearx-web
+
+# Full builds
+cargo build --release --features native --bin nearx              # Terminal
+trunk build --release                                            # Web
+cd tauri-workspace && cargo tauri build                          # Tauri
 ```
 
-**Result**:
-- Up/Down: 1-line precision scrolling
-- Left/Right: 6-line page jumps
-- PgUp/PgDn: 20-line jumps (existing)
-- Home/End: Jump to top/bottom (existing)
+### Quick Iteration
+
+```bash
+# Fastest: Native terminal
+cargo run --bin nearx --features native
+
+# Fast: Web with hot reload
+trunk serve
+
+# Medium: Tauri with hot reload
+cd tauri-workspace && cargo tauri dev
+
+# Slow: Deep link testing (requires full rebuild + registration)
+./tauri-dev.sh
+```
 
 ---
 
-### Issue: 2-Row Layout Implementation
-**Problem**: Original 3-column layout was cramped. Transaction details were squashed and hard to read.
+## Common Issues & Solutions
 
-**Battle Station Pattern**: Uses 2-row layout:
-- **Top row**: Blocks (left) + Tx list (right) - 50/50 split
-- **Bottom row**: Details pane (full width) - only shown when txs exist
+### Issue 1: Tauri Shows Dark Screen After Loading
 
-**Fix** (src/ui.rs:82-195):
+**Symptoms**:
+- "Loading NEARx" disappears but UI doesn't render
+- Console shows WASM preload warnings
+- Deep link bridge initializes but nothing visible
+
+**Solution**:
+```bash
+# 1. Verify Trunk.toml has relative paths
+grep "public_url" Trunk.toml
+# Should show: public_url = "./"
+
+# 2. Rebuild WASM
+trunk build --release
+
+# 3. Rebuild Tauri
+./tauri-dev.sh
+```
+
+---
+
+### Issue 2: CSP Errors in Console
+
+**Symptoms**:
+```
+Refused to connect to ipc://localhost/...
+IPC custom protocol failed, falling back to postMessage
+```
+
+**Solution**:
+Check `tauri.conf.json` CSP includes:
+```json
+"connect-src 'self' ipc: http://ipc.localhost ..."
+```
+
+---
+
+### Issue 3: Deep Links Don't Work
+
+**Symptoms**:
+- Clicking `nearx://` link does nothing
+- Opens wrong app version
+- Opens browser instead of app
+
+**Solution**:
+```bash
+# 1. Clean old registrations
+./tauri-dev.sh clean
+
+# 2. Rebuild and register
+./tauri-dev.sh
+
+# 3. Test
+open 'nearx://v1/tx/ABC123'
+
+# 4. Verify registration
+mdfind "kMDItemCFBundleIdentifier == 'com.fastnear.nearx'"
+# Should show: /Applications/NEARx.app
+```
+
+---
+
+### Issue 4: Keyboard/Mouse Not Working
+
+**Current Status**: ✅ Working across all targets
+
+**If Regresses**:
+1. Check browser console for errors
+2. Verify no panic messages in logs
+3. Test in `cargo tauri dev` mode (better error messages)
+4. Check if egui wants_keyboard_input() is true
+
+**Known Pattern**:
+- Mouse: Click events must not hold app borrows during egui context access
+- Keyboard: Key events collected first, then processed (avoid nested borrows)
+
+---
+
+## Theme System
+
+### Tokens Structure
+
 ```rust
-// Split vertically first (rows)
-let rows = if has_selection {
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(50),  // Top row
-            Constraint::Percentage(50),  // Bottom row (details)
-        ])
-        .split(area)
+// src/theme/tokens.rs
+pub struct Tokens {
+    pub layout: LayoutSpec {
+        top_ratio: 0.52,     // 52% top (Blocks+Txs), 48% bottom (Details)
+        gap_px: 6.0,         // Gap between panels (egui)
+        gap_cells: 1,        // Gap between panels (ratatui)
+    },
+    pub visuals: VisualTokens {
+        focus_stroke_px: 2.0,      // Focused border width (egui)
+        unfocus_stroke_px: 1.0,    // Unfocused border width (egui)
+        window_radius_px: 4,       // Window corners
+        widget_radius_px: 3,       // Widget corners
+        row_height_px: 22.0,       // Virtual scroll row height
+    },
+    pub rat: RatTokens {
+        focused_thick_border: true,  // Use BorderType::Thick when focused
+        gap_cells: 1,
+    },
+}
+```
+
+### Usage Example
+
+```rust
+// In src/ui.rs (TUI)
+let top_ratio = (tokens::tokens().layout.top_ratio * 100.0).round() as u16;
+let rows = Layout::default()
+    .constraints([Constraint::Percentage(top_ratio), ...])
+    .split(area);
+
+// Border thickness
+if focused && tokens::tokens().rat.focused_thick_border {
+    block.border_type(BorderType::Thick)
 } else {
-    // No selection: Use full height for top row
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(100)])
-        .split(area)
-};
-
-// Then split top row horizontally (columns)
-let top_cols = Layout::default()
-    .direction(Direction::Horizontal)
-    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-    .split(rows[0]);
-```
-
-**Result**: Transaction details now have full terminal width, much more readable. Blocks and tx list get equal space in top half.
-
----
-
-### Known Issue: Selection Drift (Investigation in Progress)
-
-**User Report**: "The selection is still changing as blocks come in. I feel like there is a significant delay compared to the JS one."
-
-**Battle Station Behavior** (Reference):
-```typescript
-// When at index 0: Stay at index 0 (live mode)
-const isViewingLatest = currentIndex === 0;
-if (isViewingLatest) {
-  setSelectedBlock(blockHeights[0]);
-  ref.current.select(0);
-} else {
-  // History browsing: Track block object by reference
-  const index = blockIndex(blockRef.current);
-  ref.current.select(index);
+    block.border_type(BorderType::Rounded)
 }
 ```
 
-**Ratacat Current Approach** (src/app.rs:411-439):
-```rust
-// Three-way branching based on flags
-if self.follow_latest {
-    // Live mode: stay at index 0
-    self.sel_block = 0;
-} else if let Some(target_height) = self.selected_block_height {
-    // History browsing: find block by height
-    if let Some(new_idx) = self.blocks.iter().position(|block| block.height == target_height) {
-        self.sel_block = new_idx;
-    }
-} else {
-    // INIT mode: first blocks arriving
-    self.sel_block = 0;
-    self.selected_block_height = Some(self.blocks[0].height);
-}
+---
+
+## Testing Checklist
+
+### Before Committing
+
+```bash
+# 1. Check all targets compile
+cargo check --features native --bin nearx
+cargo check --target wasm32-unknown-unknown --no-default-features --features egui-web --bin nearx-web
+cd tauri-workspace && cargo check
+
+# 2. Format
+cargo fmt
+
+# 3. Clippy
+cargo clippy --features native
+cargo clippy --target wasm32-unknown-unknown --no-default-features --features egui-web
+
+# 4. Run preflight
+./tools/preflight.sh
 ```
 
-**Suspected Issues**:
-1. **State Management Complexity**: Using both `follow_latest` boolean AND `selected_block_height` Option creates edge cases
-2. **Missing Pane Context**: Battle station doesn't re-select on every block arrival - only when in blocks pane
-3. **Initialization Race**: INIT mode might be re-triggering unexpectedly
-4. **Render Delay**: FPS capping (30 FPS default) might create perceived lag vs. React's immediate updates
+### Manual Testing Matrix
 
-**Debug Strategy**:
-- Debug log panel now shows: "Block #X arr, [MODE], sel=Y"
-- Next step: Copy debug output during drift to identify exact state transitions
-- Compare timing: Battle station's useEffect vs. Ratacat's push_block() timing
-
-**Hypothesis**: The Rust version correctly implements the logic, but:
-- **Timing difference**: Battle station batches React state updates, Ratacat processes each block immediately
-- **Visual feedback delay**: 30 FPS render budget means up to 33ms lag between state change and visual update
-- **Pane-aware selection**: Might need to skip repositioning when not in blocks pane (pane != 0)
-
-**Next Steps**:
-1. User to run app and copy debug log showing drift
-2. Add pane awareness: Only reposition selection if `self.pane == 0` (blocks pane active)
-3. Consider increasing default FPS to 60 for snappier updates
-4. Profile block arrival timing vs. render timing
+| Feature | Terminal | Web | Tauri | Notes |
+|---------|----------|-----|-------|-------|
+| Arrow keys | ✅ | ✅ | ✅ | Navigate lists |
+| Tab cycling | ✅ | ✅ | ✅ | Focus panes |
+| Space toggle | ✅ | ✅ | ✅ | Fullscreen details |
+| Copy ('c') | ✅ | ✅ | ✅ | Clipboard |
+| Mouse click | N/A | ✅ | ✅ | Focus + select |
+| Mouse scroll | N/A | ✅ | ✅ | Navigate lists |
+| Double-click | N/A | ✅ | ✅ | Fullscreen toggle |
+| Deep links | N/A | N/A | ✅ | `nearx://v1/tx/HASH` |
+| Theme borders | ✅ | ✅ | ✅ | Thick when focused |
+| Layout ratio | ✅ | ✅ | ✅ | 52/48 split |
 
 ---
 
-## Conclusion
+## Configuration
 
-Ratacat successfully demonstrates a production-quality TUI application for blockchain monitoring. The architecture is:
+### Environment Variables
 
-- **Performant**: FPS-capped rendering, parallel data fetching, non-blocking I/O
-- **Resilient**: Network auto-detection, catch-up limits, graceful error handling
-- **Idiomatic**: Proper use of official NEAR crates and Rust patterns
-- **User-Friendly**: Vim-style navigation, clipboard integration, multiple view modes, **NOW with 2-row layout and 6-line page scrolling**
+```bash
+# RPC endpoint
+NEAR_NODE_URL=https://rpc.mainnet.fastnear.com/
 
-The codebase is well-structured and maintainable, with clear separation of concerns:
-- `source_*.rs`: Data acquisition layer
-- `app.rs`: State management and business logic
-- `ui.rs`: Rendering and presentation
-- `types.rs`: Data models
-- `config.rs`: Configuration management
+# Authentication
+FASTNEAR_AUTH_TOKEN=your_token_here
 
-**Primary strengths**:
-1. Hybrid WebSocket + RPC architecture handles both development and production needs
-2. Network auto-detection solved critical mainnet/testnet mismatch bug
-3. Official NEAR primitives integration ensures compatibility
-4. FPS-capped rendering prevents UI thrashing
-5. Non-blocking persistence maintains responsiveness
-6. **NEW**: 2-row layout provides excellent space utilization (battle station pattern)
-7. **NEW**: Comprehensive scrolling controls (1-line, 6-line, 20-line jumps)
-8. **NEW**: Clear focus indicators (bright yellow borders)
+# Filtering
+WATCH_ACCOUNTS=alice.near,bob.near
+DEFAULT_FILTER="acct:intents.near"
 
-**Areas for polish**:
-1. Add comprehensive test coverage
-2. Implement user-facing error notifications
-3. Performance profiling under production load
-4. Export/analytics features
-5. Configuration file support
-6. **IN PROGRESS**: Debug selection drift issue with pane-aware repositioning
+# Performance
+RENDER_FPS=30
+KEEP_BLOCKS=100
 
-The technical foundation is solid and ready for principal engineer review. All major architectural decisions are documented, trade-offs are explained, and the codebase follows Rust best practices.
+# Archival (optional)
+ARCHIVAL_RPC_URL=https://archival-rpc.mainnet.fastnear.com
+```
+
+See `.env.example` for complete documentation.
+
+---
+
+## Known Limitations
+
+### Web/Tauri
+- ⚠️ No SQLite persistence (in-memory only)
+- ⚠️ No WebSocket support (RPC polling only)
+- ⚠️ No credential watching
+- ⚠️ WASM preload warning (cosmetic, doesn't affect functionality)
+
+### Native Terminal
+- ⚠️ Mouse text selection requires modifier key (Option/Alt/Shift depending on terminal)
+
+### Tauri
+- ⚠️ Deep links require `./tauri-dev.sh` for testing (not `cargo tauri dev`)
+- ⚠️ Bundle identifier must not end in `.app` (Apple reserved)
+
+---
+
+## Next Steps / Roadmap
+
+### High Priority
+1. ✅ ~~Fix Tauri WASM loading~~ (DONE 2025-11-11)
+2. ✅ ~~Centralize theme tokens~~ (DONE 2025-11-11)
+3. ✅ ~~Fix CSP for Tauri IPC~~ (DONE 2025-11-11)
+4. ⬜ E2E tests for keyboard/mouse interactions
+5. ⬜ OAuth integration testing
+
+### Medium Priority
+1. ⬜ WASM preload warning fix (cosmetic)
+2. ⬜ Performance profiling (Web vs Native)
+3. ⬜ Contrast audit integration (call in debug builds)
+4. ⬜ Documentation for browser extension integration
+
+### Low Priority
+1. ⬜ Windows/Linux deep link testing
+2. ⬜ Code signing automation
+3. ⬜ Auto-updater integration
+4. ⬜ DMG installer with drag-to-Applications
+
+---
+
+## Files Modified (This Session - 2025-11-11)
+
+1. **Trunk.toml** - Changed `public_url` from `/` to `./`
+2. **tauri.conf.json** - Added `ipc:` and `http://ipc.localhost` to CSP, removed invalid opener config
+3. **src/theme/tokens.rs** - Created (NEW)
+4. **src/theme.rs** - Added `pub mod tokens;`
+5. **src/ui.rs** - Updated to use tokens for layout ratio and border thickness
+6. **dist-egui/** - Rebuilt with relative WASM paths
+
+---
+
+## Contact & Support
+
+**Project Repository**: [GitHub URL]
+**Documentation**: See `CLAUDE.md` for comprehensive technical details
+**Bug Reports**: GitHub Issues
+**Development Chat**: [Link if applicable]
+
+---
+
+**Last Updated**: 2025-11-11 21:15 UTC
+**Status**: ✅ All targets functional, theme tokens centralized, ready for PE review

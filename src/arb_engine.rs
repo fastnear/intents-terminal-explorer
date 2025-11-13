@@ -1,9 +1,9 @@
 // Ultra-fast arbitrage detection engine for Ref Finance pools
 // Monitors pool state changes in real-time and identifies profitable opportunities
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use serde::{Deserialize, Serialize};
 
 const MIN_PROFIT_THRESHOLD: f64 = 0.003; // 0.3% minimum profit after fees
 const REF_FINANCE_FEE: f64 = 0.0025; // 0.25% fee on Ref Finance
@@ -86,7 +86,11 @@ impl TickMA {
         }
 
         // Calculate MA
-        let count = if self.filled { self.window_size } else { self.current_idx };
+        let count = if self.filled {
+            self.window_size
+        } else {
+            self.current_idx
+        };
         if count > 0 {
             self.sum / count as f64
         } else {
@@ -96,7 +100,11 @@ impl TickMA {
 
     #[inline(always)]
     pub fn value(&self) -> f64 {
-        let count = if self.filled { self.window_size } else { self.current_idx };
+        let count = if self.filled {
+            self.window_size
+        } else {
+            self.current_idx
+        };
         if count > 0 {
             self.sum / count as f64
         } else {
@@ -128,8 +136,8 @@ pub struct ArbOpportunity {
 /// Type of arbitrage opportunity
 #[derive(Debug, Clone, PartialEq)]
 pub enum ArbType {
-    TwoHop,     // Simple: Buy A, Sell B
-    Triangle,   // Complex: A→B→C→A
+    TwoHop,   // Simple: Buy A, Sell B
+    Triangle, // Complex: A→B→C→A
 }
 
 impl ArbOpportunity {
@@ -203,7 +211,11 @@ impl PoolTracker {
         self.pool_info = Some(pool_info.clone()); // Store full metadata
 
         if self.current_liquidity == 0.0 {
-            log::warn!("Pool {} has ZERO liquidity (price: {:.6})", self.pool_id, self.current_price);
+            log::warn!(
+                "Pool {} has ZERO liquidity (price: {:.6})",
+                self.pool_id,
+                self.current_price
+            );
         }
 
         self.ma_50.update(self.current_price)
@@ -235,9 +247,9 @@ pub struct LightningArbEngine {
 /// Triangle arbitrage path (3 pools forming a cycle)
 #[derive(Debug, Clone)]
 pub struct TrianglePath {
-    pub pool_ab: u64,  // Pool: A → B
-    pub pool_bc: u64,  // Pool: B → C
-    pub pool_ca: u64,  // Pool: C → A
+    pub pool_ab: u64, // Pool: A → B
+    pub pool_bc: u64, // Pool: B → C
+    pub pool_ca: u64, // Pool: C → A
     pub token_a: String,
     pub token_b: String,
     pub token_c: String,
@@ -409,8 +421,9 @@ impl LightningArbEngine {
             if profit_pct > MIN_PROFIT_THRESHOLD && is_anomaly && spread > max_spread {
                 max_spread = spread;
 
-                let confidence = (spread / ma_spread).min(1.0) *
-                                (tracker_a.current_liquidity.min(tracker_b.current_liquidity) / 10000.0).min(1.0);
+                let confidence = (spread / ma_spread).min(1.0)
+                    * (tracker_a.current_liquidity.min(tracker_b.current_liquidity) / 10000.0)
+                        .min(1.0);
 
                 best_opp = Some(ArbOpportunity {
                     arb_type: ArbType::TwoHop,
@@ -438,7 +451,10 @@ impl LightningArbEngine {
         // Check triangle arbitrage opportunities
         for triangle in &self.triangle_paths {
             // Skip if changed pool is not part of this triangle
-            if triangle.pool_ab != changed_pool && triangle.pool_bc != changed_pool && triangle.pool_ca != changed_pool {
+            if triangle.pool_ab != changed_pool
+                && triangle.pool_bc != changed_pool
+                && triangle.pool_ca != changed_pool
+            {
                 continue;
             }
 
@@ -476,12 +492,13 @@ impl LightningArbEngine {
             if profit_pct > MIN_PROFIT_THRESHOLD && spread > max_spread {
                 max_spread = spread;
 
-                let min_liquidity = tracker_ab.current_liquidity
+                let min_liquidity = tracker_ab
+                    .current_liquidity
                     .min(tracker_bc.current_liquidity)
                     .min(tracker_ca.current_liquidity);
 
-                let confidence = (spread / (REF_FINANCE_FEE * 3.0)).min(1.0) *
-                                (min_liquidity / 10000.0).min(1.0);
+                let confidence = (spread / (REF_FINANCE_FEE * 3.0)).min(1.0)
+                    * (min_liquidity / 10000.0).min(1.0);
 
                 log::debug!(
                     "Triangle opportunity detected: pools {}→{}→{} | liquidity: ${:.2}, ${:.2}, ${:.2} | min: ${:.2} | confidence: {:.1}% | spread: {:.2}% | profit: {:.2}%",
@@ -519,7 +536,8 @@ impl LightningArbEngine {
     /// Get performance stats
     pub fn stats(&self) -> ArbStats {
         let avg_latency = if !self.detection_latencies.is_empty() {
-            self.detection_latencies.iter().sum::<Duration>() / self.detection_latencies.len() as u32
+            self.detection_latencies.iter().sum::<Duration>()
+                / self.detection_latencies.len() as u32
         } else {
             Duration::ZERO
         };
@@ -583,7 +601,10 @@ mod tests {
         let pool1 = PoolInfo {
             pool_id: 1,
             token_account_ids: vec!["near".to_string(), "usdc".to_string()],
-            amounts: vec![1_000_000_000_000_000_000_000_000, 5_000_000_000_000_000_000_000_000], // 1 NEAR = 5 USDC
+            amounts: vec![
+                1_000_000_000_000_000_000_000_000,
+                5_000_000_000_000_000_000_000_000,
+            ], // 1 NEAR = 5 USDC
             total_fee: 25,
             shares_total_supply: 1_000_000,
         };
@@ -591,7 +612,10 @@ mod tests {
         let pool2 = PoolInfo {
             pool_id: 2,
             token_account_ids: vec!["near".to_string(), "usdc".to_string()],
-            amounts: vec![1_000_000_000_000_000_000_000_000, 5_100_000_000_000_000_000_000_000], // 1 NEAR = 5.1 USDC (2% spread!)
+            amounts: vec![
+                1_000_000_000_000_000_000_000_000,
+                5_100_000_000_000_000_000_000_000,
+            ], // 1 NEAR = 5.1 USDC (2% spread!)
             total_fee: 25,
             shares_total_supply: 1_000_000,
         };
@@ -608,7 +632,10 @@ mod tests {
         // Now update with divergent price - should detect opportunity
         let pool2_diverged = PoolInfo {
             pool_id: 2,
-            amounts: vec![1_000_000_000_000_000_000_000_000, 5_500_000_000_000_000_000_000_000], // 1 NEAR = 5.5 USDC (10% spread!)
+            amounts: vec![
+                1_000_000_000_000_000_000_000_000,
+                5_500_000_000_000_000_000_000_000,
+            ], // 1 NEAR = 5.5 USDC (10% spread!)
             ..pool2
         };
 

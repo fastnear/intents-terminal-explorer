@@ -3,19 +3,24 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ratacat - NEAR Blockchain Viewer (egui)</title>
+    <title>NEARx - NEAR Blockchain Viewer</title>
+
+    <!-- Theme CSS variables (unified with Rust theme) -->
+    <link data-trunk rel="copy-file" href="web/theme.css" />
+    <link rel="stylesheet" href="theme.css" />
 
     <style>
+        /* Page-specific overrides (theme.css provides base styles) */
         html, body {
             margin: 0;
             padding: 0;
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background: #0b0b0b;
+            /* background from theme.css (var(--bg)) */
         }
 
-        #canvas {
+        #nearx_canvas {
             position: absolute;
             top: 30px;
             left: 0;
@@ -91,8 +96,8 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            color: #fff;
-            font-family: monospace;
+            color: var(--text);
+            font-family: inherit; /* Use theme font */
             font-size: 18px;
             z-index: 1000;
         }
@@ -113,6 +118,14 @@
             display: none;
         }
     </style>
+
+    <!-- Tauri deep link bridge (safe no-op on plain web) -->
+    <link data-trunk rel="copy-file" href="web/deep_link.js" />
+    <script defer src="deep_link.js"></script>
+
+    <!-- WASM error guard (dev helper - surfaces errors inline) -->
+    <link data-trunk rel="copy-file" href="web/wasm_guard.js" />
+    <script defer src="wasm_guard.js"></script>
 </head>
 <body>
     <!-- Status bar -->
@@ -122,8 +135,8 @@
         <span class="status-help">Press F12 for debug console</span>
     </div>
 
-    <canvas id="canvas"></canvas>
-    <div class="loading">Loading Ratacat (egui)</div>
+    <canvas id="nearx_canvas"></canvas>
+    <div class="loading">Loading NEARx</div>
 
     <script>
         // Status bar management
@@ -163,7 +176,7 @@
         //   ?token=<token>      - FastNEAR auth token (overrides localStorage)
         //   ?filter=<account>   - Default account filter
         //
-        // Example: http://localhost:8181?token=YOUR_TOKEN&rpc=https://rpc.mainnet.fastnear.com/
+        // Example: http://localhost:8083?token=YOUR_TOKEN&rpc=https://rpc.mainnet.fastnear.com/
         //
         // ═══════════════════════════════════════════════════════════════
 
@@ -177,7 +190,7 @@
             : 'none';
 
         console.log('═══════════════════════════════════════════════════');
-        console.log('🦀 Ratacat egui-web Configuration:');
+        console.log('🦀 NEARx Configuration:');
         console.log('═══════════════════════════════════════════════════');
         console.log('  RPC Endpoint:', rpc);
         console.log('  Auth Token:', token);
@@ -211,6 +224,6 @@
     <div id="rc-select-overlay" hidden></div>
 
     <!-- Trunk will inject the WASM loader script here -->
-    <link data-trunk rel="rust" data-bin="ratacat-egui-web" data-cargo-features="egui-web" />
+    <link data-trunk rel="rust" data-bin="nearx-web" data-cargo-no-default-features data-cargo-features="egui-web" />
 </body>
 </html>

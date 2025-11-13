@@ -105,10 +105,10 @@ impl History {
             let _ = spawn_blocking(move || -> Result<()> {
                 let conn = Connection::open(path)?;
                 // Enable WAL mode for concurrent read/write performance
-                conn.pragma_update(None, "journal_mode", &"WAL")?;
-                conn.pragma_update(None, "synchronous", &"NORMAL")?;
+                conn.pragma_update(None, "journal_mode", "WAL")?;
+                conn.pragma_update(None, "synchronous", "NORMAL")?;
                 // Set busy timeout to avoid immediate lock failures
-                conn.pragma_update(None, "busy_timeout", &250)?;
+                conn.pragma_update(None, "busy_timeout", 250)?;
                 conn.execute_batch(
                     r#"
                     CREATE TABLE IF NOT EXISTS blocks(
@@ -230,7 +230,15 @@ impl History {
 
     pub async fn search(&self, query: String, limit: usize) -> Vec<HistoryHit> {
         let (resp_tx, resp_rx) = oneshot::channel();
-        if self.tx.send(HistoryMsg::Search { query, limit, resp: resp_tx }).is_err() {
+        if self
+            .tx
+            .send(HistoryMsg::Search {
+                query,
+                limit,
+                resp: resp_tx,
+            })
+            .is_err()
+        {
             return Vec::new();
         }
         resp_rx.await.unwrap_or_default()
@@ -238,7 +246,14 @@ impl History {
 
     pub async fn get_tx(&self, hash: String) -> Option<String> {
         let (resp_tx, resp_rx) = oneshot::channel();
-        if self.tx.send(HistoryMsg::GetTx { hash, resp: resp_tx }).is_err() {
+        if self
+            .tx
+            .send(HistoryMsg::GetTx {
+                hash,
+                resp: resp_tx,
+            })
+            .is_err()
+        {
             return None;
         }
         resp_rx.await.ok().flatten()
@@ -246,7 +261,11 @@ impl History {
 
     pub async fn list_marks(&self) -> Vec<PersistedMark> {
         let (resp_tx, resp_rx) = oneshot::channel();
-        if self.tx.send(HistoryMsg::ListMarks { resp: resp_tx }).is_err() {
+        if self
+            .tx
+            .send(HistoryMsg::ListMarks { resp: resp_tx })
+            .is_err()
+        {
             return Vec::new();
         }
         resp_rx.await.unwrap_or_default()
@@ -254,19 +273,29 @@ impl History {
 
     pub async fn put_mark(&self, mark: PersistedMark) {
         let (resp_tx, resp_rx) = oneshot::channel();
-        let _ = self.tx.send(HistoryMsg::PutMark { mark, resp: resp_tx });
+        let _ = self.tx.send(HistoryMsg::PutMark {
+            mark,
+            resp: resp_tx,
+        });
         let _ = resp_rx.await;
     }
 
     pub async fn del_mark(&self, label: String) {
         let (resp_tx, resp_rx) = oneshot::channel();
-        let _ = self.tx.send(HistoryMsg::DelMark { label, resp: resp_tx });
+        let _ = self.tx.send(HistoryMsg::DelMark {
+            label,
+            resp: resp_tx,
+        });
         let _ = resp_rx.await;
     }
 
     pub async fn set_mark_pinned(&self, label: String, pinned: bool) {
         let (resp_tx, resp_rx) = oneshot::channel();
-        let _ = self.tx.send(HistoryMsg::SetMarkPinned { label, pinned, resp: resp_tx });
+        let _ = self.tx.send(HistoryMsg::SetMarkPinned {
+            label,
+            pinned,
+            resp: resp_tx,
+        });
         let _ = resp_rx.await;
     }
 
@@ -339,7 +368,7 @@ fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<History
     if !sq.acct.is_empty() {
         for a in &sq.acct {
             where_clauses.push("(LOWER(t.signer) LIKE ? OR LOWER(t.receiver) LIKE ?)".to_string());
-            let pattern = format!("%{}%", a);
+            let pattern = format!("%{a}%");
             params_vec.push(Box::new(pattern.clone()));
             params_vec.push(Box::new(pattern));
         }
@@ -347,25 +376,34 @@ fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<History
 
     // signer
     if !sq.signer.is_empty() {
-        let clause = format!("({})", vec!["LOWER(t.signer) LIKE ?"; sq.signer.len()].join(" OR "));
+        let clause = format!(
+            "({})",
+            vec!["LOWER(t.signer) LIKE ?"; sq.signer.len()].join(" OR ")
+        );
         where_clauses.push(clause);
         for s in &sq.signer {
-            params_vec.push(Box::new(format!("%{}%", s)));
+            params_vec.push(Box::new(format!("%{s}%")));
         }
     }
 
     // receiver
     if !sq.receiver.is_empty() {
-        let clause = format!("({})", vec!["LOWER(t.receiver) LIKE ?"; sq.receiver.len()].join(" OR "));
+        let clause = format!(
+            "({})",
+            vec!["LOWER(t.receiver) LIKE ?"; sq.receiver.len()].join(" OR ")
+        );
         where_clauses.push(clause);
         for r in &sq.receiver {
-            params_vec.push(Box::new(format!("%{}%", r)));
+            params_vec.push(Box::new(format!("%{r}%")));
         }
     }
 
     // hash
     if !sq.hash.is_empty() {
-        let clause = format!("({})", vec!["LOWER(t.hash) = ?"; sq.hash.len()].join(" OR "));
+        let clause = format!(
+            "({})",
+            vec!["LOWER(t.hash) = ?"; sq.hash.len()].join(" OR ")
+        );
         where_clauses.push(clause);
         for h in &sq.hash {
             params_vec.push(Box::new(h.clone()));
@@ -384,17 +422,23 @@ fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<History
 
     // method/action: LIKE on actions_json
     if !sq.method.is_empty() {
-        let clause = format!("({})", vec!["LOWER(t.actions_json) LIKE ?"; sq.method.len()].join(" OR "));
+        let clause = format!(
+            "({})",
+            vec!["LOWER(t.actions_json) LIKE ?"; sq.method.len()].join(" OR ")
+        );
         where_clauses.push(clause);
         for m in &sq.method {
-            params_vec.push(Box::new(format!("%{}%", m)));
+            params_vec.push(Box::new(format!("%{m}%")));
         }
     }
     if !sq.action.is_empty() {
-        let clause = format!("({})", vec!["LOWER(t.actions_json) LIKE ?"; sq.action.len()].join(" OR "));
+        let clause = format!(
+            "({})",
+            vec!["LOWER(t.actions_json) LIKE ?"; sq.action.len()].join(" OR ")
+        );
         where_clauses.push(clause);
         for a in &sq.action {
-            params_vec.push(Box::new(format!("%{}%", a)));
+            params_vec.push(Box::new(format!("%{a}%")));
         }
     }
 
@@ -403,7 +447,7 @@ fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<History
         let clause = format!("({})", vec!["(LOWER(t.signer)||' '||LOWER(t.receiver)||' '||LOWER(t.hash)||' '||LOWER(t.actions_json)) LIKE ?"; sq.free.len()].join(" AND "));
         where_clauses.push(clause);
         for f in &sq.free {
-            params_vec.push(Box::new(format!("%{}%", f)));
+            params_vec.push(Box::new(format!("%{f}%")));
         }
     }
 
@@ -432,12 +476,7 @@ fn search_db(conn: &Connection, query: &str, limit: usize) -> Result<Vec<History
         })
     })?;
 
-    let mut hits = Vec::new();
-    for r in rows {
-        if let Ok(hit) = r {
-            hits.push(hit);
-        }
-    }
+    let hits: Vec<HistoryHit> = rows.flatten().collect();
     Ok(hits)
 }
 
@@ -475,7 +514,9 @@ fn summarize_methods(actions_json: &str) -> String {
 
 #[cfg(feature = "native")]
 fn list_marks_db(conn: &Connection) -> Result<Vec<PersistedMark>> {
-    let mut stmt = conn.prepare("SELECT label, pane, height, tx, when_ms, pinned FROM marks ORDER BY when_ms DESC")?;
+    let mut stmt = conn.prepare(
+        "SELECT label, pane, height, tx, when_ms, pinned FROM marks ORDER BY when_ms DESC",
+    )?;
     let mut rows = stmt.query([])?;
     let mut marks = Vec::new();
     while let Some(row) = rows.next()? {
@@ -511,7 +552,12 @@ fn del_mark_db(_conn: &Connection, stmt: &mut Statement, label: &str) -> Result<
 }
 
 #[cfg(feature = "native")]
-fn set_mark_pinned_db(_conn: &Connection, stmt: &mut Statement, label: &str, pinned: bool) -> Result<()> {
+fn set_mark_pinned_db(
+    _conn: &Connection,
+    stmt: &mut Statement,
+    label: &str,
+    pinned: bool,
+) -> Result<()> {
     stmt.execute(params![pinned as i64, label])?;
     Ok(())
 }
