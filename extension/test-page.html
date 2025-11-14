@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zcash Payment Test Page</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #fff;
+    }
+    .container {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border-radius: 16px;
+      padding: 40px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+    h1 {
+      margin-top: 0;
+      font-size: 2.5em;
+      text-align: center;
+    }
+    .payment-section {
+      margin: 30px 0;
+      padding: 20px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+    }
+    .payment-section h2 {
+      margin-top: 0;
+      font-size: 1.5em;
+      border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+      padding-bottom: 10px;
+    }
+    a, button {
+      display: inline-block;
+      padding: 12px 24px;
+      margin: 10px 10px 10px 0;
+      background: rgba(255, 255, 255, 0.2);
+      color: #fff;
+      text-decoration: none;
+      border-radius: 8px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      cursor: pointer;
+      font-size: 16px;
+      transition: all 0.3s ease;
+    }
+    a:hover, button:hover {
+      background: rgba(255, 255, 255, 0.3);
+      border-color: rgba(255, 255, 255, 0.5);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+    code {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Monaco', 'Courier New', monospace;
+      font-size: 0.9em;
+    }
+    .address {
+      word-break: break-all;
+      font-size: 0.85em;
+      margin: 10px 0;
+    }
+    .log {
+      margin-top: 30px;
+      padding: 20px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 8px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .log h3 {
+      margin-top: 0;
+    }
+    .log-entry {
+      margin: 8px 0;
+      padding: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 0.9em;
+    }
+    .log-entry.success {
+      border-left: 4px solid #10b981;
+    }
+    .log-entry.error {
+      border-left: 4px solid #ef4444;
+    }
+    .log-entry.info {
+      border-left: 4px solid #3b82f6;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔐 Zcash Payment Demo</h1>
+    <p style="text-align: center; font-size: 1.1em; opacity: 0.9;">
+      Test the Zcash Native Bridge Extension with privacy-first transactions
+    </p>
+
+    <div class="payment-section">
+      <h2>Method 1: zcash: Protocol Links</h2>
+      <p>Click these links to test the <code>zcash:</code> URI scheme interception:</p>
+      
+      <a href="zcash:zs1qq402u5t8e0hp4hjskd0nhrw92hes9u0dmu36r4s5upk3cazys?amount=1.5&memo=Coffee">
+        ☕ Pay 1.5 ZEC for Coffee
+      </a>
+      
+      <a href="zcash:zs1testaddress123456789abcdefghijklmnopqrstuvwxyz?amount=5.0&memo=Donation">
+        💝 Donate 5.0 ZEC
+      </a>
+      
+      <a href="zcash:zs1anothertest987654321zyxwvutsrqponmlkjihgfedcba?amount=0.1&memo=Tip">
+        💰 Tip 0.1 ZEC
+      </a>
+
+      <div class="address">
+        <strong>Note:</strong> These are test addresses for demo purposes only
+      </div>
+    </div>
+
+    <div class="payment-section">
+      <h2>Method 2: Data Attribute Buttons</h2>
+      <p>These buttons use custom <code>data-zcash-*</code> attributes:</p>
+      
+      <button 
+        data-zcash-action="pay"
+        data-zcash-to="zs1qq402u5t8e0hp4hjskd0nhrw92hes9u0dmu36r4s5upk3cazys"
+        data-zcash-amount="2.0"
+        data-zcash-memo="Premium Subscription">
+        📱 Subscribe (2.0 ZEC)
+      </button>
+      
+      <button 
+        data-zcash-action="pay"
+        data-zcash-to="zs1merchant123456789abcdefghijklmnopqrstuvwxyz"
+        data-zcash-amount="10.5"
+        data-zcash-memo="Purchase Product XYZ">
+        🛒 Buy Product (10.5 ZEC)
+      </button>
+
+      <button 
+        data-zcash-action="pay"
+        data-zcash-to="zs1charity987654321zyxwvutsrqponmlkjihgfedcba"
+        data-zcash-amount="0.5"
+        data-zcash-memo="Support the cause">
+        ❤️ Support Cause (0.5 ZEC)
+      </button>
+    </div>
+
+    <div class="payment-section">
+      <h2>Event Log</h2>
+      <div class="log" id="log">
+        <div class="log-entry info">
+          <strong>Ready:</strong> Click any payment link or button above to test
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const logContainer = document.getElementById('log');
+
+    function addLog(message, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.innerHTML = `<strong>${new Date().toLocaleTimeString()}:</strong> ${message}`;
+      logContainer.appendChild(entry);
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+
+    // Listen for Zcash transaction approval
+    document.addEventListener('zcash-transaction-approved', (e) => {
+      console.log('✅ Transaction approved:', e.detail);
+      addLog(`✅ Transaction approved!<br>TX ID: <code>${e.detail.txid}</code><br>Session: ${e.detail.session}`, 'success');
+    });
+
+    // Listen for Zcash transaction denial
+    document.addEventListener('zcash-transaction-denied', (e) => {
+      console.log('❌ Transaction denied:', e.detail);
+      addLog(`❌ Transaction denied by user<br>Session: ${e.detail.session}`, 'error');
+    });
+
+    // Log when extension is detected
+    window.addEventListener('load', () => {
+      addLog('🚀 Page loaded. Extension should intercept Zcash links.', 'info');
+      
+      // Check if extension injected content script
+      setTimeout(() => {
+        if (document.querySelector('style#zcash-extension-styles')) {
+          addLog('✓ Zcash extension content script detected', 'success');
+        } else {
+          addLog('⚠️ Extension might not be loaded. Check chrome://extensions/', 'error');
+        }
+      }, 1000);
+    });
+
+    // Log clicks for debugging (extension should intercept these)
+    document.addEventListener('click', (e) => {
+      if (e.target.tagName === 'A' && e.target.href.startsWith('zcash:')) {
+        addLog(`🔗 Clicked zcash: link (extension should intercept)`, 'info');
+      } else if (e.target.hasAttribute('data-zcash-action')) {
+        addLog(`🔘 Clicked payment button: ${e.target.textContent}`, 'info');
+      }
+    }, true); // Use capture to log before interception
+  </script>
+</body>
+</html>

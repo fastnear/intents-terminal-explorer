@@ -1,7 +1,29 @@
 {
   "manifest_version": 3,
-  "name": "ratacat copy bridge",
+  "name": "Zcash Native Bridge Extension",
   "version": "0.1.0",
-  "permissions": ["clipboardWrite", "scripting", "activeTab"],
-  "background": { "service_worker": "background.js" }
+  "description": "Privacy-first Zcash transaction signer using native app integration",
+  "permissions": [
+    "nativeMessaging",
+    "webRequest",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://return.zwallet/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["contentScript.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
 }

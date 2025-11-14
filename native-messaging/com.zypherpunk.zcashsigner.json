@@ -1,0 +1,9 @@
+{
+  "name": "com.zypherpunk.zcashsigner",
+  "description": "Zcash Signer Tauri App Host for Privacy-First Transactions",
+  "path": "/Applications/ZcashSigner.app/Contents/MacOS/nearx-tauri",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://EXTENSION_ID_PLACEHOLDER/"
+  ]
+}

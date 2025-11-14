@@ -5,6 +5,12 @@
 
 mod deeplink;
 
+// Zcash privacy-first transaction modules
+mod zcash_auth;
+mod zcash_native_msg;
+mod zcash_signer;
+mod zcash_handler;
+
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
@@ -365,6 +371,11 @@ pub fn run() {
 
             // Spawn native messaging host sidecar if present
             #[cfg(desktop)]
+
+            // Start Zcash native messaging handler for Chrome extension integration
+            log::info!("🚀 Starting Zcash native messaging handler...");
+            zcash_handler::start_zcash_handler(app.handle().clone());
+
             spawn_sidecar_if_present(app.handle());
 
             // Dev convenience (Win/Linux). macOS requires installed app.

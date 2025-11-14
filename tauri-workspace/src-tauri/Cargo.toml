@@ -30,6 +30,7 @@ tauri-plugin-clipboard-manager = "2"
 
 # Utilities
 chrono = "0.4"
+sha2 = "0.10"
 
 # egui + ratatui stack (optional - only for egui-tauri binary)
 egui = { version = "0.32", optional = true }
