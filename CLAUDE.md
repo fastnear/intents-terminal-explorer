@@ -1344,7 +1344,7 @@ tauri-driver
 ```bash
 # Build and run app manually
 cargo tauri build --debug --no-bundle --features e2e
-./tauri-workspace/src-tauri/target/debug/nearx-tauri
+./tauri-workspace/target/debug/nearx-tauri
 
 # Open DevTools (auto-opens in debug builds)
 # Cmd+Option+I or F12
