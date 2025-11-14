@@ -189,7 +189,7 @@ The Tauri app logs to console when built in debug mode. Logs include:
 cargo tauri build --debug --no-bundle --features e2e
 
 # Run app manually (not via tests)
-./tauri-workspace/src-tauri/target/debug/nearx-tauri
+./tauri-workspace/target/debug/nearx-tauri
 
 # Open DevTools (auto-opens in debug builds)
 # Cmd+Option+I (macOS) or F12 (Windows/Linux)
