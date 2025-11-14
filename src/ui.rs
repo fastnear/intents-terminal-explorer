@@ -25,6 +25,13 @@ use crate::types::Mark;
 // ===============================
 
 #[cfg(feature = "native")]
+fn supports_true_color() -> bool {
+    std::env::var("COLORTERM")
+        .map(|v| v == "truecolor" || v == "24bit")
+        .unwrap_or(false)
+}
+
+#[cfg(feature = "native")]
 #[inline]
 fn get_accent() -> ratatui::style::Color {
     c(Theme::default().accent)
@@ -39,7 +46,11 @@ fn get_accent() -> ratatui::style::Color {
 #[cfg(feature = "native")]
 #[inline]
 fn get_accent_strong() -> ratatui::style::Color {
-    c(Theme::default().accent_strong)
+    if supports_true_color() {
+        c(Theme::default().accent_strong)
+    } else {
+        Color::Yellow  // ANSI fallback for terminals without RGB support
+    }
 }
 
 #[cfg(not(feature = "native"))]
@@ -51,7 +62,11 @@ fn get_accent_strong() -> ratatui::style::Color {
 #[cfg(feature = "native")]
 #[inline]
 fn get_border() -> ratatui::style::Color {
-    c(Theme::default().border)
+    if supports_true_color() {
+        c(Theme::default().border)
+    } else {
+        Color::DarkGray  // ANSI fallback for terminals without RGB support
+    }
 }
 
 #[cfg(not(feature = "native"))]
@@ -370,6 +385,12 @@ fn render_blocks_pane(f: &mut Frame, area: Rect, app: &App) {
         " Blocks ".to_string()
     };
 
+    let border_color = if blocks_focused {
+        get_accent_strong()
+    } else {
+        get_border()
+    };
+
     let blocks_widget = List::new(items_blocks)
         .highlight_style(get_sel_style().add_modifier(Modifier::BOLD))
         .highlight_symbol("› ")
@@ -384,11 +405,7 @@ fn render_blocks_pane(f: &mut Frame, area: Rect, app: &App) {
                 })
                 .border_style(
                     Style::default()
-                        .fg(if blocks_focused {
-                            get_accent_strong()
-                        } else {
-                            get_border()
-                        })
+                        .fg(border_color)
                         .add_modifier(if blocks_focused {
                             Modifier::BOLD
                         } else {
