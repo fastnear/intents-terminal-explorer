@@ -89,19 +89,19 @@ jobs:
         run: trunk build --release
 
       - name: Build Tauri app with e2e features
-        working-directory: tauri-workspace
         run: |
+          cd tauri-workspace
           cargo tauri build --debug --no-bundle --features e2e -c src-tauri/tauri.e2e.conf.json
           ls -la src-tauri/target/debug/
 
       - name: Verify binary exists
         run: |
-          if [ -f "tauri-workspace/src-tauri/target/debug/nearx-tauri" ]; then
+          if [ -f "tauri-workspace/target/debug/nearx-tauri" ]; then
             echo "✅ Binary found"
-            file tauri-workspace/src-tauri/target/debug/nearx-tauri
+            file tauri-workspace/target/debug/nearx-tauri
           else
             echo "❌ Binary not found!"
-            ls -la tauri-workspace/src-tauri/target/debug/
+            ls -la tauri-workspace/target/debug/
             exit 1
           fi
 
