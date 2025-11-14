@@ -62,7 +62,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: e2e-tests/package-lock.json
+          cache-dependency-path: '**/package-lock.json'
 
       - name: Install E2E test dependencies
         working-directory: e2e-tests
@@ -76,20 +76,32 @@ jobs:
           which tauri-driver
           tauri-driver --version || echo "tauri-driver installed but version check failed"
 
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version '^2.0.0' --locked
+
+      - name: Install Trunk
+        run: cargo install --locked trunk
+
+      - name: Add WASM target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Build web frontend
+        run: trunk build --release
+
       - name: Build Tauri app with e2e features
         working-directory: tauri-workspace
         run: |
-          cargo tauri build --debug --no-bundle --features e2e
-          ls -la src-tauri/target/debug/
+          cargo tauri build --debug --no-bundle --features e2e -c src-tauri/tauri.e2e.conf.json
+          ls -la target/debug/
 
       - name: Verify binary exists
         run: |
-          if [ -f "tauri-workspace/src-tauri/target/debug/nearx-tauri" ]; then
+          if [ -f "tauri-workspace/target/debug/nearx-tauri" ]; then
             echo "✅ Binary found"
-            file tauri-workspace/src-tauri/target/debug/nearx-tauri
+            file tauri-workspace/target/debug/nearx-tauri
           else
             echo "❌ Binary not found!"
-            ls -la tauri-workspace/src-tauri/target/debug/
+            ls -la tauri-workspace/target/debug/
             exit 1
           fi
 
@@ -113,7 +125,7 @@ jobs:
           name: e2e-test-artifacts
           path: |
             e2e-tests/*.log
-            tauri-workspace/src-tauri/target/debug/*.log
+            tauri-workspace/target/debug/*.log
           retention-days: 7
 
   # Optional: Run web build tests on macOS (since Tauri WebDriver isn't supported)

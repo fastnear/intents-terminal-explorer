@@ -25,6 +25,13 @@ use crate::types::Mark;
 // ===============================
 
 #[cfg(feature = "native")]
+fn supports_true_color() -> bool {
+    std::env::var("COLORTERM")
+        .map(|v| v == "truecolor" || v == "24bit")
+        .unwrap_or(false)
+}
+
+#[cfg(feature = "native")]
 #[inline]
 fn get_accent() -> ratatui::style::Color {
     c(Theme::default().accent)
@@ -39,7 +46,11 @@ fn get_accent() -> ratatui::style::Color {
 #[cfg(feature = "native")]
 #[inline]
 fn get_accent_strong() -> ratatui::style::Color {
-    c(Theme::default().accent_strong)
+    if supports_true_color() {
+        c(Theme::default().accent_strong)
+    } else {
+        Color::Yellow  // ANSI fallback for terminals without RGB support
+    }
 }
 
 #[cfg(not(feature = "native"))]
@@ -51,7 +62,11 @@ fn get_accent_strong() -> ratatui::style::Color {
 #[cfg(feature = "native")]
 #[inline]
 fn get_border() -> ratatui::style::Color {
-    c(Theme::default().border)
+    if supports_true_color() {
+        c(Theme::default().border)
+    } else {
+        Color::DarkGray  // ANSI fallback for terminals without RGB support
+    }
 }
 
 #[cfg(not(feature = "native"))]
@@ -370,40 +385,39 @@ fn render_blocks_pane(f: &mut Frame, area: Rect, app: &App) {
         " Blocks ".to_string()
     };
 
+    let border_color = if blocks_focused {
+        get_accent_strong()
+    } else {
+        get_border()
+    };
+
     let blocks_widget = List::new(items_blocks)
         .highlight_style(get_sel_style().add_modifier(Modifier::BOLD))
         .highlight_symbol("› ")
         .block({
-            let mut b = Block::default()
+            Block::default()
                 .title(blocks_title)
-                .borders(Borders::TOP | Borders::RIGHT);
-
-            // Use tokens to determine border thickness
-            if blocks_focused && tokens::tokens().rat.focused_thick_border {
-                b = b.border_type(BorderType::Thick);
-            } else {
-                b = b.border_type(BorderType::Rounded);
-            }
-
-            b.border_style(
-                Style::default()
-                    .fg(if blocks_focused {
-                        get_accent_strong()
-                    } else {
-                        get_border()
-                    })
-                    .add_modifier(if blocks_focused {
-                        Modifier::BOLD
-                    } else {
-                        Modifier::empty()
-                    }),
-            )
-            .padding(Padding {
-                left: 1,
-                right: 1,
-                top: 0,
-                bottom: 0,
-            })
+                .borders(Borders::TOP | Borders::RIGHT)
+                .border_type(if blocks_focused && tokens::tokens().rat.focused_thick_border {
+                    BorderType::Thick
+                } else {
+                    BorderType::Rounded
+                })
+                .border_style(
+                    Style::default()
+                        .fg(border_color)
+                        .add_modifier(if blocks_focused {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
+                )
+                .padding(Padding {
+                    left: 1,
+                    right: 1,
+                    top: 0,
+                    bottom: 0,
+                })
         });
 
     f.render_stateful_widget(blocks_widget, area, &mut st_blocks);
@@ -460,36 +474,33 @@ fn render_txs_pane(f: &mut Frame, area: Rect, app: &App) {
         .highlight_style(get_sel_style().add_modifier(Modifier::BOLD))
         .highlight_symbol("› ")
         .block({
-            let mut b = Block::default()
+            Block::default()
                 .title(title)
-                .borders(Borders::LEFT | Borders::TOP | Borders::RIGHT);
-
-            // Use tokens to determine border thickness
-            if txs_focused && tokens::tokens().rat.focused_thick_border {
-                b = b.border_type(BorderType::Thick);
-            } else {
-                b = b.border_type(BorderType::Rounded);
-            }
-
-            b.border_style(
-                Style::default()
-                    .fg(if txs_focused {
-                        get_accent_strong()
-                    } else {
-                        get_border()
-                    })
-                    .add_modifier(if txs_focused {
-                        Modifier::BOLD
-                    } else {
-                        Modifier::empty()
-                    }),
-            )
-            .padding(Padding {
-                left: 1,
-                right: 1,
-                top: 0,
-                bottom: 0,
-            })
+                .borders(Borders::LEFT | Borders::TOP | Borders::RIGHT)
+                .border_type(if txs_focused && tokens::tokens().rat.focused_thick_border {
+                    BorderType::Thick
+                } else {
+                    BorderType::Rounded
+                })
+                .border_style(
+                    Style::default()
+                        .fg(if txs_focused {
+                            get_accent_strong()
+                        } else {
+                            get_border()
+                        })
+                        .add_modifier(if txs_focused {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
+                )
+                .padding(Padding {
+                    left: 1,
+                    right: 1,
+                    top: 0,
+                    bottom: 0,
+                })
         });
 
     f.render_stateful_widget(tx_widget, area, &mut st_txs);
@@ -540,39 +551,36 @@ fn render_details_pane(f: &mut Frame, area: Rect, app: &mut App) {
             .scroll((app.details_scroll(), 0))
             .style(Style::default().bg(bg_color))
             .block({
-                let mut b = Block::default()
+                Block::default()
                     .title(title)
-                    .borders(Borders::TOP | Borders::RIGHT);
-
-                // Use tokens to determine border thickness
-                if details_focused && tokens::tokens().rat.focused_thick_border {
-                    b = b.border_type(BorderType::Thick);
-                } else {
-                    b = b.border_type(BorderType::Rounded);
-                }
-
-                b.border_style(
-                    Style::default()
-                        .fg(if details_focused {
-                            get_accent_strong()
-                        } else {
-                            get_border()
-                        })
-                        .add_modifier(if details_focused {
-                            Modifier::BOLD
-                        } else {
-                            Modifier::empty()
-                        }),
-                )
-                .padding(Padding {
-                    left: 1,
-                    right: 1,
-                    top: 0,
-                    bottom: 0,
-                })
+                    .borders(Borders::TOP | Borders::RIGHT)
+                    .border_type(if details_focused && tokens::tokens().rat.focused_thick_border {
+                        BorderType::Thick
+                    } else {
+                        BorderType::Rounded
+                    })
+                    .border_style(
+                        Style::default()
+                            .fg(if details_focused {
+                                get_accent_strong()
+                            } else {
+                                get_border()
+                            })
+                            .add_modifier(if details_focused {
+                                Modifier::BOLD
+                            } else {
+                                Modifier::empty()
+                            }),
+                    )
+                    .padding(Padding {
+                        left: 1,
+                        right: 1,
+                        top: 0,
+                        bottom: 0,
+                    })
             })
     } else {
-        // Plain text when unfocused or loading
+        // Plain text when loading
         Paragraph::new(details_text)
             .wrap(Wrap { trim: false })
             .scroll((app.details_scroll(), 0))
@@ -581,7 +589,11 @@ fn render_details_pane(f: &mut Frame, area: Rect, app: &mut App) {
                 Block::default()
                     .title(title)
                     .borders(Borders::TOP | Borders::RIGHT)
-                    .border_type(BorderType::Rounded)
+                    .border_type(if details_focused && tokens::tokens().rat.focused_thick_border {
+                        BorderType::Thick
+                    } else {
+                        BorderType::Rounded
+                    })
                     .border_style(
                         Style::default()
                             .fg(if details_focused {

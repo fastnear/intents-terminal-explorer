@@ -44,7 +44,7 @@ impl Default for Theme {
             panel_alt: Rgb(0x12, 0x17, 0x22),     // #121722 - focused pane bg
             text: Rgb(0xe6, 0xed, 0xf3),          // #e6edf3 - primary text
             text_dim: Rgb(0xa2, 0xad, 0xbd),      // #a2adbd - secondary text
-            border: Rgb(0x1e, 0x24, 0x30),        // #1e2430 - unfocused borders
+            border: Rgb(0x5d, 0x63, 0x6d),        // #5d636d - unfocused borders (3.08:1 contrast)
             accent: Rgb(0x66, 0xb3, 0xff),        // #66b3ff - links/highlights
             accent_strong: Rgb(0xff, 0xcc, 0x00), // #ffcc00 - focused borders (yellow)
             sel_bg: Rgb(0x1e, 0x2a, 0x3a),        // #1e2a3a - selection background
