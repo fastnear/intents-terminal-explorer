@@ -91,7 +91,7 @@ jobs:
       - name: Build Tauri app with e2e features
         working-directory: tauri-workspace
         run: |
-          cargo tauri build --debug --no-bundle --features e2e
+          cargo tauri build --debug --no-bundle --features e2e -c src-tauri/tauri.e2e.conf.json
           ls -la src-tauri/target/debug/
 
       - name: Verify binary exists
