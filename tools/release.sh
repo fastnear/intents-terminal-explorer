@@ -64,7 +64,7 @@ git push origin HEAD --tags
 
 echo "==> Done"
 echo "Artifacts:"
-echo "  - Tauri bundles under: tauri-workspace/src-tauri/target/release/bundle/"
+echo "  - Tauri bundles under: tauri-workspace/target/release/bundle/"
 echo "  - Webview WASM bundle for Tauri: dist-egui/"
 echo
 echo "Release notes template:"
