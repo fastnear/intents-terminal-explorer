@@ -56,6 +56,9 @@ pub mod flags;
 // Debug logging system (available on all platforms)
 pub mod debug;
 
+// UI snapshot types for DOM-based rendering (all platforms)
+pub mod ui_snapshot;
+
 // History module (has native-only implementation internally)
 pub mod history;
 

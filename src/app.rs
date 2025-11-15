@@ -1609,3 +1609,273 @@ fn format_timestamp_utc(timestamp: u64) -> String {
         format!("{}s", secs)
     }
 }
+
+impl App {
+    // ----- UI Snapshot Generation (for DOM rendering) -----
+
+    /// Generate a snapshot of current UI state for DOM rendering
+    pub fn ui_snapshot(&self) -> crate::ui_snapshot::UiSnapshot {
+        use crate::ui_snapshot::*;
+
+        // Filter state
+        let filter = FilterState {
+            text: self.filter_query.clone(),
+            focused: false, // Managed by DOM
+        };
+
+        // Blocks pane
+        let (filtered_blocks, sel_idx, total) = self.filtered_blocks();
+        let blocks = BlocksPane {
+            rows: filtered_blocks
+                .iter()
+                .map(|b| BlockRow {
+                    height: b.height,
+                    tx_count: b.tx_count,
+                    time_utc: b.when.clone(),
+                    available: true, // All blocks in filtered list are available
+                })
+                .collect(),
+            selected_index: sel_idx,
+            total_count: total,
+            viewing_cached: self.is_viewing_cached_block(),
+        };
+
+        // Transactions pane
+        let (txs_list, sel_tx, total_txs) = self.txs();
+        let txs = TxsPane {
+            rows: txs_list
+                .iter()
+                .map(|tx| {
+                    let action = if let Some(acts) = &tx.actions {
+                        if acts.is_empty() {
+                            "No actions".to_string()
+                        } else {
+                            format!("{:?}", acts[0])
+                        }
+                    } else {
+                        "?".to_string()
+                    };
+                    TxRow {
+                        hash: tx.hash.clone(),
+                        signer_id: tx.signer_id.clone().unwrap_or_else(|| "?".to_string()),
+                        action_summary: action,
+                    }
+                })
+                .collect(),
+            selected_index: sel_tx,
+            total_count: total_txs,
+        };
+
+        // Details pane
+        let details = DetailsPane {
+            json: self.details_pretty_string(),
+            fullscreen: self.details_fullscreen,
+        };
+
+        // Toast message (with 2-second lifetime)
+        #[cfg(not(target_arch = "wasm32"))]
+        let toast = if let Some((ref msg, timestamp)) = self.toast_message {
+            if timestamp.elapsed() < std::time::Duration::from_secs(2) {
+                Some(msg.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        let toast = if let Some((ref msg, timestamp)) = self.toast_message {
+            if timestamp.elapsed() < web_time::Duration::from_secs(2) {
+                Some(msg.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Auth state
+        let auth = AuthState {
+            signed_in: crate::auth::has_token(),
+            email: None, // Can be populated from token claims if needed
+        };
+
+        UiSnapshot {
+            focused_pane: self.pane,
+            filter,
+            blocks,
+            txs,
+            details,
+            toast,
+            loading_block: self.loading_block,
+            auth,
+        }
+    }
+
+    /// Handle a UI action from the DOM
+    pub fn handle_ui_action(&mut self, action: crate::ui_snapshot::UiAction) {
+        use crate::ui_snapshot::UiAction;
+
+        match action {
+            // ----- Focus & Navigation -----
+            UiAction::FocusPane { pane } => {
+                if pane < 3 {
+                    self.set_pane_direct(pane);
+                }
+            }
+            UiAction::NextPane => self.next_pane(),
+            UiAction::PrevPane => self.prev_pane(),
+
+            // ----- Block selection -----
+            UiAction::SelectBlock { index } => self.select_block_row(index),
+            UiAction::BlockUp => {
+                if self.pane == 0 {
+                    let nav_list = self.get_navigation_list();
+                    if !nav_list.is_empty() {
+                        let current_idx = if let Some(height) = self.sel_block_height {
+                            nav_list.iter().position(|&h| h == height).unwrap_or(0)
+                        } else {
+                            0
+                        };
+                        if current_idx > 0 {
+                            self.select_block_row(current_idx - 1);
+                        }
+                    }
+                }
+            }
+            UiAction::BlockDown => {
+                if self.pane == 0 {
+                    let nav_list = self.get_navigation_list();
+                    if !nav_list.is_empty() {
+                        let current_idx = if let Some(height) = self.sel_block_height {
+                            nav_list.iter().position(|&h| h == height).unwrap_or(0)
+                        } else {
+                            0
+                        };
+                        if current_idx + 1 < nav_list.len() {
+                            self.select_block_row(current_idx + 1);
+                        }
+                    }
+                }
+            }
+            UiAction::BlockPageUp => {
+                if self.pane == 0 {
+                    let nav_list = self.get_navigation_list();
+                    if !nav_list.is_empty() {
+                        let current_idx = if let Some(height) = self.sel_block_height {
+                            nav_list.iter().position(|&h| h == height).unwrap_or(0)
+                        } else {
+                            0
+                        };
+                        let new_idx = current_idx.saturating_sub(20);
+                        self.select_block_row(new_idx);
+                    }
+                }
+            }
+            UiAction::BlockPageDown => {
+                if self.pane == 0 {
+                    let nav_list = self.get_navigation_list();
+                    if !nav_list.is_empty() {
+                        let current_idx = if let Some(height) = self.sel_block_height {
+                            nav_list.iter().position(|&h| h == height).unwrap_or(0)
+                        } else {
+                            0
+                        };
+                        let new_idx = (current_idx + 20).min(nav_list.len().saturating_sub(1));
+                        self.select_block_row(new_idx);
+                    }
+                }
+            }
+            UiAction::BlockHome => {
+                if self.pane == 0 && !self.blocks.is_empty() {
+                    self.select_block_row(0);
+                }
+            }
+            UiAction::BlockEnd => {
+                if self.pane == 0 {
+                    let nav_list = self.get_navigation_list();
+                    if !nav_list.is_empty() {
+                        self.select_block_row(nav_list.len() - 1);
+                    }
+                }
+            }
+
+            // ----- Transaction selection -----
+            UiAction::SelectTx { index } => self.select_tx_row(index),
+            UiAction::TxUp => {
+                if self.pane == 1 && self.sel_tx > 0 {
+                    self.select_tx_row(self.sel_tx - 1);
+                }
+            }
+            UiAction::TxDown => {
+                if self.pane == 1 {
+                    let (txs, _, _) = self.txs();
+                    if self.sel_tx + 1 < txs.len() {
+                        self.select_tx_row(self.sel_tx + 1);
+                    }
+                }
+            }
+            UiAction::TxPageUp => {
+                if self.pane == 1 {
+                    let new_idx = self.sel_tx.saturating_sub(20);
+                    self.select_tx_row(new_idx);
+                }
+            }
+            UiAction::TxPageDown => {
+                if self.pane == 1 {
+                    let (txs, _, _) = self.txs();
+                    let new_idx = (self.sel_tx + 20).min(txs.len().saturating_sub(1));
+                    self.select_tx_row(new_idx);
+                }
+            }
+            UiAction::TxHome => {
+                if self.pane == 1 {
+                    self.select_tx_row(0);
+                }
+            }
+            UiAction::TxEnd => {
+                if self.pane == 1 {
+                    let (txs, _, _) = self.txs();
+                    if !txs.is_empty() {
+                        self.select_tx_row(txs.len() - 1);
+                    }
+                }
+            }
+
+            // ----- Filter -----
+            UiAction::UpdateFilterText { text } => {
+                self.filter_query = text;
+                // Note: Don't apply immediately - DOM handles debouncing
+            }
+            UiAction::ApplyFilter { text } => {
+                self.set_filter_query(text);
+            }
+            UiAction::FocusFilter => {
+                // DOM handles focus, no-op here
+            }
+
+            // ----- Details -----
+            UiAction::ToggleDetailsFullscreen => {
+                self.toggle_details_fullscreen();
+            }
+
+            // ----- Copy -----
+            UiAction::CopyFocusedJson => {
+                if let Some(json) = self.focused_json_string() {
+                    let _ = crate::platform::copy_to_clipboard(&json);
+                    self.show_toast("Copied to clipboard".to_string());
+                }
+            }
+
+            // ----- Auth -----
+            UiAction::SignInGoogle => {
+                #[cfg(target_arch = "wasm32")]
+                crate::webshim::auth_login_google();
+            }
+            UiAction::SignOut => {
+                crate::auth::clear();
+            }
+        }
+    }
+}

@@ -23,6 +23,11 @@ name = "nearx-web"
 path = "src/bin/nearx-web.rs"
 required-features = ["egui-web"]
 
+[[bin]]
+name = "nearx-web-dom"
+path = "src/bin/nearx-web-dom.rs"
+required-features = ["egui-web"]
+
 [workspace]
 resolver = "2"
 members = [

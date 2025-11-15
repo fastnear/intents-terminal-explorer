@@ -1,0 +1,245 @@
+/**
+ * NEARx DOM UI Styles
+ *
+ * Uses CSS variables from theme.css for consistency with egui version.
+ * Follows csli-dashboard aesthetic: flat panels, strong focus borders.
+ */
+
+/* ----- Layout ----- */
+
+#app-root {
+    position: absolute;
+    top: 30px; /* Below status bar */
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Mono", monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    overflow: hidden;
+}
+
+#top-bar {
+    flex-shrink: 0;
+    padding: 12px 16px;
+    background: var(--panel);
+    border-bottom: var(--stroke) solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+#filter-input {
+    flex: 1;
+    padding: 6px 10px;
+    background: var(--panel-alt);
+    color: var(--text);
+    border: var(--stroke) solid var(--border);
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+}
+
+#filter-input:focus {
+    border-color: var(--accent-strong);
+    box-shadow: 0 0 0 2px var(--accent-strong);
+}
+
+#auth-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.auth-email {
+    color: var(--text-dim);
+    font-size: 12px;
+}
+
+.btn-primary,
+.btn-secondary {
+    padding: 6px 12px;
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+}
+
+.btn-primary:hover {
+    background: var(--accent-strong);
+}
+
+.btn-secondary {
+    background: transparent;
+    color: var(--text-dim);
+    border: var(--stroke) solid var(--border);
+}
+
+.btn-secondary:hover {
+    background: var(--panel-alt);
+    color: var(--text);
+}
+
+/* ----- Main Content ----- */
+
+#main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#row-top {
+    flex: 0 0 52%; /* 52% of main content (top_ratio from layout.rs) */
+    display: flex;
+    gap: 8px;
+    padding: 8px;
+    overflow: hidden;
+}
+
+#row-bottom {
+    flex: 1;
+    padding: 0 8px 8px 8px;
+    overflow: hidden;
+}
+
+/* ----- Panes ----- */
+
+.pane {
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border: var(--stroke) solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.pane--focused {
+    background: var(--panel-alt);
+    border-color: var(--accent-strong);
+}
+
+.pane--fullscreen {
+    position: fixed !important;
+    top: 30px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    border-radius: 0;
+}
+
+.pane-blocks,
+.pane-txs {
+    flex: 1;
+}
+
+.pane-details {
+    flex: 1;
+}
+
+.pane-header {
+    flex-shrink: 0;
+    padding: 8px 12px;
+    font-weight: bold;
+    background: var(--panel);
+    border-bottom: var(--stroke) solid var(--border);
+}
+
+.pane--focused .pane-header {
+    background: var(--panel-alt);
+    color: var(--accent);
+}
+
+.pane-rows {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.details-content {
+    flex: 1;
+    overflow: auto;
+    padding: 12px;
+    margin: 0;
+    font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background: var(--json-bg, var(--panel));
+}
+
+/* ----- Rows ----- */
+
+.row {
+    padding: 6px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-bottom: var(--stroke) solid transparent;
+}
+
+.row:hover {
+    background: var(--panel-alt);
+}
+
+.row--selected {
+    background: var(--sel-bg);
+    font-weight: bold;
+}
+
+/* ----- Toast ----- */
+
+.toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 10px 20px;
+    background: var(--success);
+    color: var(--bg);
+    border-radius: var(--radius);
+    font-weight: bold;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+    z-index: 2000;
+}
+
+.toast--visible {
+    opacity: 1;
+}
+
+/* ----- Scrollbars ----- */
+
+.pane-rows::-webkit-scrollbar,
+.details-content::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.pane-rows::-webkit-scrollbar-thumb,
+.details-content::-webkit-scrollbar-thumb {
+    background: var(--panel-alt);
+    border: 2px solid var(--panel);
+    border-radius: var(--radius);
+}
+
+.pane-rows::-webkit-scrollbar-track,
+.details-content::-webkit-scrollbar-track {
+    background: var(--panel);
+}
