@@ -169,7 +169,8 @@ ls -la /Applications/ZcashSigner.app/Contents/MacOS/nearx-tauri
    - Session IDs correlate requests/responses
 
 2. **Touch ID Implementation**
-   - Uses AppleScript to invoke LocalAuthentication framework
+   - Uses idiomatic localauthentication-rs Rust crate (not AppleScript!)
+   - Native FFI to macOS LocalAuthentication framework
    - Shows transaction details in system prompt
    - Graceful fallback to PIN
 
@@ -191,23 +192,55 @@ ls -la /Applications/ZcashSigner.app/Contents/MacOS/nearx-tauri
 ## 📝 Commit Summary
 
 ```
-Commit: 3a3122c
+Latest Commits:
+- 48282a8: refactor - Use idiomatic localauthentication-rs for Touch ID
+- 96669a6: docs - Add quick setup guide
+- 3a3122c: feat - Privacy-first Zcash transaction system
+
 Branch: zypherpunk
-Files Changed: 15 files, 2026 insertions(+)
+Total Changes: 15 files, 2094+ insertions
 
 New Files:
 - 4 Rust modules (native messaging, auth, signer, handler)
 - 3 extension files (content script, test page, README)
 - 2 native messaging files (manifest, README)
-- 1 comprehensive guide (ZYPHERPUNK_README.md)
+- 2 comprehensive guides (ZYPHERPUNK_README + SETUP_GUIDE)
 
 Modified:
 - extension/manifest.json (added nativeMessaging)
 - extension/background.js (native messaging bridge)
 - tauri.conf.json (zypher-zcash:// scheme)
-- Cargo.toml (sha2 dependency)
+- Cargo.toml (sha2 + localauthentication-rs dependencies)
 - lib.rs (Zcash handler initialization)
+- zcash_auth.rs (refactored to use native Rust crate)
 ```
+
+## 🎨 Latest Improvement: Idiomatic Touch ID
+
+**Commit 48282a8** refactored the Touch ID implementation to use the native Rust
+`localauthentication-rs` crate instead of AppleScript:
+
+**Before** (AppleScript):
+```rust
+let script = r#"use framework "LocalAuthentication"..."#;
+let output = Command::new("osascript").arg("-e").arg(&script).output()?;
+```
+
+**After** (Native Rust):
+```rust
+use localauthentication_rs::{LAPolicy, LocalAuthentication};
+let local_auth = LocalAuthentication::new();
+let authenticated = local_auth.evaluate_policy(
+    LAPolicy::DeviceOwnerAuthenticationWithBiometrics,
+    reason,
+);
+```
+
+**Benefits**:
+- ✅ Type-safe (compiler catches errors)
+- ✅ Faster (native FFI vs shell subprocess)
+- ✅ Cleaner error handling
+- ✅ Idiomatic Rust code
 
 ## 🎉 You're Ready!
 
