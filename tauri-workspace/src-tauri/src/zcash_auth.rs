@@ -1,5 +1,7 @@
 //! Authentication module for Touch ID and PIN fallback
 //! Provides biometric authentication on macOS using LocalAuthentication framework
+//!
+//! Uses the idiomatic localauthentication-rs crate for Touch ID integration
 
 use std::process::Command;
 
@@ -11,64 +13,30 @@ pub struct AuthResult {
 
 /// Attempt Touch ID authentication on macOS
 /// Returns Ok(true) if fingerprint verified, Ok(false) if failed/canceled
+///
+/// Uses the localauthentication-rs crate for idiomatic Rust access to macOS LocalAuthentication
 #[cfg(target_os = "macos")]
 pub fn try_touch_id(reason: &str) -> Result<bool, String> {
     log::info!("🔐 [Auth] Attempting Touch ID authentication...");
     log::info!("🔐 [Auth] Reason: {}", reason);
 
-    // Use AppleScript to trigger Touch ID via LocalAuthentication
-    // This creates a system dialog that prompts for fingerprint
-    let script = format!(
-        r#"
-        use framework "LocalAuthentication"
-        use scripting additions
+    use localauthentication_rs::{LAPolicy, LocalAuthentication};
 
-        set context to current application's LAContext's alloc()'s init()
-        set theError to missing value
-        
-        -- Check if biometric authentication is available
-        set canEvaluate to context's canEvaluatePolicy:1 |error|:(reference)
-        
-        if not canEvaluate then
-            return "unavailable"
-        end if
-        
-        -- Request biometric authentication
-        set theReason to "{}"
-        set success to context's evaluatePolicy:1 localizedReason:theReason reply:(missing value) |error|:(reference)
-        
-        if success as boolean then
-            return "approved"
-        else
-            return "denied"
-        end if
-        "#,
-        reason.replace("\"", "\\\"")
+    let local_auth = LocalAuthentication::new();
+
+    // Use DeviceOwnerAuthenticationWithBiometrics policy
+    // This requires Touch ID/Face ID (no passcode fallback at this level)
+    let authenticated = local_auth.evaluate_policy(
+        LAPolicy::DeviceOwnerAuthenticationWithBiometrics,
+        reason,
     );
 
-    let output = Command::new("osascript")
-        .arg("-l")
-        .arg("JavaScript")
-        .arg("-e")
-        .arg(&script)
-        .output()
-        .map_err(|e| format!("Failed to execute osascript: {}", e))?;
-
-    let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-    log::info!("🔐 [Auth] Touch ID result: {}", result);
-
-    match result.as_str() {
-        "approved" => Ok(true),
-        "denied" => Ok(false),
-        "unavailable" => {
-            log::warn!("🔐 [Auth] Touch ID unavailable on this system");
-            Ok(false)
-        }
-        _ => {
-            log::error!("🔐 [Auth] Unexpected Touch ID result: {}", result);
-            Ok(false)
-        }
+    if authenticated {
+        log::info!("🔐 [Auth] ✅ Touch ID authentication successful");
+        Ok(true)
+    } else {
+        log::info!("🔐 [Auth] ❌ Touch ID authentication failed or canceled");
+        Ok(false)
     }
 }
 
@@ -169,5 +137,15 @@ mod tests {
         };
         assert!(result.approved);
         assert_eq!(result.method, "touchid");
+    }
+
+    #[test]
+    fn test_auth_result_denied() {
+        let result = AuthResult {
+            approved: false,
+            method: "denied".to_string(),
+        };
+        assert!(!result.approved);
+        assert_eq!(result.method, "denied");
     }
 }

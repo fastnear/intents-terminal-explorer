@@ -166,17 +166,34 @@ Messages are prefixed with a 4-byte little-endian length field.
 
 ### 2. Touch ID Implementation
 
-Uses AppleScript to invoke macOS LocalAuthentication:
+Uses the idiomatic **localauthentication-rs** crate for native Rust access to macOS LocalAuthentication framework:
 
 ```rust
-// Simplified example from zcash_auth.rs
-let script = r#"
-use framework "LocalAuthentication"
-set context to current application's LAContext's alloc()'s init()
-set success to context's evaluatePolicy:1 localizedReason:"Approve transaction" reply:(missing value) |error|:(reference)
-return success
-"#;
+// From zcash_auth.rs
+use localauthentication_rs::{LAPolicy, LocalAuthentication};
+
+let local_auth = LocalAuthentication::new();
+
+// DeviceOwnerAuthenticationWithBiometrics requires Touch ID/Face ID
+let authenticated = local_auth.evaluate_policy(
+    LAPolicy::DeviceOwnerAuthenticationWithBiometrics,
+    "Approve Zcash transaction: Send 1.5 ZEC to zs1qq402u...",
+);
+
+if authenticated {
+    // User approved with biometrics
+    Ok(true)
+} else {
+    // Failed or canceled → fall back to PIN
+    Ok(false)
+}
 ```
+
+**Why localauthentication-rs instead of AppleScript?**
+- ✅ Idiomatic Rust code (type-safe, compile-time checks)
+- ✅ Better error handling (no shell subprocess parsing)
+- ✅ Faster execution (native FFI vs shell invocation)
+- ✅ Easier to maintain and test
 
 ### 3. Deep Link Callback
 

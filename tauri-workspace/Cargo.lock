@@ -3228,6 +3228,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 
 [[package]]
+name = "localauthentication-rs"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b8efa96bad8c96e1e41778854c6ca043733dd93c8cf2f291c2d66ec34fafc26"
+dependencies = [
+ "swift-rs",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3991,12 +4000,14 @@ dependencies = [
  "egui_ratatui 2.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "embedded-graphics-unicodefonts",
  "env_logger",
+ "localauthentication-rs",
  "log",
  "nearx",
  "rand 0.8.5",
  "ratatui",
  "serde",
  "serde_json",
+ "sha2",
  "soft_ratatui 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "tauri",
  "tauri-build",
