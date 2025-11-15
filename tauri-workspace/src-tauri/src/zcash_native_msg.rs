@@ -110,7 +110,10 @@ impl NativeMessagingHandler {
     }
 
     /// Parse transaction details from request params
-    pub fn parse_transaction(params: &serde_json::Value, session: String) -> Result<TransactionRequest, String> {
+    pub fn parse_transaction(
+        params: &serde_json::Value,
+        session: String,
+    ) -> Result<TransactionRequest, String> {
         let to = params
             .get("to")
             .and_then(|v| v.as_str())

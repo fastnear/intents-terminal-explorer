@@ -53,7 +53,10 @@ pub fn start_zcash_handler<R: Runtime>(app: AppHandle<R>) {
                                 session: request.session,
                             };
                             if let Err(e) = NativeMessagingHandler::send_response(&response) {
-                                log::error!("🔴 [Zcash Handler] Failed to send error response: {}", e);
+                                log::error!(
+                                    "🔴 [Zcash Handler] Failed to send error response: {}",
+                                    e
+                                );
                             }
                         }
                     }

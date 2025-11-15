@@ -26,10 +26,8 @@ pub fn try_touch_id(reason: &str) -> Result<bool, String> {
 
     // Use DeviceOwnerAuthenticationWithBiometrics policy
     // This requires Touch ID/Face ID (no passcode fallback at this level)
-    let authenticated = local_auth.evaluate_policy(
-        LAPolicy::DeviceOwnerAuthenticationWithBiometrics,
-        reason,
-    );
+    let authenticated =
+        local_auth.evaluate_policy(LAPolicy::DeviceOwnerAuthenticationWithBiometrics, reason);
 
     if authenticated {
         log::info!("🔐 [Auth] ✅ Touch ID authentication successful");

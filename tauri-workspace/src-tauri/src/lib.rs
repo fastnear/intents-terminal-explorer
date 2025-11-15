@@ -7,9 +7,9 @@ mod deeplink;
 
 // Zcash privacy-first transaction modules
 mod zcash_auth;
+mod zcash_handler;
 mod zcash_native_msg;
 mod zcash_signer;
-mod zcash_handler;
 
 use serde::Serialize;
 use std::collections::BTreeMap;
