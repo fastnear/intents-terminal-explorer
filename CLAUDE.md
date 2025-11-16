@@ -929,9 +929,21 @@ cargo tauri build  # Will use existing binary
 
 #### Development Mode
 
+**Prerequisites**: Build the frontend first
+
 ```bash
+# Step 1: Build the DOM frontend (from project root)
+trunk build --config Trunk-dom.toml
+# Output: dist-dom/
+
+# Step 2: Run Tauri dev mode
 cd tauri-workspace
 cargo tauri dev
+```
+
+**Alternative**: Use the dev-deep-links.sh script which auto-builds the frontend:
+```bash
+./tauri-workspace/dev-deep-links.sh
 ```
 
 **DevTools Access** (4 methods):
