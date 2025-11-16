@@ -1,24 +1,19 @@
 /*
  * Ratacat Unified Theme - CSS Variables
  * csli-style consistency across all targets
+ *
+ * Color variables are injected at runtime from src/theme.rs via wasm_start()
+ * This ensures TUI and web/Tauri use the same color palette.
  */
 
 :root {
-  /* Unified palette (matches src/theme.rs) */
-  --bg: #0b0e14;                    /* backdrop */
-  --panel: #0f131a;                 /* unfocused pane bg */
-  --panel-alt: #121722;             /* focused pane bg */
-  --text: #e6edf3;                  /* primary text */
-  --text-dim: #a2adbd;              /* secondary text */
-  --border: #1e2430;                /* unfocused borders */
-  --accent: #66b3ff;                /* links/highlights */
-  --accent-strong: #3399ff;         /* focused borders */
-  --sel-bg: #1e2a3a;                /* selection background */
-  --success: #6bdc96;               /* success */
-  --warn: #ffcc66;                  /* warnings */
-  --error: #ff6b6b;                 /* errors */
+  /* Color variables (injected by theme.rs)
+   * --bg, --panel, --panel-alt, --fg, --fg-dim, --border,
+   * --accent, --accent-strong, --sel-bg, --success, --warn, --error,
+   * --json-bg, --json-key, --json-string, --json-number, --json-bool, --json-struct
+   */
 
-  /* Styling metrics (match egui theme) */
+  /* Non-color styling metrics */
   --radius: 4px;                    /* border radius */
   --stroke: 1px;                    /* border width */
   --spacing: 8px;                   /* item spacing */
@@ -28,7 +23,7 @@
 html,
 body {
   background-color: var(--bg);
-  color: var(--text);
+  color: var(--fg);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Mono", "Liberation Mono", Consolas, monospace;
   -webkit-font-smoothing: antialiased;
   -webkit-text-size-adjust: 100%;
@@ -67,7 +62,7 @@ video {
 @media (prefers-contrast: high) {
   :root {
     --bg: #000000;
-    --text: #ffffff;
+    --fg: #ffffff;
     --border: #ffffff;
   }
 }
@@ -91,7 +86,7 @@ video {
 /* Panel styling for DOM elements (toasts, overlays) */
 .nx-panel {
   background: var(--panel);
-  color: var(--text);
+  color: var(--fg);
   border: var(--stroke) solid var(--border);
   border-radius: var(--radius);
   padding: var(--spacing);

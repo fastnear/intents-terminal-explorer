@@ -9,7 +9,9 @@
 //   const snap2 = JSON.parse(app.handle_action_json(JSON.stringify({ type: "SetFilter", text: "foo" })));
 
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
+use web_sys::window;
 
 use serde::{Deserialize, Serialize};
 
@@ -228,6 +230,32 @@ pub enum UiAction {
     },
 }
 
+/// Initialize theme CSS variables on page load.
+///
+/// This runs once when WASM loads, injecting theme.rs colors into document root.
+#[wasm_bindgen(start)]
+pub fn wasm_start() {
+    console_error_panic_hook::set_once();
+    wasm_logger::init(wasm_logger::Config::default());
+
+    // Inject theme CSS vars from Rust theme
+    if let Some(win) = window() {
+        if let Some(doc) = win.document() {
+            if let Some(root) = doc.document_element() {
+                if let Some(html_root) = root.dyn_ref::<web_sys::HtmlElement>() {
+                    let theme = nearx::theme::Theme::default();
+                    for (name, value) in theme.to_css_vars() {
+                        if let Err(e) = html_root.style().set_property(name, &value) {
+                            log::warn!("[theme] Failed to set CSS var {}: {:?}", name, e);
+                        }
+                    }
+                    log::info!("[theme] CSS variables injected from theme.rs");
+                }
+            }
+        }
+    }
+}
+
 /// Wasm-exposed app wrapper.
 ///
 /// Holds the core App and an event receiver for RPC events.
@@ -243,9 +271,6 @@ impl WasmApp {
     #[wasm_bindgen(constructor)]
     #[allow(clippy::new_without_default)]
     pub fn new() -> WasmApp {
-        console_error_panic_hook::set_once();
-        wasm_logger::init(wasm_logger::Config::default());
-
         // Channel for RPC -> App events.
         let (event_tx, event_rx) = unbounded_channel::<AppEvent>();
 

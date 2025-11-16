@@ -63,6 +63,43 @@ impl Default for Theme {
     }
 }
 
+impl Rgb {
+    /// Convert RGB to CSS hex color string
+    pub fn to_css_hex(&self) -> String {
+        format!("#{:02x}{:02x}{:02x}", self.0, self.1, self.2)
+    }
+}
+
+impl Theme {
+    /// Export theme as CSS custom properties for web/Tauri
+    ///
+    /// Returns (var_name, hex_value) pairs that should be set on document.documentElement.style
+    pub fn to_css_vars(&self) -> Vec<(&'static str, String)> {
+        vec![
+            // Core colors
+            ("--bg", self.bg.to_css_hex()),
+            ("--panel", self.panel.to_css_hex()),
+            ("--panel-alt", self.panel_alt.to_css_hex()),
+            ("--fg", self.text.to_css_hex()),
+            ("--fg-dim", self.text_dim.to_css_hex()),
+            ("--border", self.border.to_css_hex()),
+            ("--accent", self.accent.to_css_hex()),
+            ("--accent-strong", self.accent_strong.to_css_hex()),
+            ("--sel-bg", self.sel_bg.to_css_hex()),
+            ("--success", self.success.to_css_hex()),
+            ("--warn", self.warn.to_css_hex()),
+            ("--error", self.error.to_css_hex()),
+            // JSON syntax highlighting
+            ("--json-bg", self.json_bg.to_css_hex()),
+            ("--json-key", self.json_key.to_css_hex()),
+            ("--json-string", self.json_string.to_css_hex()),
+            ("--json-number", self.json_number.to_css_hex()),
+            ("--json-bool", self.json_bool.to_css_hex()),
+            ("--json-struct", self.json_struct.to_css_hex()),
+        ]
+    }
+}
+
 // ---------- Ratatui helpers (native TUI) ----------
 
 #[cfg(feature = "native")]
