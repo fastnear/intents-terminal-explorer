@@ -5,12 +5,8 @@
 # Environment
 .env
 
-# Wasm/Web
-/dist
-/dist-egui
-/dist-dom
+# Wasm/Web (wasm-bindgen output)
 web/pkg/
-*.wasm
 
 # IDE / OS
 .idea/
@@ -28,12 +24,6 @@ ratacat_history.db-wal
 # Logs / runtime
 *.log
 ratacat_debug.log
-
-# Web build artifacts (Trunk)
-/dist/
-/dist-egui/
-/dist-dom/
-**/dist/
 
 # Playwright E2E artifacts
 node_modules/

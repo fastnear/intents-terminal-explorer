@@ -18,12 +18,6 @@ name = "ratacat-proxy"
 path = "src/bin/ratacat-proxy.rs"
 required-features = ["proxy"]
 
-# Legacy egui-web binary (deprecated - use nearx-web-dom instead)
-# [[bin]]
-# name = "nearx-web"
-# path = "src/bin/nearx-web.rs"
-# required-features = ["egui-web"]
-
 [[bin]]
 name = "nearx-web-dom"
 path = "src/bin/nearx-web-dom.rs"
@@ -87,24 +81,6 @@ proxy = [
     "tokio/rt-multi-thread",
 ]
 
-# Legacy egui-web feature (deprecated - use dom-web instead)
-# egui-web = [
-#     "dep:egui",
-#     "dep:eframe",
-#     "dep:egui_extras",
-#     "dep:egui_ratatui",
-#     "dep:soft_ratatui",
-#     "dep:wasm-bindgen",
-#     "dep:wasm-bindgen-futures",
-#     "dep:js-sys",
-#     "dep:web-sys",
-#     "dep:getrandom",
-#     "dep:console_error_panic_hook",
-#     "dep:wasm-logger",
-#     "dep:web-time",
-#     "dep:gloo-timers",
-# ]
-
 dom-web = [
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
@@ -167,12 +143,6 @@ rand = { version = "0.8", optional = true }
 dotenvy = { version = "0.15", optional = true }
 
 # Web-only dependencies (DOM frontend with wasm-bindgen)
-# Legacy egui dependencies (deprecated - use dom-web feature instead):
-# egui = { version = "0.32", optional = true }
-# eframe = { version = "0.32", optional = true, default-features = false, features = ["glow", "default_fonts"] }
-# egui_extras = { version = "0.32", optional = true }
-# egui_ratatui = { path = "vendor/egui_ratatui", optional = true }
-# soft_ratatui = { path = "vendor/soft_ratatui", optional = true, features = ["embedded-graphics", "unicodefonts"] }
 wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 js-sys = { version = "0.3", optional = true }

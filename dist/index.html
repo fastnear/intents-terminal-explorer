@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>NEARx (DOM) - NEAR Blockchain Viewer</title>
+
+    <!-- Theme CSS variables (unified with Rust theme) -->
+    
+    <link rel="stylesheet" href="theme.css" />
+
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--bg, #05060a);
+        color: var(--fg, #e6edf3);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+          sans-serif;
+      }
+
+      #nearx-root {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      /* Header: Tab-style pane selector (1 line, matches TUI) */
+      .nx-header {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        border-bottom: 1px solid var(--border, #2b2f36);
+        background: var(--panel, #0d1117);
+      }
+
+      .nx-tab {
+        background: none;
+        border: none;
+        color: var(--fg, #e6edf3);
+        padding: 2px 8px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+
+      .nx-tab:hover {
+        color: var(--accent, #f2cc60);
+      }
+
+      .nx-tab.nx-tab--active {
+        color: var(--accent, #f2cc60);
+        font-weight: bold;
+      }
+
+      .nx-tab-sep {
+        color: var(--border, #2b2f36);
+      }
+
+      /* Filter Bar */
+      #row-filter {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 8px;
+      }
+
+      #nearx-filter {
+        flex: 1;
+        padding: 4px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--border, #2b2f36);
+        background: var(--panel, #0d1117);
+        color: inherit;
+      }
+
+      #nearx-owned-toggle {
+        padding: 4px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--border, #2b2f36);
+        background: var(--panel, #0d1117);
+        color: inherit;
+        cursor: pointer;
+      }
+
+      #nearx-owned-toggle.nx-owned--active {
+        border-color: var(--accent-strong, #f2cc60);
+        background: var(--panel-alt, #161b22);
+      }
+
+      /* Body: 30/70 vertical split (matches TUI Ratio(3,10) and Ratio(7,10)) */
+      .nx-body {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        gap: 4px;
+        padding: 0 8px;
+      }
+
+      #row-main {
+        /* Top 30% */
+        flex: 0 0 30%;
+        display: grid;
+        grid-template-columns: 2fr 3fr; /* Blocks 40%, Txs 60% */
+        gap: 4px;
+        min-height: 0;
+      }
+
+      #row-details {
+        /* Bottom 70% */
+        flex: 0 0 70%;
+        min-height: 0;
+      }
+
+      .nx-pane {
+        display: flex;
+        flex-direction: column;
+        border-radius: 4px;
+        background: var(--panel, #0d1117);
+        border: 1px solid var(--border, #2b2f36);
+        overflow: hidden;
+      }
+
+      .nx-pane-title {
+        padding: 2px 8px;
+        font-size: 12px;
+        font-weight: bold;
+        color: var(--fg, #e6edf3);
+        border-bottom: 1px solid var(--border, #2b2f36);
+        background: var(--panel, #0d1117);
+      }
+
+      .nx-pane-content {
+        flex: 1;
+        overflow: auto;
+        padding: 2px 0;
+      }
+
+      .nx-pane--focused {
+        border-color: var(--accent-strong, #f2cc60);
+        box-shadow: 0 0 0 1px rgba(242, 204, 96, 0.4);
+      }
+
+      .nx-row {
+        padding: 2px 8px;
+        cursor: default;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        overflow: hidden;
+        font-size: 13px;
+      }
+
+      .nx-row:hover {
+        background: var(--hover-bg, #151b23);
+      }
+
+      .nx-row--selected {
+        background: var(--sel-bg, #1f2933);
+      }
+
+      .nx-row--owned {
+        font-weight: 500;
+        color: var(--accent-soft, #f2cc60);
+      }
+
+      .nx-details {
+        flex: 1;
+        box-sizing: border-box;
+        padding: 8px;
+        margin: 0;
+        background: var(--json-bg, #05060a);
+        overflow: auto;
+        font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
+          Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .nx-details--fullscreen {
+        position: fixed;
+        inset: 8px;
+        z-index: 20;
+        background: var(--panel, #0d1117);
+        border-radius: 12px;
+        border: 1px solid var(--accent-strong, #f2cc60);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+      }
+
+      .nx-toast {
+        position: fixed;
+        bottom: 12px;
+        right: 12px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: var(--toast-bg, #111827);
+        border: 1px solid var(--accent-soft, #f2cc60);
+        font-size: 12px;
+        max-width: 360px;
+        white-space: pre-wrap;
+      }
+
+      /* Footer: Status bar (1 line, matches TUI) */
+      .nx-footer {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 8px;
+        border-top: 1px solid var(--border, #2b2f36);
+        background: var(--panel, #0d1117);
+        font-size: 12px;
+      }
+
+      .nx-shortcut {
+        color: var(--fg, #e6edf3);
+      }
+
+      .nx-shortcut kbd {
+        color: var(--accent, #f2cc60);
+        font-weight: bold;
+        font-family: inherit;
+      }
+
+      .nx-badge {
+        color: var(--accent-strong, #f2cc60);
+        font-weight: bold;
+      }
+
+      .nx-fps {
+        margin-left: auto;
+        color: var(--fg, #e6edf3);
+      }
+
+      /* JSON Syntax Highlighting (matches TUI colorize_json) */
+      .json-key {
+        color: var(--json-key, #79c0ff);
+      }
+
+      .json-string {
+        color: var(--json-string, #a5d6ff);
+      }
+
+      .json-number {
+        color: var(--json-number, #f2cc60);
+      }
+
+      .json-bool {
+        color: var(--json-bool, #7ee787);
+      }
+
+      .json-null {
+        color: var(--json-null, #6e7681);
+      }
+    </style>
+  <link rel="modulepreload" href="./nearx-web-dom-5473c8c88b57ca34.js" crossorigin="anonymous" integrity="sha384-PuwnZqafUkEFco/HxoAGrz4ihne+974+SvvRciz0RJlC3mtDyahYpCedMAvd6e4V"><link rel="preload" href="./nearx-web-dom-5473c8c88b57ca34_bg.wasm" crossorigin="anonymous" integrity="sha384-p7NSRibNb3BgXTKA8OHjH1kk0bY3GFDAuhaNFppIMgCugoCTCzG5RXkUNVI3tXlt" as="fetch" type="application/wasm"></head>
+  <body>
+    <div id="nearx-root">
+      <!-- Header: Tab-style pane selector (matches TUI) -->
+      <div id="nearx-header" class="nx-header">
+        <button class="nx-tab" data-pane="0">Blocks</button>
+        <span class="nx-tab-sep">|</span>
+        <button class="nx-tab" data-pane="1">Tx Hashes</button>
+        <span class="nx-tab-sep">|</span>
+        <button class="nx-tab" data-pane="2">Tx Details</button>
+      </div>
+
+      <!-- Filter Bar -->
+      <div id="row-filter">
+        <input
+          id="nearx-filter"
+          type="text"
+          placeholder="Filter (press / to focus)…"
+          autocomplete="off"
+        />
+        <button id="nearx-owned-toggle" type="button">Owned only</button>
+      </div>
+
+      <!-- Body: Two-row layout (30/70 split) -->
+      <div id="nearx-body" class="nx-body">
+        <!-- Top row: Blocks + Txs side by side -->
+        <div id="row-main">
+          <div id="pane-blocks" class="nx-pane nx-pane--blocks">
+            <div class="nx-pane-title" id="blocks-title">Blocks</div>
+            <div class="nx-pane-content" id="blocks-content"></div>
+          </div>
+          <div id="pane-txs" class="nx-pane nx-pane--txs">
+            <div class="nx-pane-title" id="txs-title">Txs</div>
+            <div class="nx-pane-content" id="txs-content"></div>
+          </div>
+        </div>
+
+        <!-- Bottom row: Details -->
+        <div id="row-details">
+          <div class="nx-pane nx-pane--details">
+            <div class="nx-pane-title" id="details-title">Transaction details</div>
+            <pre id="pane-details" class="nx-details"></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer: Shortcuts + FPS + Status (matches TUI) -->
+      <div id="nearx-footer" class="nx-footer">
+        <span class="nx-shortcut"><kbd>Tab</kbd> switch</span>
+        <span class="nx-shortcut"><kbd>/</kbd> filter</span>
+        <span class="nx-shortcut"><kbd>←/→</kbd> page</span>
+        <span class="nx-shortcut"><kbd>q</kbd> quit</span>
+        <span id="owned-badge" class="nx-badge" hidden>[OWNED]</span>
+        <span id="fps-display" class="nx-fps">• FPS 60</span>
+      </div>
+
+      <!-- Toast (overlay) -->
+      <div id="nearx-toast" class="nx-toast" hidden></div>
+    </div>
+
+    <!-- Tauri deep link bridge (safe no-op on plain web) -->
+    
+    <script defer src="deep_link.js"></script>
+
+    <!-- Clipboard / platform bridge (works in web, Tauri, extension) -->
+    
+    <script src="platform.js"></script>
+
+    <!-- DOM frontend JS -->
+    
+    <script type="module" src="app.js"></script>
+
+    <!-- Trunk will build the nearx-web-dom binary to WASM and inject loader -->
+    
+<script type="module">
+import init, * as bindings from './nearx-web-dom-5473c8c88b57ca34.js';
+const wasm = await init({ module_or_path: './nearx-web-dom-5473c8c88b57ca34_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+  </body>
+</html>
