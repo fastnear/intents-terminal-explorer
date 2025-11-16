@@ -585,9 +585,9 @@ auth::clear();
 
 **Web (Deterministic Test)**:
 ```bash
-trunk serve --open
+make dev
 # In browser: paste URL
-http://localhost:8080/#/auth/callback?token=smoke-token
+http://localhost:8000/#/auth/callback?token=smoke-token
 
 # Expected:
 # - Hash scrubs to #/
@@ -672,8 +672,8 @@ Ratacat v0.4.2 implements defense-in-depth security with CSP headers, XSS harden
 git grep -nE 'Authorization:|x-api-key|token=' -- ':!tests/*' || echo "✅ Clean"
 
 # Verify CSP in production build
-trunk build --release
-grep 'Content-Security-Policy' dist/index.html
+make web-release
+grep 'Content-Security-Policy' web/index.html
 ```
 
 ## Building & Running
@@ -761,8 +761,8 @@ cargo run --bin ratacat --features native -- --help
 
 **Prerequisites:**
 ```bash
-# Install Trunk (WASM build tool)
-cargo install --locked trunk
+# Install wasm-bindgen-cli (WASM bindings generator)
+cargo install wasm-bindgen-cli --locked
 
 # Add WASM target
 rustup target add wasm32-unknown-unknown
@@ -770,27 +770,37 @@ rustup target add wasm32-unknown-unknown
 
 **Build Commands:**
 ```bash
-# Development server (auto-reload on changes)
-trunk serve --config Trunk-dom.toml
-# Opens at http://127.0.0.1:8084
+# Development (builds and serves at http://localhost:8000)
+make dev
+
+# Debug build (WASM output to web/pkg/)
+make web
 
 # Production build
-trunk build --config Trunk-dom.toml --release
-# Output: dist-dom/index.html, dist-dom/*.wasm, dist-dom/*.js
+make web-release
+
+# Clean build artifacts
+make clean
 ```
 
 **Critical Build Details:**
-- Binary: `nearx-web-dom` (specified in `Trunk-dom.toml`)
-- HTML: `index-dom.html` (clean DOM structure, no canvas)
+- Binary: `nearx-web-dom` (specified in Makefile)
+- HTML: `web/index.html` (clean DOM structure, no canvas)
 - Features: `--no-default-features --features dom-web` (pure WASM dependencies, zero egui)
-- Output: `dist-dom/` directory (separate from legacy egui build)
+- Output: `web/pkg/` directory (gitignored WASM artifacts)
 
 **File Structure:**
 ```
-index-dom.html          # Entry point with DOM layout
-web/app.js              # DOM renderer (snapshot → render)
+web/
+├── index.html            # Entry point with DOM layout
+├── app.js                # DOM renderer (snapshot → render)
+├── theme.css             # Theme variables (injected by theme.rs)
+├── platform.js           # Unified clipboard bridge
+├── auth.js               # OAuth popup manager
+├── router_shim.js        # Hash router for auth callbacks
+└── pkg/                  # WASM build output (gitignored)
 src/bin/nearx-web-dom.rs  # WASM binary (WasmApp wrapper)
-dist-dom/               # Built output (for both web and Tauri)
+Makefile                  # Build automation
 ```
 
 **JSON Bridge API:**
@@ -843,25 +853,29 @@ render(newSnapshot);
 
 1. **Error: `winit` not supported on this platform**
    - **Cause:** Trying to build for native target instead of wasm32
-   - **Fix:** Use `cargo check --target wasm32-unknown-unknown` or let Trunk handle it
+   - **Fix:** Use `cargo check --target wasm32-unknown-unknown` or let Makefile handle it
 
-2. **Error: Watch ignore path not found (dist-egui/)**
-   - **Cause:** Trunk-dom.toml references non-existent directories
-   - **Fix:** `mkdir -p dist-egui` or remove from ignore list
+2. **Error: wasm-bindgen version mismatch**
+   - **Cause:** CLI version doesn't match wasm-bindgen crate version
+   - **Fix:** Reinstall with exact version: `cargo install wasm-bindgen-cli --version 0.2.104 --locked --force`
 
 **Verifying the Build:**
 ```bash
 # Clean build
-rm -rf dist-dom
-trunk build --config Trunk-dom.toml
+make clean
+make web
 
 # Check WASM target compiles without warnings
 cargo check --bin nearx-web-dom --target wasm32-unknown-unknown \
   --no-default-features --features dom-web
 
-# Verify dist-dom structure
-ls dist-dom/
-# Should show: index.html, app.js, *.wasm, theme.css, platform.js
+# Verify web/pkg/ structure
+ls web/pkg/
+# Should show: nearx-web-dom.js, nearx-web-dom_bg.wasm, snippets/
+
+# Test dev server
+make dev
+# Open http://localhost:8000 in browser
 ```
 
 ### Ratatui Version Requirements
@@ -878,9 +892,9 @@ These deprecation warnings are safe to ignore (fixes planned for future release)
 
 ### Tauri Desktop App Mode
 
-**Overview**: Native desktop application with deep link support for handling `nearx://` URLs. Built with Tauri v2, combining Rust backend with **DOM frontend** (same dist-dom build as web).
+**Overview**: Native desktop application with deep link support for handling `nearx://` URLs. Built with Tauri v2, combining Rust backend with **DOM frontend** (same static site as web).
 
-**Frontend**: Uses the same `dist-dom/` output as the web build - pure DOM with WASM core, no canvas or WebGL. Configuration in `tauri.conf.json` points to `frontendDist: "../../dist-dom"`.
+**Frontend**: Uses the same `web/` static site as the web build - pure DOM with WASM core, no canvas or WebGL. Configuration in `tauri.conf.json` points to `frontendDist: "../../web"`.
 
 **Key Features**:
 - **DOM-based UI**: Native web elements for consistent cross-platform UX
@@ -891,8 +905,17 @@ These deprecation warnings are safe to ignore (fixes planned for future release)
 - **Native host sidecar**: Browser extension integration support
 
 **Build Requirements**:
-1. Build the DOM frontend first: `trunk build --config Trunk-dom.toml`
-2. Then build Tauri: `cd tauri-workspace && cargo tauri build`
+Tauri automatically builds the frontend via Makefile (see `tauri.conf.json` → `beforeDevCommand` and `beforeBuildCommand`).
+
+```bash
+# Development (automatically runs 'make dev')
+cd tauri-workspace
+cargo tauri dev
+
+# Production build (automatically runs 'make web-release')
+cd tauri-workspace
+cargo tauri build
+```
 
 #### Deep Link Architecture
 
@@ -988,19 +1011,15 @@ cargo tauri build  # Will use existing binary
 
 #### Development Mode
 
-**Prerequisites**: Build the frontend first
+**Note**: Tauri automatically builds the frontend via `make dev` before starting (see `tauri.conf.json` → `beforeDevCommand`).
 
 ```bash
-# Step 1: Build the DOM frontend (from project root)
-trunk build --config Trunk-dom.toml
-# Output: dist-dom/
-
-# Step 2: Run Tauri dev mode
+# Run Tauri dev mode (frontend builds automatically)
 cd tauri-workspace
 cargo tauri dev
 ```
 
-**Alternative**: Use the dev-deep-links.sh script which auto-builds the frontend:
+**Alternative**: Use the dev-deep-links.sh script for deep link testing (macOS):
 ```bash
 ./tauri-workspace/dev-deep-links.sh
 ```
@@ -1483,15 +1502,15 @@ strings target/release/nearx-tauri | grep nearx_test
 ```
 ratacat/
 ├── Cargo.toml           # Dependencies with feature flags (native/web)
-├── index-dom.html       # DOM frontend entry point (Web + Tauri)
-├── index-egui.html      # Legacy egui frontend (deprecated)
-├── Trunk-dom.toml       # DOM build configuration
-├── Trunk.toml           # Legacy egui build configuration
+├── Makefile             # Web build automation
 ├── web/
+│   ├── index.html       # DOM frontend entry point (Web + Tauri)
 │   ├── app.js           # DOM renderer (snapshot → render → action)
+│   ├── theme.css        # Theme variables (injected by theme.rs)
 │   ├── platform.js      # Unified clipboard bridge (Tauri/Extension/Navigator/execCommand)
 │   ├── auth.js          # OAuth popup manager (Google + Magic)
-│   └── router_shim.js   # Hash change router for auth callback handling
+│   ├── router_shim.js   # Hash change router for auth callback handling
+│   └── pkg/             # WASM build output (gitignored)
 ├── src/
 │   ├── lib.rs           # Library exports (shared core)
 │   ├── bin/
@@ -1601,21 +1620,21 @@ ratacat/
   - **Removed wasm_guard.js**: Errors now visible in browser/Tauri console instead of overlay
   - **Headless pattern**: `WasmApp` exposes `App` via `UiSnapshot` (JSON state) and `UiAction` (JSON commands)
   - **Binary**: `nearx-web-dom` replaces `nearx-web` (egui version deprecated)
-  - **Trunk config**: `Trunk-dom.toml` uses `dom-web` feature, outputs to `dist-dom/`
+  - **Build system**: Makefile + wasm-bindgen (no bundler), outputs to `web/pkg/`
 - **Architecture**:
   - **Rust (WASM)**: `src/bin/nearx-web-dom.rs` - 375 lines, no egui imports
   - **JavaScript**: `web/app.js` - DOM renderer with snapshot → render → action pattern
-  - **HTML**: `index-dom.html` - Pure DOM structure with flexbox layout
+  - **HTML**: `web/index.html` - Pure DOM structure with flexbox layout
   - **Data flow**: RPC events → App state → JSON snapshot → DOM render → User action → App update
 - **Benefits**:
   - **Smaller bundle**: 3.7MB WASM (no egui overhead)
   - **Better debugging**: Real errors visible in console, no masking overlay
   - **Native UX**: Regular web text selection, scrolling, focus management
   - **Maximum compatibility**: Works in any modern browser, no WebGL required
-  - **Same build for Tauri**: Desktop app uses identical `dist-dom/` output
+  - **Same build for Tauri**: Desktop app uses identical `web/` static site
 - **Verification**:
   - ✅ `cargo tree -i egui` → "did not match any packages"
-  - ✅ Clean Trunk build with zero canvas/WebGL dependencies
+  - ✅ Clean Makefile build with zero canvas/WebGL dependencies
   - ✅ All keyboard shortcuts work (arrows, vim keys, Tab, Space, etc.)
 
 ### Unified Clipboard System (v0.4.1)

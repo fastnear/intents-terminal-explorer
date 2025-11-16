@@ -5,11 +5,10 @@
 # Terminal (TUI)
 cargo run --bin nearx --features native
 
-# Web (DOM frontend)
-trunk serve --open
+# Web (DOM frontend) - builds and serves at http://localhost:8000
+make dev
 
-# Tauri (Desktop) - requires frontend build first
-trunk build
+# Tauri (Desktop) - automatically builds frontend
 cd tauri-workspace && cargo tauri dev
 ```
 
@@ -19,10 +18,9 @@ cd tauri-workspace && cargo tauri dev
 cargo build --release --features native --bin nearx
 
 # Web release (DOM frontend)
-trunk build --release
+make web-release
 
-# Tauri bundle (requires frontend build first)
-trunk build --release
+# Tauri bundle (automatically builds frontend)
 cd tauri-workspace && cargo tauri build
 ```
 
@@ -51,17 +49,14 @@ Built with [Ratatui](https://ratatui.rs) and Rust.
 git clone <repo-url>
 cd ratacat
 
-# 2. Build the web frontend (required for Tauri)
-trunk build
-
-# 3. Run the desktop app (macOS/Linux/Windows)
+# 2. Run the desktop app (macOS/Linux/Windows)
 cd tauri-workspace
 cargo tauri dev
 ```
 
 That's it! The app will open with live blockchain data from NEAR mainnet.
 
-**Note:** Tauri uses the DOM-based web frontend (`dist/`), so you need to build it first with Trunk.
+**Note:** Tauri automatically builds the DOM-based web frontend (`web/`) via Makefile.
 
 **For deep link testing (macOS only):**
 ```bash
@@ -162,20 +157,16 @@ See `.env.example` for all available options (RPC endpoints, polling intervals, 
 ### Tauri Desktop (Recommended)
 
 ```bash
-# Build the DOM frontend first (required)
-trunk build
-
-# Development
+# Development (automatically builds frontend)
 cd tauri-workspace
 cargo tauri dev
 
-# Production build
-trunk build --release
+# Production build (automatically builds frontend)
 cd tauri-workspace
 cargo tauri build
 ```
 
-**Note:** Tauri uses the DOM-based web frontend from `dist/`, which must be built before running Tauri commands.
+**Note:** Tauri automatically builds the DOM-based web frontend from `web/` using the Makefile.
 
 ### Native Terminal
 
@@ -193,18 +184,18 @@ FASTNEAR_AUTH_TOKEN=your_token ./target/release/nearx
 ### Web Browser (DOM Frontend)
 
 ```bash
-# One-time setup
-cargo install --locked trunk
+# One-time setup (if not already installed)
+cargo install wasm-bindgen-cli --locked
 rustup target add wasm32-unknown-unknown
 
-# Development
-trunk serve  # Opens at http://127.0.0.1:8084
+# Development (builds and serves at http://localhost:8000)
+make dev
 
-# Production
-trunk build --release  # Output in dist/
+# Production build (output in web/pkg/)
+make web-release
 ```
 
-**Architecture:** Pure DOM-based UI with JSON bridge to WASM core. No canvas or WebGL - just native HTML/CSS/JavaScript for maximum compatibility.
+**Architecture:** Pure DOM-based UI with JSON bridge to WASM core using wasm-bindgen. No canvas or WebGL - just native HTML/CSS/JavaScript for maximum compatibility.
 
 ---
 
@@ -216,7 +207,7 @@ End-to-end tests verify the Web target works without WASM panics, keyboard/mouse
 
 **Prerequisites:**
 - Node.js/npm installed
-- Web target dependencies (`trunk`, `wasm32-unknown-unknown` target)
+- Web target dependencies (`wasm-bindgen-cli`, `wasm32-unknown-unknown` target)
 
 **Setup (one-time):**
 
@@ -253,8 +244,8 @@ NEARX_E2E_REQUIRE_DATA=1 npm run e2e
 - ✅ Optional: Clipboard contains valid JSON (strict mode)
 
 **Port usage:**
-- E2E tests run on `http://127.0.0.1:5173` (via `trunk serve --release --port 5173`)
-- Development server runs on `http://127.0.0.1:8084` (default from `Trunk.toml`)
+- E2E tests run on `http://127.0.0.1:5173` (separate test server)
+- Development server runs on `http://localhost:8000` (via `make dev`)
 - This separation allows running tests while development server is active
 
 **Test configuration:**
@@ -349,9 +340,9 @@ Key settings:
 
 **Key Technologies**:
 - [Ratatui](https://ratatui.rs) - Terminal UI framework
-- [wasm-bindgen](https://rustwasm.github.io/wasm-bindgen/) - Rust/JavaScript bridge
+- [wasm-bindgen](https://rustwasm.github.io/wasm-bindgen/) - Rust/JavaScript bridge (direct, no bundler)
 - [Tauri v2](https://tauri.app) - Desktop app framework
-- [Trunk](https://trunkrs.dev) - WASM build tool
+- Makefile + Python HTTP server - Simple, standard build tooling
 
 ---
 
@@ -363,22 +354,23 @@ ratacat/
 │   ├── bin/
 │   │   ├── nearx.rs          # Native terminal binary
 │   │   ├── nearx-web-dom.rs  # DOM frontend binary (WASM, JSON bridge)
-│   │   ├── nearx-web.rs      # Legacy egui binary (deprecated)
 │   │   └── ratacat-proxy.rs  # RPC proxy (development)
 │   ├── app.rs                # Application state (shared)
 │   ├── ui.rs                 # Ratatui rendering (terminal only)
-│   ├── theme.rs              # Unified theme system (shared)
+│   ├── theme.rs              # Unified theme system (runtime CSS vars)
 │   └── ...                   # Other shared modules
 ├── tauri-workspace/
 │   └── src-tauri/            # Tauri desktop app
 ├── web/
+│   ├── index.html            # DOM frontend entry point
 │   ├── app.js                # DOM renderer (snapshot → render → action)
+│   ├── theme.css             # Theme variables (injected by theme.rs)
 │   ├── platform.js           # Unified clipboard bridge
 │   ├── auth.js               # OAuth popup manager
-│   └── router_shim.js        # Hash router for auth callbacks
+│   ├── router_shim.js        # Hash router for auth callbacks
+│   └── pkg/                  # WASM build output (gitignored)
+├── Makefile                  # Web build automation
 ├── tauri-dev.sh              # Deep link testing helper (macOS)
-├── index.html                # DOM frontend entry point (Web + Tauri)
-├── Trunk.toml                # DOM build configuration
 └── .env.example              # Configuration template
 ```
 
