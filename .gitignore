@@ -9,6 +9,7 @@
 /dist
 /dist-egui
 /dist-dom
+web/pkg/
 *.wasm
 
 # IDE / OS
