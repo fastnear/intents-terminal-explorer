@@ -30,26 +30,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   line-height: 1.45;
-  cursor: default; /* Default cursor; set pointer from code when rows are hoverable */
-}
-
-/* Global rendering clarity for canvas-based UIs (egui + ratatui texture) */
-canvas,
-img,
-video {
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-  image-rendering: -moz-crisp-edges;
-  image-rendering: -webkit-optimize-contrast;
-}
-
-/* Legacy canvas ID (kept for backwards compat) */
-#the_canvas_id {
-  /* Crisp pixel rendering for terminal texture */
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-  image-rendering: -moz-crisp-edges;
-  image-rendering: -webkit-optimize-contrast;
+  cursor: default;
 }
 
 /* Accessibility: ensure focus is always visible */
@@ -81,13 +62,4 @@ video {
 
 *::-webkit-scrollbar-track {
   background: var(--panel);
-}
-
-/* Panel styling for DOM elements (toasts, overlays) */
-.nx-panel {
-  background: var(--panel);
-  color: var(--fg);
-  border: var(--stroke) solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--spacing);
 }
