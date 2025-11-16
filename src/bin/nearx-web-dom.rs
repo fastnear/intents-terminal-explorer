@@ -241,9 +241,10 @@ pub struct WasmApp {
 impl WasmApp {
     /// Construct a new WasmApp and start RPC polling in the background.
     #[wasm_bindgen(constructor)]
+    #[allow(clippy::new_without_default)]
     pub fn new() -> WasmApp {
         console_error_panic_hook::set_once();
-        let _ = wasm_logger::init(wasm_logger::Config::default());
+        wasm_logger::init(wasm_logger::Config::default());
 
         // Channel for RPC -> App events.
         let (event_tx, event_rx) = unbounded_channel::<AppEvent>();

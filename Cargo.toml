@@ -18,10 +18,11 @@ name = "ratacat-proxy"
 path = "src/bin/ratacat-proxy.rs"
 required-features = ["proxy"]
 
-[[bin]]
-name = "nearx-web"
-path = "src/bin/nearx-web.rs"
-required-features = ["egui-web"]
+# Legacy egui-web binary (deprecated - use nearx-web-dom instead)
+# [[bin]]
+# name = "nearx-web"
+# path = "src/bin/nearx-web.rs"
+# required-features = ["egui-web"]
 
 [[bin]]
 name = "nearx-web-dom"
