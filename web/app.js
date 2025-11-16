@@ -308,38 +308,6 @@ function setupEventHandlers() {
             dispatch({ type: 'SignOut' });
             return;
         }
-
-        // Pane focus + row selection
-        const pane = e.target.closest('.pane');
-        if (pane) {
-            // Focus pane
-            const paneId = pane.id;
-            if (paneId === 'pane-blocks') {
-                dispatch({ type: 'FocusPane', pane: 0 });
-            } else if (paneId === 'pane-txs') {
-                dispatch({ type: 'FocusPane', pane: 1 });
-            } else if (paneId === 'pane-details') {
-                dispatch({ type: 'FocusPane', pane: 2 });
-            }
-
-            // Row selection
-            const row = e.target.closest('.row');
-            if (row) {
-                const index = parseInt(row.dataset.index, 10);
-                if (paneId === 'pane-blocks') {
-                    dispatch({ type: 'SelectBlock', index });
-                } else if (paneId === 'pane-txs') {
-                    dispatch({ type: 'SelectTx', index });
-                }
-            }
-        }
-    });
-
-    // Double-click for fullscreen
-    document.addEventListener('dblclick', (e) => {
-        if (e.target.closest('#pane-details')) {
-            dispatch({ type: 'ToggleDetailsFullscreen' });
-        }
     });
 }
 
