@@ -7,6 +7,7 @@
 
 # Wasm/Web (wasm-bindgen output)
 web/pkg/
+dist/  # Legacy Trunk output (should not exist, but ignore just in case)
 
 # IDE / OS
 .idea/
