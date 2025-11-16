@@ -6,10 +6,10 @@
 cargo run --bin nearx --features native
 
 # Web (DOM frontend)
-trunk serve --config Trunk-dom.toml --open
+trunk serve --open
 
 # Tauri (Desktop) - requires frontend build first
-trunk build --config Trunk-dom.toml
+trunk build
 cd tauri-workspace && cargo tauri dev
 ```
 
@@ -19,10 +19,10 @@ cd tauri-workspace && cargo tauri dev
 cargo build --release --features native --bin nearx
 
 # Web release (DOM frontend)
-trunk build --config Trunk-dom.toml --release
+trunk build --release
 
 # Tauri bundle (requires frontend build first)
-trunk build --config Trunk-dom.toml --release
+trunk build --release
 cd tauri-workspace && cargo tauri build
 ```
 
@@ -52,7 +52,7 @@ git clone <repo-url>
 cd ratacat
 
 # 2. Build the web frontend (required for Tauri)
-trunk build --config Trunk-dom.toml
+trunk build
 
 # 3. Run the desktop app (macOS/Linux/Windows)
 cd tauri-workspace
@@ -61,7 +61,7 @@ cargo tauri dev
 
 That's it! The app will open with live blockchain data from NEAR mainnet.
 
-**Note:** Tauri uses the DOM-based web frontend (`dist-dom/`), so you need to build it first with Trunk.
+**Note:** Tauri uses the DOM-based web frontend (`dist/`), so you need to build it first with Trunk.
 
 **For deep link testing (macOS only):**
 ```bash
@@ -163,19 +163,19 @@ See `.env.example` for all available options (RPC endpoints, polling intervals, 
 
 ```bash
 # Build the DOM frontend first (required)
-trunk build --config Trunk-dom.toml
+trunk build
 
 # Development
 cd tauri-workspace
 cargo tauri dev
 
 # Production build
-trunk build --config Trunk-dom.toml --release
+trunk build --release
 cd tauri-workspace
 cargo tauri build
 ```
 
-**Note:** Tauri uses the DOM-based web frontend from `dist-dom/`, which must be built before running Tauri commands.
+**Note:** Tauri uses the DOM-based web frontend from `dist/`, which must be built before running Tauri commands.
 
 ### Native Terminal
 
@@ -198,10 +198,10 @@ cargo install --locked trunk
 rustup target add wasm32-unknown-unknown
 
 # Development
-trunk serve --config Trunk-dom.toml  # Opens at http://127.0.0.1:8084
+trunk serve  # Opens at http://127.0.0.1:8084
 
 # Production
-trunk build --config Trunk-dom.toml --release  # Output in dist-dom/
+trunk build --release  # Output in dist/
 ```
 
 **Architecture:** Pure DOM-based UI with JSON bridge to WASM core. No canvas or WebGL - just native HTML/CSS/JavaScript for maximum compatibility.
@@ -253,8 +253,8 @@ NEARX_E2E_REQUIRE_DATA=1 npm run e2e
 - ✅ Optional: Clipboard contains valid JSON (strict mode)
 
 **Port usage:**
-- E2E tests run on `http://127.0.0.1:5173` (via `trunk serve --config Trunk-dom.toml --release --port 5173`)
-- Development server runs on `http://127.0.0.1:8084` (default from `Trunk-dom.toml`)
+- E2E tests run on `http://127.0.0.1:5173` (via `trunk serve --release --port 5173`)
+- Development server runs on `http://127.0.0.1:8084` (default from `Trunk.toml`)
 - This separation allows running tests while development server is active
 
 **Test configuration:**
@@ -377,10 +377,8 @@ ratacat/
 │   ├── auth.js               # OAuth popup manager
 │   └── router_shim.js        # Hash router for auth callbacks
 ├── tauri-dev.sh              # Deep link testing helper (macOS)
-├── index-dom.html            # DOM frontend entry point (Web + Tauri)
-├── index-egui.html           # Legacy egui entry point (deprecated)
-├── Trunk-dom.toml            # DOM build configuration
-├── Trunk.toml                # Legacy egui build configuration
+├── index.html                # DOM frontend entry point (Web + Tauri)
+├── Trunk.toml                # DOM build configuration
 └── .env.example              # Configuration template
 ```
 
