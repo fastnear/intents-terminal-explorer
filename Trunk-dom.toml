@@ -16,7 +16,7 @@ public_url = "./"
 [build.rust]
 # Features to enable for the DOM web build
 no_default_features = true
-features = ["dom-web"]
+features = ["egui-web"]
 
 # Binary to build (nearx-web-dom)
 bin = "nearx-web-dom"

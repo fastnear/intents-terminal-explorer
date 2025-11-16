@@ -1,329 +1,253 @@
-/**
- * NEARx Web App - DOM Renderer
- *
- * Renders UI from Rust snapshots using native DOM elements.
- * One-way data flow: Rust state → JS rendering → DOM events → Rust actions
- */
+// DOM frontend for NEARx using WasmApp.
+//
+// Expects the wasm-bindgen JS glue for the `nearx-web-dom` binary to be
+// available as `nearx-web-dom.js` in the same directory.
+//
+// HTML requirements (see index-dom.html):
+//
+// <div id="nearx-root">
+//   <div id="row-filter">
+//     <input id="nearx-filter" />
+//     <button id="nearx-owned-toggle" type="button">Owned only</button>
+//   </div>
+//   <div id="row-main">
+//     <div id="pane-blocks" class="nx-pane nx-pane--blocks"></div>
+//     <div id="pane-txs" class="nx-pane nx-pane--txs"></div>
+//   </div>
+//   <div id="row-details">
+//     <pre id="pane-details" class="nx-details"></pre>
+//   </div>
+//   <div id="nearx-toast" class="nx-toast" hidden></div>
+// </div>
 
-import init, { WasmApp } from '../pkg/nearx_web_dom.js';
+import init, { WasmApp } from "./nearx-web-dom.js";
 
-let app = null;
-let renderLoopId = null;
-
-// ----- Initialization -----
+let wasmApp = null;
+let lastSnapshot = null;
+let suppressFilterEvent = false;
 
 async function main() {
-    console.log('🦀 Initializing NEARx Web (DOM)...');
+  await init();
+  wasmApp = new WasmApp();
 
-    // Initialize WASM module
-    await init();
-
-    // Create app instance
-    app = new WasmApp();
-    console.log('✅ WasmApp created');
-
-    // Wire up event handlers
-    setupEventHandlers();
-
-    // Start render loop (30 FPS)
-    startRenderLoop();
-
-    console.log('🚀 NEARx ready!');
-
-    // Hide loading screen
-    const loading = document.querySelector('.loading');
-    if (loading) loading.classList.add('hidden');
-
-    // Update status
-    if (window.updateStatus) {
-        window.updateStatus('Connected to mainnet RPC', 'connected');
-    }
+  hookEvents();
+  const snap = snapshot();
+  render(snap);
 }
 
-// ----- Render Loop -----
-
-function startRenderLoop() {
-    const fps = 30;
-    const frameTime = 1000 / fps;
-
-    function loop() {
-        const snapshotJson = app.tick();
-        const snapshot = JSON.parse(snapshotJson);
-        render(snapshot);
-        renderLoopId = setTimeout(loop, frameTime);
-    }
-
-    loop();
+function snapshot() {
+  const json = wasmApp.snapshot_json();
+  lastSnapshot = JSON.parse(json);
+  return lastSnapshot;
 }
 
-// ----- Rendering -----
-
-function render(snapshotValue) {
-    const snap = typeof snapshotValue === 'string'
-        ? JSON.parse(snapshotValue)
-        : snapshotValue;
-
-    renderTopBar(snap);
-    renderBlocks(snap);
-    renderTxs(snap);
-    renderDetails(snap);
-    renderToast(snap);
+function apply(action) {
+  const json = wasmApp.handle_action_json(JSON.stringify(action));
+  lastSnapshot = JSON.parse(json);
+  render(lastSnapshot);
 }
 
-function renderTopBar(snap) {
-    const container = document.getElementById('top-bar');
-    if (!container) return;
+function hookEvents() {
+  const filter = document.getElementById("nearx-filter");
+  const blocksPane = document.getElementById("pane-blocks");
+  const txPane = document.getElementById("pane-txs");
+  const ownedToggle = document.getElementById("nearx-owned-toggle");
+  const details = document.getElementById("pane-details");
 
-    // Filter input
-    const filterInput = document.getElementById('filter-input');
-    if (filterInput && filterInput.value !== snap.filter.text) {
-        filterInput.value = snap.filter.text;
+  if (!filter || !blocksPane || !txPane || !details) {
+    console.error("[nearx-web-dom] Missing required DOM elements");
+    return;
+  }
+
+  // Filter text -> SetFilter action.
+  filter.addEventListener("input", (e) => {
+    if (suppressFilterEvent) return;
+    const text = e.target.value;
+    apply({ type: "SetFilter", text });
+  });
+
+  filter.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      filter.blur();
     }
+  });
 
-    // Auth buttons
-    const authContainer = document.getElementById('auth-container');
-    if (authContainer) {
-        if (snap.auth.signed_in) {
-            authContainer.innerHTML = `
-                <span class="auth-email">${snap.auth.email || 'Signed in'}</span>
-                <button id="sign-out-btn" class="btn-secondary">Sign out</button>
-            `;
-        } else {
-            authContainer.innerHTML = `
-                <button id="sign-in-google-btn" class="btn-primary">Sign in with Google</button>
-            `;
-        }
-    }
-}
+  // Mouse focus: click on a pane focuses it.
+  blocksPane.addEventListener("mousedown", () => {
+    apply({ type: "FocusPane", pane: 0 });
+  });
 
-function renderBlocks(snap) {
-    const container = document.getElementById('pane-blocks');
-    if (!container) return;
+  txPane.addEventListener("mousedown", () => {
+    apply({ type: "FocusPane", pane: 1 });
+  });
 
-    const focused = snap.focused_pane === 0;
-    container.className = `pane pane-blocks ${focused ? 'pane--focused' : ''}`;
-
-    // Header
-    const header = container.querySelector('.pane-header') || document.createElement('div');
-    header.className = 'pane-header';
-    const filterSuffix = snap.blocks.total_count > snap.blocks.rows.length
-        ? ` (${snap.blocks.rows.length} / ${snap.blocks.total_count})`
-        : ` (${snap.blocks.total_count})`;
-    header.textContent = `Blocks${filterSuffix}`;
-    if (!container.querySelector('.pane-header')) {
-        container.insertBefore(header, container.firstChild);
-    }
-
-    // Rows
-    let rowsContainer = container.querySelector('.pane-rows');
-    if (!rowsContainer) {
-        rowsContainer = document.createElement('div');
-        rowsContainer.className = 'pane-rows';
-        container.appendChild(rowsContainer);
-    }
-
-    rowsContainer.innerHTML = '';
-    snap.blocks.rows.forEach((block, index) => {
-        const row = document.createElement('div');
-        row.className = 'row' + (index === snap.blocks.selected_index ? ' row--selected' : '');
-        row.dataset.index = index;
-        row.textContent = `#${block.height}  ·  ${block.tx_count} txs  ·  ${block.time_utc}`;
-        rowsContainer.appendChild(row);
+  // Owned-only toggle button.
+  if (ownedToggle) {
+    ownedToggle.addEventListener("click", () => {
+      apply({ type: "ToggleOwnedOnly" });
     });
-}
+  }
 
-function renderTxs(snap) {
-    const container = document.getElementById('pane-txs');
-    if (!container) return;
-
-    const focused = snap.focused_pane === 1;
-    container.className = `pane pane-txs ${focused ? 'pane--focused' : ''}`;
-
-    // Header
-    const header = container.querySelector('.pane-header') || document.createElement('div');
-    header.className = 'pane-header';
-    const filterSuffix = snap.txs.total_count > snap.txs.rows.length
-        ? ` (${snap.txs.rows.length} / ${snap.txs.total_count})`
-        : ` (${snap.txs.total_count})`;
-    header.textContent = `Transactions${filterSuffix}`;
-    if (!container.querySelector('.pane-header')) {
-        container.insertBefore(header, container.firstChild);
+  // Global keyboard navigation.
+  document.addEventListener("keydown", (e) => {
+    // '/' focuses filter input.
+    if (e.key === "/") {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      filter.focus();
+      filter.select();
+      return;
     }
 
-    // Rows
-    let rowsContainer = container.querySelector('.pane-rows');
-    if (!rowsContainer) {
-        rowsContainer = document.createElement('div');
-        rowsContainer.className = 'pane-rows';
-        container.appendChild(rowsContainer);
-    }
+    const navKeys = [
+      "ArrowUp",
+      "ArrowDown",
+      "ArrowLeft",
+      "ArrowRight",
+      "PageUp",
+      "PageDown",
+      "Home",
+      "End",
+      "Tab",
+      "Enter",
+      " ", // Space
+      "j",
+      "k",
+      "h",
+      "l",
+      "J",
+      "K",
+      "H",
+      "L",
+      "u",
+      "U",
+      "Escape",
+    ];
 
-    rowsContainer.innerHTML = '';
-    snap.txs.rows.forEach((tx, index) => {
-        const row = document.createElement('div');
-        row.className = 'row' + (index === snap.txs.selected_index ? ' row--selected' : '');
-        row.dataset.index = index;
-        row.textContent = `${tx.hash}  ·  ${tx.signer_id}  ·  ${tx.action_summary}`;
-        rowsContainer.appendChild(row);
+    if (!navKeys.includes(e.key)) return;
+
+    e.preventDefault();
+    apply({
+      type: "Key",
+      code: e.key,
+      ctrl: e.ctrlKey || e.metaKey,
+      alt: e.altKey,
+      shift: e.shiftKey,
+      meta: e.metaKey,
     });
+  });
+
+  // Row clicks (blocks).
+  blocksPane.addEventListener("click", (e) => {
+    const row = e.target.closest("[data-index]");
+    if (!row) return;
+    const index = Number(row.dataset.index);
+    if (Number.isNaN(index)) return;
+    apply({ type: "SelectBlock", index });
+  });
+
+  // Row clicks (txs).
+  txPane.addEventListener("click", (e) => {
+    const row = e.target.closest("[data-index]");
+    if (!row) return;
+    const index = Number(row.dataset.index);
+    if (Number.isNaN(index)) return;
+    apply({ type: "SelectTx", index });
+  });
+
+  // Details pane scroll is native; no extra wiring needed.
 }
 
-function renderDetails(snap) {
-    const container = document.getElementById('pane-details');
-    if (!container) return;
+function render(snapshot) {
+  const filter = document.getElementById("nearx-filter");
+  const blocksPane = document.getElementById("pane-blocks");
+  const txPane = document.getElementById("pane-txs");
+  const details = document.getElementById("pane-details");
+  const toastEl = document.getElementById("nearx-toast");
+  const ownedToggle = document.getElementById("nearx-owned-toggle");
 
-    const focused = snap.focused_pane === 2;
-    container.className = `pane pane-details ${focused ? 'pane--focused' : ''}`;
+  if (!filter || !blocksPane || !txPane || !details) return;
 
-    if (snap.details.fullscreen) {
-        container.classList.add('pane--fullscreen');
+  // Filter text.
+  suppressFilterEvent = true;
+  filter.value = snapshot.filter_query || "";
+  suppressFilterEvent = false;
+
+  // Owned-only button state.
+  if (ownedToggle) {
+    if (snapshot.owned_only_filter) {
+      ownedToggle.classList.add("nx-owned--active");
     } else {
-        container.classList.remove('pane--fullscreen');
+      ownedToggle.classList.remove("nx-owned--active");
     }
+  }
 
-    // Header
-    const header = container.querySelector('.pane-header') || document.createElement('div');
-    header.className = 'pane-header';
-    header.textContent = snap.details.fullscreen
-        ? 'Transaction Details (Press Space to exit fullscreen)'
-        : 'Transaction Details';
-    if (!container.querySelector('.pane-header')) {
-        container.insertBefore(header, container.firstChild);
-    }
+  // Pane focus (0=blocks,1=txs,2=details).
+  blocksPane.classList.toggle("nx-pane--focused", snapshot.pane === 0);
+  txPane.classList.toggle("nx-pane--focused", snapshot.pane === 1);
+  details.classList.toggle("nx-pane--focused", snapshot.pane === 2);
 
-    // Content
-    let content = container.querySelector('.details-content');
-    if (!content) {
-        content = document.createElement('pre');
-        content.className = 'details-content';
-        container.appendChild(content);
-    }
+  // Blocks pane.
+  blocksPane.innerHTML = "";
+  snapshot.blocks.forEach((b) => {
+    const row = document.createElement("div");
+    row.className = "nx-row nx-row--block";
+    if (b.is_selected) row.classList.add("nx-row--selected");
+    row.dataset.index = String(b.index);
 
-    content.textContent = snap.details.json;
-}
+    const ownedSuffix =
+      b.owned_tx_count && b.owned_tx_count > 0
+        ? ` · ${b.owned_tx_count} owned`
+        : "";
 
-function renderToast(snap) {
-    let toast = document.getElementById('toast');
-    if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'toast';
-        toast.className = 'toast';
-        document.body.appendChild(toast);
-    }
+    row.textContent = `#${b.height} · ${b.tx_count} tx${ownedSuffix} · ${b.when}`;
+    blocksPane.appendChild(row);
+  });
 
-    if (snap.toast) {
-        toast.textContent = snap.toast;
-        toast.classList.add('toast--visible');
+  // Txs pane.
+  txPane.innerHTML = "";
+  snapshot.txs.forEach((t) => {
+    const row = document.createElement("div");
+    row.className = "nx-row nx-row--tx";
+    if (t.is_selected) row.classList.add("nx-row--selected");
+    if (t.is_owned) row.classList.add("nx-row--owned");
+    row.dataset.index = String(t.index);
+
+    const signer = t.signer_id || "";
+    const receiver = t.receiver_id || "";
+    const label =
+      signer && receiver
+        ? `${signer} → ${receiver}`
+        : signer || receiver || t.hash;
+
+    row.textContent = label;
+    txPane.appendChild(row);
+  });
+
+  // Details pane.
+  details.textContent = snapshot.details || "";
+
+  if (snapshot.details_fullscreen) {
+    details.classList.add("nx-details--fullscreen");
+  } else {
+    details.classList.remove("nx-details--fullscreen");
+  }
+
+  // Toast.
+  if (toastEl) {
+    if (snapshot.toast) {
+      toastEl.textContent = snapshot.toast;
+      toastEl.hidden = false;
     } else {
-        toast.classList.remove('toast--visible');
+      toastEl.hidden = true;
+      toastEl.textContent = "";
     }
+  }
 }
 
-// ----- Event Handlers -----
-
-function setupEventHandlers() {
-    // Filter input
-    document.addEventListener('input', (e) => {
-        if (e.target.id === 'filter-input') {
-            dispatch({ type: 'UpdateFilterText', text: e.target.value });
-        }
-    });
-
-    document.addEventListener('keydown', (e) => {
-        // Filter: Enter to apply
-        if (e.target.id === 'filter-input' && e.key === 'Enter') {
-            const text = e.target.value;
-            dispatch({ type: 'ApplyFilter', text });
-            e.preventDefault();
-        }
-    });
-
-    // Global keyboard shortcuts
-    document.addEventListener('keydown', (e) => {
-        // Ignore if typing in filter
-        if (e.target.id === 'filter-input') return;
-
-        const key = e.key;
-        const ctrl = e.ctrlKey || e.metaKey;
-        const shift = e.shiftKey;
-
-        // Tab cycling
-        if (key === 'Tab') {
-            dispatch(shift ? { type: 'PrevPane' } : { type: 'NextPane' });
-            e.preventDefault();
-            return;
-        }
-
-        // Focus filter
-        if (key === '/' || (ctrl && key === 'f')) {
-            document.getElementById('filter-input')?.focus();
-            e.preventDefault();
-            return;
-        }
-
-        // Copy
-        if (key === 'c' && !ctrl) {
-            dispatch({ type: 'CopyFocusedJson' });
-            e.preventDefault();
-            return;
-        }
-
-        // Space for fullscreen (only in details pane)
-        if (key === ' ') {
-            dispatch({ type: 'ToggleDetailsFullscreen' });
-            e.preventDefault();
-            return;
-        }
-
-        // Arrow keys
-        if (key === 'ArrowUp') {
-            dispatch({ type: 'BlockUp' });
-            e.preventDefault();
-        } else if (key === 'ArrowDown') {
-            dispatch({ type: 'BlockDown' });
-            e.preventDefault();
-        } else if (key === 'PageUp') {
-            dispatch({ type: 'BlockPageUp' });
-            e.preventDefault();
-        } else if (key === 'PageDown') {
-            dispatch({ type: 'BlockPageDown' });
-            e.preventDefault();
-        } else if (key === 'Home') {
-            dispatch({ type: 'BlockHome' });
-            e.preventDefault();
-        } else if (key === 'End') {
-            dispatch({ type: 'BlockEnd' });
-            e.preventDefault();
-        }
-    });
-
-    // Click handlers (event delegation)
-    document.addEventListener('click', (e) => {
-        // Auth buttons
-        if (e.target.id === 'sign-in-google-btn') {
-            dispatch({ type: 'SignInGoogle' });
-            return;
-        }
-        if (e.target.id === 'sign-out-btn') {
-            dispatch({ type: 'SignOut' });
-            return;
-        }
-    });
-}
-
-function dispatch(action) {
-    if (!app) return;
-    const actionJson = JSON.stringify(action);
-    const updatedJson = app.handle_action_json(actionJson);
-    const updated = JSON.parse(updatedJson);
-    render(updated);
-}
-
-// ----- Start -----
-
-main().catch(err => {
-    console.error('❌ Failed to initialize NEARx:', err);
-    if (window.updateStatus) {
-        window.updateStatus(`Error: ${err.message}`, 'error');
-    }
+document.addEventListener("DOMContentLoaded", () => {
+  main().catch((err) => {
+    console.error("[nearx-web-dom] Failed to start:", err);
+  });
 });

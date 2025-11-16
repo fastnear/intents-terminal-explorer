@@ -1,112 +1,177 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+  <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NEARx - NEAR Blockchain Viewer (DOM)</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>NEARx (DOM) - NEAR Blockchain Viewer</title>
 
     <!-- Theme CSS variables (unified with Rust theme) -->
     <link data-trunk rel="copy-file" href="web/theme.css" />
     <link rel="stylesheet" href="theme.css" />
 
-    <!-- App CSS (DOM-specific styles) -->
-    <link data-trunk rel="copy-file" href="web/app.css" />
-    <link rel="stylesheet" href="app.css" />
-
     <style>
-        /* Page-specific overrides */
-        html, body {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-        }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--bg, #05060a);
+        color: var(--fg, #e6edf3);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+          sans-serif;
+      }
 
-        /* Status bar at top */
-        .status-bar {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 30px;
-            background: #1a1a1a;
-            border-bottom: 1px solid #333;
-            display: flex;
-            align-items: center;
-            padding: 0 16px;
-            font-family: monospace;
-            font-size: 12px;
-            color: #888;
-            z-index: 2000;
-        }
+      #nearx-root {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        padding: 8px;
+        box-sizing: border-box;
+        gap: 8px;
+      }
 
-        .status-indicator {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #666;
-            margin-right: 8px;
-            animation: pulse 2s ease-in-out infinite;
-        }
+      #row-filter {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
 
-        .status-indicator.connected {
-            background: #4CAF50;
-            animation: none;
-        }
+      #nearx-filter {
+        flex: 1;
+        padding: 4px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--border, #2b2f36);
+        background: var(--panel, #0d1117);
+        color: inherit;
+      }
 
-        .status-indicator.error {
-            background: #f44336;
-            animation: blink 1s ease-in-out infinite;
-        }
+      #nearx-owned-toggle {
+        padding: 4px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--border, #2b2f36);
+        background: var(--panel, #0d1117);
+        color: inherit;
+        cursor: pointer;
+      }
 
-        @keyframes pulse {
-            0%, 100% { opacity: 0.4; }
-            50% { opacity: 1; }
-        }
+      #nearx-owned-toggle.nx-owned--active {
+        border-color: var(--accent-strong, #f2cc60);
+        background: var(--panel-alt, #161b22);
+      }
 
-        @keyframes blink {
-            0%, 50%, 100% { opacity: 1; }
-            25%, 75% { opacity: 0.3; }
-        }
+      #row-main {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 1fr 2fr;
+        gap: 8px;
+        min-height: 0;
+      }
 
-        .status-text {
-            flex: 1;
-        }
+      .nx-pane {
+        border-radius: 8px;
+        background: var(--panel, #0d1117);
+        border: 1px solid var(--border, #2b2f36);
+        overflow: auto;
+        padding: 4px 0;
+      }
 
-        .status-help {
-            font-size: 11px;
-            color: #666;
-        }
+      .nx-pane--focused {
+        border-color: var(--accent-strong, #f2cc60);
+        box-shadow: 0 0 0 1px rgba(242, 204, 96, 0.4);
+      }
 
-        /* Loading screen */
-        .loading {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: var(--text);
-            font-family: inherit;
-            font-size: 18px;
-            z-index: 1000;
-        }
+      .nx-row {
+        padding: 2px 8px;
+        cursor: default;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        overflow: hidden;
+        font-size: 13px;
+      }
 
-        .loading::after {
-            content: '';
-            animation: dots 1.5s steps(4, end) infinite;
-        }
+      .nx-row:hover {
+        background: var(--hover-bg, #151b23);
+      }
 
-        @keyframes dots {
-            0%, 20% { content: ''; }
-            40% { content: '.'; }
-            60% { content: '..'; }
-            80%, 100% { content: '...'; }
-        }
+      .nx-row--selected {
+        background: var(--sel-bg, #1f2933);
+      }
 
-        .loading.hidden {
-            display: none;
-        }
+      .nx-row--owned {
+        font-weight: 500;
+        color: var(--accent-soft, #f2cc60);
+      }
+
+      #row-details {
+        min-height: 96px;
+      }
+
+      .nx-details {
+        width: 100%;
+        height: 100%;
+        box-sizing: border-box;
+        padding: 8px;
+        margin: 0;
+        border-radius: 8px;
+        background: var(--panel, #0d1117);
+        border: 1px solid var(--border, #2b2f36);
+        overflow: auto;
+        font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
+          Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .nx-details--fullscreen {
+        position: fixed;
+        inset: 8px;
+        z-index: 20;
+        background: var(--panel, #0d1117);
+        border-radius: 12px;
+        border: 1px solid var(--accent-strong, #f2cc60);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+      }
+
+      .nx-toast {
+        position: fixed;
+        bottom: 12px;
+        right: 12px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: var(--toast-bg, #111827);
+        border: 1px solid var(--accent-soft, #f2cc60);
+        font-size: 12px;
+        max-width: 360px;
+        white-space: pre-wrap;
+      }
     </style>
+  </head>
+  <body>
+    <div id="nearx-root">
+      <div id="row-filter">
+        <input
+          id="nearx-filter"
+          type="text"
+          placeholder="Filter (press / to focus)…"
+          autocomplete="off"
+        />
+        <button id="nearx-owned-toggle" type="button">Owned only</button>
+      </div>
+
+      <div id="row-main">
+        <div id="pane-blocks" class="nx-pane nx-pane--blocks"></div>
+        <div id="pane-txs" class="nx-pane nx-pane--txs"></div>
+      </div>
+
+      <div id="row-details">
+        <pre id="pane-details" class="nx-details"></pre>
+      </div>
+
+      <div id="nearx-toast" class="nx-toast" hidden></div>
+    </div>
 
     <!-- Tauri deep link bridge (safe no-op on plain web) -->
     <link data-trunk rel="copy-file" href="web/deep_link.js" />
@@ -115,101 +180,22 @@
     <!-- WASM error guard (dev helper - surfaces errors inline) -->
     <link data-trunk rel="copy-file" href="web/wasm_guard.js" />
     <script defer src="wasm_guard.js"></script>
-</head>
-<body>
-    <!-- Status bar -->
-    <div class="status-bar">
-        <div class="status-indicator" id="status-indicator"></div>
-        <span class="status-text" id="status-text">Initializing...</span>
-        <span class="status-help">Press F12 for debug console</span>
-    </div>
 
-    <!-- App root -->
-    <div id="app-root">
-        <!-- Top bar (filter + auth) -->
-        <div id="top-bar">
-            <input
-                type="text"
-                id="filter-input"
-                placeholder="Filter (acct:…, action:…, method:… ; comma AND)"
-            />
-            <div id="auth-container">
-                <!-- Auth buttons will be rendered here -->
-            </div>
-        </div>
-
-        <!-- Main content -->
-        <div id="main-content">
-            <!-- Top row (Blocks + Txs) -->
-            <div id="row-top">
-                <div id="pane-blocks" class="pane pane-blocks">
-                    <!-- Rendered by app.js -->
-                </div>
-                <div id="pane-txs" class="pane pane-txs">
-                    <!-- Rendered by app.js -->
-                </div>
-            </div>
-
-            <!-- Bottom row (Details) -->
-            <div id="row-bottom">
-                <div id="pane-details" class="pane pane-details">
-                    <!-- Rendered by app.js -->
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="loading">Loading NEARx</div>
-
-    <script>
-        // Status bar management
-        function updateStatus(message, state = 'loading') {
-            const indicator = document.getElementById('status-indicator');
-            const text = document.getElementById('status-text');
-
-            if (text) text.textContent = message;
-            if (indicator) {
-                indicator.className = 'status-indicator';
-                if (state === 'connected') indicator.classList.add('connected');
-                else if (state === 'error') indicator.classList.add('error');
-            }
-        }
-
-        // Export status updater for WASM to call
-        window.updateStatus = updateStatus;
-
-        // Configuration logging (same as egui version)
-        const params = new URLSearchParams(window.location.search);
-        const rpc = params.get('rpc') || localStorage.getItem('RPC_URL') || 'https://rpc.mainnet.fastnear.com/';
-        const filter = params.get('filter') || localStorage.getItem('DEFAULT_FILTER') || '';
-        const hasToken = params.get('token') || localStorage.getItem('RPC_BEARER');
-        const token = hasToken ? `${hasToken.substring(0, 8)}...` : 'none';
-
-        console.log('═══════════════════════════════════════════════════');
-        console.log('🦀 NEARx Configuration (DOM mode):');
-        console.log('═══════════════════════════════════════════════════');
-        console.log('  RPC Endpoint:', rpc);
-        console.log('  Auth Token:', token);
-        console.log('  Default Filter:', filter || '(empty - show all)');
-        console.log('═══════════════════════════════════════════════════');
-
-        // Warn if no auth token
-        if (!hasToken) {
-            console.warn('⚠️  NO AUTH TOKEN CONFIGURED');
-            console.warn('Set via: localStorage.setItem("RPC_BEARER", "your_token_here");');
-            updateStatus('⚠️ No auth token - may hit rate limits', 'error');
-        }
-    </script>
-
-    <!-- Clipboard bridge (works in web, Tauri, and extension contexts) -->
+    <!-- Clipboard / platform bridge (works in web, Tauri, extension) -->
     <link data-trunk rel="copy-file" href="web/platform.js" />
     <script src="platform.js"></script>
 
-    <!-- App loader (ES module) -->
+    <!-- DOM frontend JS -->
     <link data-trunk rel="copy-file" href="web/app.js" />
     <script type="module" src="app.js"></script>
 
-    <!-- Trunk will inject the WASM loader script here -->
-    <link data-trunk rel="rust" data-bin="nearx-web-dom" data-cargo-no-default-features data-cargo-features="dom-web" />
-</body>
+    <!-- Trunk will build the nearx-web-dom binary to WASM and inject loader -->
+    <link
+      data-trunk
+      rel="rust"
+      data-bin="nearx-web-dom"
+      data-cargo-no-default-features
+      data-cargo-features="egui-web"
+    />
+  </body>
 </html>

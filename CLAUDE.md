@@ -19,9 +19,9 @@ Ratacat v0.4.0 features a revolutionary **quad-deployment architecture** - write
 │  │  Terminal  │  │  Browser   │  │   Tauri    │  │  Browser Ext +   │ │
 │  │  (Native)  │  │   (WASM)   │  │  Desktop   │  │  Native Host     │ │
 │  │            │  │            │  │            │  │                  │ │
-│  │ • Crossterm│  │ • egui     │  │ • Deep     │  │ • MV3 Extension  │ │
-│  │ • SQLite   │  │ • In-mem   │  │   links    │  │ • stdio bridge   │ │
-│  │ • WS + RPC │  │ • RPC only │  │ • Single   │  │ • myapp://       │ │
+│  │ • Crossterm│  │ • DOM UI   │  │ • Deep     │  │ • MV3 Extension  │ │
+│  │ • SQLite   │  │ • JSON API │  │   links    │  │ • stdio bridge   │ │
+│  │ • WS + RPC │  │ • RPC only │  │ • DOM UI   │  │ • nearx://       │ │
 │  └─────┬──────┘  └─────┬──────┘  │   instance │  │   deep links     │ │
 │        │               │         └──────┬─────┘  └────────┬─────────┘ │
 │        └───────────────┼────────────────┼──────────────────┘           │
@@ -54,8 +54,8 @@ Ratacat v0.4.0 features a revolutionary **quad-deployment architecture** - write
 ### Deployment Modes
 
 1. **Native Terminal**: Full-featured TUI with SQLite, WebSocket, file watching
-2. **Web Browser (WASM)**: Same UI in browser, RPC-only, in-memory storage
-3. **Tauri Desktop**: Native desktop app with deep link support (`myapp://` protocol)
+2. **Web Browser (WASM)**: Pure DOM UI with JSON bridge, RPC-only, in-memory storage
+3. **Tauri Desktop**: Native desktop app with DOM UI, deep link support (`nearx://` protocol)
 4. **Browser Extension**: 1Password-style "Open in Ratacat" button on tx pages
 
 ## Key Design Principles
@@ -750,9 +750,14 @@ cargo run --bin ratacat --features native -- --help
 ./target/release/ratacat --source rpc --near-node-url https://rpc.mainnet.fastnear.com/
 ```
 
-### Web Browser Mode
+### Web Browser Mode (DOM Frontend)
 
-**Technology Stack**: Uses **eframe** (egui's app framework) with **egui_ratatui** to render terminal UI in browser via WebGL.
+**Technology Stack**: Pure DOM-based frontend using native HTML/CSS/JavaScript with WASM core. No canvas or WebGL - just regular web elements for maximum compatibility and native UX.
+
+**Architecture**: Headless App pattern with JSON bridge
+- **Rust (WASM)**: `WasmApp` exposes `App` via JSON snapshots (`UiSnapshot`) and actions (`UiAction`)
+- **JavaScript**: DOM renderer consumes snapshots, dispatches user actions
+- **Data Flow**: RPC events → App state → JSON snapshot → DOM render → User action → App update
 
 **Prerequisites:**
 ```bash
@@ -765,51 +770,98 @@ rustup target add wasm32-unknown-unknown
 
 **Build Commands:**
 ```bash
-# Development server (auto-reload on changes) - uses egui
-trunk serve
-# Opens at http://127.0.0.1:8080
+# Development server (auto-reload on changes)
+trunk serve --config Trunk-dom.toml
+# Opens at http://127.0.0.1:8084
 
 # Production build
-trunk build --release
-# Output: dist/index.html, dist/*.wasm, dist/*.js
+trunk build --config Trunk-dom.toml --release
+# Output: dist-dom/index.html, dist-dom/*.wasm, dist-dom/*.js
 ```
 
 **Critical Build Details:**
-- `--no-default-features` - **REQUIRED** - Configured in `Trunk.toml` to prevent NEAR SDK crates (C dependencies)
-- `--features egui-web` - Enables eframe, egui_ratatui, soft_ratatui, wasm-bindgen, web-sys
-- Binary: `nearx-web` (specified in `Trunk.toml`)
-- HTML: `index-egui.html` (specifies `data-bin="nearx-web"`)
+- Binary: `nearx-web-dom` (specified in `Trunk-dom.toml`)
+- HTML: `index-dom.html` (clean DOM structure, no canvas)
+- Features: `--no-default-features --features egui-web` (feature name kept for compatibility, but no egui used)
+- Output: `dist-dom/` directory (separate from egui build)
+
+**File Structure:**
+```
+index-dom.html          # Entry point with DOM layout
+web/app.js              # DOM renderer (snapshot → render)
+src/bin/nearx-web-dom.rs  # WASM binary (WasmApp wrapper)
+dist-dom/               # Built output (for both web and Tauri)
+```
+
+**JSON Bridge API:**
+
+Rust → JavaScript (UiSnapshot):
+```rust
+#[derive(Serialize)]
+pub struct UiSnapshot {
+    pub pane: u8,               // 0=Blocks, 1=Txs, 2=Details
+    pub filter_query: String,
+    pub owned_only_filter: bool,
+    pub blocks: Vec<UiBlockRow>,
+    pub txs: Vec<UiTxRow>,
+    pub details: String,        // Pretty JSON
+    pub details_fullscreen: bool,
+    pub toast: Option<String>,
+}
+
+// Usage in JavaScript:
+const json = wasmApp.snapshot_json();
+const snapshot = JSON.parse(json);
+render(snapshot);
+```
+
+JavaScript → Rust (UiAction):
+```rust
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+pub enum UiAction {
+    SetFilter { text: String },
+    FocusPane { pane: u8 },
+    SelectBlock { index: usize },
+    SelectTx { index: usize },
+    ToggleOwnedOnly,
+    Key { code, ctrl, alt, shift, meta },
+}
+
+// Usage in JavaScript:
+const action = { type: "SelectBlock", index: 5 };
+const json = wasmApp.handle_action_json(JSON.stringify(action));
+const newSnapshot = JSON.parse(json);
+render(newSnapshot);
+```
+
+**Keyboard Support:**
+- All TUI shortcuts work: arrows, vim keys (j/k/h/l), Tab, Space, Enter, PageUp/Down, Home/End
+- Handled in Rust via `Key` action, ensuring consistent behavior across web/Tauri
 
 **Common Build Errors & Solutions:**
 
-1. **Error: `zstd-sys` compilation failed**
-   - **Cause:** Default features enabled (pulls in NEAR SDK)
-   - **Fix:** Add `--no-default-features` flag
+1. **Error: `winit` not supported on this platform**
+   - **Cause:** Trying to build for native target instead of wasm32
+   - **Fix:** Use `cargo check --target wasm32-unknown-unknown` or let Trunk handle it
 
-2. **Error: `mio` not supported on wasm32**
-   - **Cause:** Tokio's `net` feature enabled
-   - **Fix:** Already handled by target-specific tokio config
-
-3. **Error: Entry symbol `main` declared multiple times**
-   - **Cause:** WASM binaries need `#![no_main]` attribute
-   - **Fix:** Already in `src/bin/nearx-web.rs`:
-     ```rust
-     #![cfg_attr(target_arch = "wasm32", no_main)]
-     ```
-
-4. **Error: Multiple target artifacts found**
-   - **Cause:** Trunk doesn't know which binary to build
-   - **Fix:** Already in `index-egui.html`:
-     ```html
-     <link data-trunk rel="rust" data-bin="nearx-web" />
-     ```
+2. **Error: Watch ignore path not found (dist-egui/)**
+   - **Cause:** Trunk-dom.toml references non-existent directories
+   - **Fix:** `mkdir -p dist-egui` or remove from ignore list
 
 **Verifying the Build:**
 ```bash
-# Check that no NEAR crates are in WASM dependency tree
-cargo tree --target wasm32-unknown-unknown --no-default-features --features egui-web | grep near-
+# Clean build
+rm -rf dist-dom
+trunk build --config Trunk-dom.toml
 
-# Should return empty (no near-* crates)
+# Check WASM target compiles without warnings
+cargo check --bin nearx-web-dom --target wasm32-unknown-unknown \
+  --no-default-features --features egui-web
+
+# Verify dist-dom structure
+ls dist-dom/
+# Should show: index.html, app.js, *.wasm, theme.css, platform.js
 ```
 
 ### Ratatui Version Requirements
@@ -826,14 +878,21 @@ These deprecation warnings are safe to ignore (fixes planned for future release)
 
 ### Tauri Desktop App Mode
 
-**Overview**: Native desktop application with deep link support for handling `near://` URLs. Built with Tauri v2, combining Rust backend with web frontend.
+**Overview**: Native desktop application with deep link support for handling `nearx://` URLs. Built with Tauri v2, combining Rust backend with **DOM frontend** (same dist-dom build as web).
+
+**Frontend**: Uses the same `dist-dom/` output as the web build - pure DOM with WASM core, no canvas or WebGL. Configuration in `tauri.conf.json` points to `frontendDist: "../../dist-dom"`.
 
 **Key Features**:
-- Deep link handler for `near://` protocol (e.g., `near://tx/ABC123?network=mainnet`)
-- Single-instance enforcement (prevents duplicate app launches)
-- Comprehensive debug logging waterfall
-- DevTools integration (keyboard shortcuts + UI controls)
-- Native host sidecar support for browser extension integration
+- **DOM-based UI**: Native web elements for consistent cross-platform UX
+- **Deep link handler**: `nearx://` protocol (e.g., `nearx://v1/tx/ABC123`)
+- **Single-instance enforcement**: Prevents duplicate app launches
+- **Comprehensive debug logging**: 8-point waterfall for deep link tracing
+- **DevTools integration**: Keyboard shortcuts + UI controls
+- **Native host sidecar**: Browser extension integration support
+
+**Build Requirements**:
+1. Build the DOM frontend first: `trunk build --config Trunk-dom.toml`
+2. Then build Tauri: `cd tauri-workspace && cargo tauri build`
 
 #### Deep Link Architecture
 
@@ -1424,9 +1483,12 @@ strings target/release/nearx-tauri | grep nearx_test
 ```
 ratacat/
 ├── Cargo.toml           # Dependencies with feature flags (native/web)
-├── index-egui.html      # Web app entry point (egui + ratatui)
-├── Trunk.toml           # Web build configuration
+├── index-dom.html       # DOM frontend entry point (Web + Tauri)
+├── index-egui.html      # Legacy egui frontend (deprecated)
+├── Trunk-dom.toml       # DOM build configuration
+├── Trunk.toml           # Legacy egui build configuration
 ├── web/
+│   ├── app.js           # DOM renderer (snapshot → render → action)
 │   ├── platform.js      # Unified clipboard bridge (Tauri/Extension/Navigator/execCommand)
 │   ├── auth.js          # OAuth popup manager (Google + Magic)
 │   └── router_shim.js   # Hash change router for auth callback handling
@@ -1434,7 +1496,8 @@ ratacat/
 │   ├── lib.rs           # Library exports (shared core)
 │   ├── bin/
 │   │   ├── nearx.rs     # Native terminal binary
-│   │   ├── nearx-web.rs # Web browser binary (WASM + egui)
+│   │   ├── nearx-web-dom.rs # DOM frontend binary (WASM, JSON bridge)
+│   │   ├── nearx-web.rs # Legacy egui binary (deprecated)
 │   │   └── ratacat-proxy.rs    # RPC proxy server (development)
 │   ├── platform/        # Platform abstraction layer
 │   │   ├── mod.rs       # Platform dispatch
@@ -1481,8 +1544,9 @@ ratacat/
 - **Feature flags**: `native` vs `web` enable/disable platform-specific code
 - **Conditional compilation**: `#[cfg(feature = "native")]` for native-only modules
 - **Platform abstraction**: `platform/` module provides unified interface for clipboard, storage, etc.
-- **Shared UI**: Same `ui.rs` and `app.rs` code renders in both terminal and browser
-- **egui_ratatui bridge**: Web uses `egui_ratatui` to render ratatui widgets in egui
+- **Shared core App**: Same `App` state engine used across all targets (terminal, web, Tauri)
+- **DOM frontend (current)**: Pure HTML/CSS/JS with JSON bridge to WASM core (WasmApp)
+- **Headless pattern**: App exposed via `UiSnapshot` (state) and `UiAction` (commands) JSON API
 
 ## Recent Improvements (v0.3.0)
 
