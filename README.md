@@ -5,10 +5,11 @@
 # Terminal (TUI)
 cargo run --bin nearx --features native
 
-# Web (Trunk)
-trunk serve --open
+# Web (DOM frontend)
+trunk serve --config Trunk-dom.toml --open
 
-# Tauri (Desktop)
+# Tauri (Desktop) - requires frontend build first
+trunk build --config Trunk-dom.toml
 cd tauri-workspace && cargo tauri dev
 ```
 
@@ -17,10 +18,11 @@ cd tauri-workspace && cargo tauri dev
 # TUI release
 cargo build --release --features native --bin nearx
 
-# Web release
-trunk build --release
+# Web release (DOM frontend)
+trunk build --config Trunk-dom.toml --release
 
-# Tauri bundle
+# Tauri bundle (requires frontend build first)
+trunk build --config Trunk-dom.toml --release
 cd tauri-workspace && cargo tauri build
 ```
 
@@ -49,12 +51,17 @@ Built with [Ratatui](https://ratatui.rs) and Rust.
 git clone <repo-url>
 cd ratacat
 
-# 2. Run the desktop app (macOS/Linux/Windows)
+# 2. Build the web frontend (required for Tauri)
+trunk build --config Trunk-dom.toml
+
+# 3. Run the desktop app (macOS/Linux/Windows)
 cd tauri-workspace
 cargo tauri dev
 ```
 
 That's it! The app will open with live blockchain data from NEAR mainnet.
+
+**Note:** Tauri uses the DOM-based web frontend (`dist-dom/`), so you need to build it first with Trunk.
 
 **For deep link testing (macOS only):**
 ```bash
@@ -112,8 +119,8 @@ See **[docs/KEYMAP.md](docs/KEYMAP.md)** for complete shortcuts:
 
 ### Multi-Platform
 - **Native Terminal**: Full-featured TUI with SQLite, WebSocket support
-- **Web Browser**: Same UI via WebAssembly (WASM), runs in any modern browser
-- **Tauri Desktop**: Native desktop app with deep link support (`nearx://` URLs)
+- **Web Browser**: Pure DOM UI with WASM core, runs in any modern browser (no canvas/WebGL required)
+- **Tauri Desktop**: Native desktop app with DOM frontend, deep link support (`nearx://` URLs)
 
 ---
 
@@ -155,14 +162,20 @@ See `.env.example` for all available options (RPC endpoints, polling intervals, 
 ### Tauri Desktop (Recommended)
 
 ```bash
-cd tauri-workspace
+# Build the DOM frontend first (required)
+trunk build --config Trunk-dom.toml
 
 # Development
+cd tauri-workspace
 cargo tauri dev
 
 # Production build
+trunk build --config Trunk-dom.toml --release
+cd tauri-workspace
 cargo tauri build
 ```
+
+**Note:** Tauri uses the DOM-based web frontend from `dist-dom/`, which must be built before running Tauri commands.
 
 ### Native Terminal
 
@@ -177,7 +190,7 @@ cargo build --release --features native
 FASTNEAR_AUTH_TOKEN=your_token ./target/release/nearx
 ```
 
-### Web Browser
+### Web Browser (DOM Frontend)
 
 ```bash
 # One-time setup
@@ -185,11 +198,13 @@ cargo install --locked trunk
 rustup target add wasm32-unknown-unknown
 
 # Development
-trunk serve  # Opens at http://127.0.0.1:8083
+trunk serve --config Trunk-dom.toml  # Opens at http://127.0.0.1:8084
 
 # Production
-trunk build --release  # Output in dist-egui/
+trunk build --config Trunk-dom.toml --release  # Output in dist-dom/
 ```
+
+**Architecture:** Pure DOM-based UI with JSON bridge to WASM core. No canvas or WebGL - just native HTML/CSS/JavaScript for maximum compatibility.
 
 ---
 
@@ -238,8 +253,8 @@ NEARX_E2E_REQUIRE_DATA=1 npm run e2e
 - ✅ Optional: Clipboard contains valid JSON (strict mode)
 
 **Port usage:**
-- E2E tests run on `http://127.0.0.1:5173` (via `trunk serve --release --port 5173`)
-- Development server runs on `http://127.0.0.1:8083` (default from `Trunk.toml`)
+- E2E tests run on `http://127.0.0.1:5173` (via `trunk serve --config Trunk-dom.toml --release --port 5173`)
+- Development server runs on `http://127.0.0.1:8084` (default from `Trunk-dom.toml`)
 - This separation allows running tests while development server is active
 
 **Test configuration:**
@@ -322,13 +337,19 @@ Key settings:
 
 **Quad-Mode Design**: Write once, run everywhere
 - **Native Terminal**: Crossterm backend with SQLite persistence
-- **Web Browser**: egui_ratatui bridge renders terminal UI in WebGL canvas
-- **Tauri Desktop**: Same egui_ratatui bridge with native window chrome
-- **Shared Core**: Same `ui.rs`, `app.rs`, `theme.rs` across all targets
+- **Web Browser**: Pure DOM UI with JSON bridge to WASM core (headless App pattern)
+- **Tauri Desktop**: Same DOM frontend with native desktop integration
+- **Shared Core**: Same `App` state engine across all targets
+
+**DOM Frontend Architecture** (Web + Tauri):
+- **Rust (WASM)**: `WasmApp` exposes headless `App` via JSON snapshots (`UiSnapshot`) and actions (`UiAction`)
+- **JavaScript**: DOM renderer consumes snapshots, dispatches user actions
+- **Data Flow**: RPC events → App state → JSON snapshot → DOM render → User action → App update
+- **Native UX**: Pure HTML/CSS/JavaScript, no canvas or WebGL
 
 **Key Technologies**:
 - [Ratatui](https://ratatui.rs) - Terminal UI framework
-- [egui_ratatui](https://github.com/gold-silver-copper/egui_ratatui) - Bridge for web/Tauri
+- [wasm-bindgen](https://rustwasm.github.io/wasm-bindgen/) - Rust/JavaScript bridge
 - [Tauri v2](https://tauri.app) - Desktop app framework
 - [Trunk](https://trunkrs.dev) - WASM build tool
 
@@ -341,21 +362,25 @@ ratacat/
 ├── src/
 │   ├── bin/
 │   │   ├── nearx.rs          # Native terminal binary
-│   │   ├── nearx-web.rs      # Web browser binary (WASM)
+│   │   ├── nearx-web-dom.rs  # DOM frontend binary (WASM, JSON bridge)
+│   │   ├── nearx-web.rs      # Legacy egui binary (deprecated)
 │   │   └── ratacat-proxy.rs  # RPC proxy (development)
 │   ├── app.rs                # Application state (shared)
-│   ├── ui.rs                 # Ratatui rendering (shared)
+│   ├── ui.rs                 # Ratatui rendering (terminal only)
 │   ├── theme.rs              # Unified theme system (shared)
 │   └── ...                   # Other shared modules
 ├── tauri-workspace/
 │   └── src-tauri/            # Tauri desktop app
 ├── web/
+│   ├── app.js                # DOM renderer (snapshot → render → action)
 │   ├── platform.js           # Unified clipboard bridge
 │   ├── auth.js               # OAuth popup manager
 │   └── router_shim.js        # Hash router for auth callbacks
 ├── tauri-dev.sh              # Deep link testing helper (macOS)
-├── index-egui.html           # Web app entry point
-├── Trunk.toml                # Web build configuration
+├── index-dom.html            # DOM frontend entry point (Web + Tauri)
+├── index-egui.html           # Legacy egui entry point (deprecated)
+├── Trunk-dom.toml            # DOM build configuration
+├── Trunk.toml                # Legacy egui build configuration
 └── .env.example              # Configuration template
 ```
 
