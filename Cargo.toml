@@ -26,7 +26,7 @@ required-features = ["egui-web"]
 [[bin]]
 name = "nearx-web-dom"
 path = "src/bin/nearx-web-dom.rs"
-required-features = ["egui-web"]
+required-features = ["dom-web"]
 
 [workspace]
 resolver = "2"
@@ -92,6 +92,18 @@ egui-web = [
     "dep:egui_extras",
     "dep:egui_ratatui",
     "dep:soft_ratatui",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:js-sys",
+    "dep:web-sys",
+    "dep:getrandom",
+    "dep:console_error_panic_hook",
+    "dep:wasm-logger",
+    "dep:web-time",
+    "dep:gloo-timers",
+]
+
+dom-web = [
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
     "dep:js-sys",

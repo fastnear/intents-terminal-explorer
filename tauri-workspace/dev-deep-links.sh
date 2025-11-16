@@ -13,10 +13,11 @@
 #
 # What it does:
 #   1. Kills any running instances of the app
-#   2. Builds a debug bundle (faster than release, includes symbols)
-#   3. Clears macOS Launch Services cache
-#   4. Registers the fresh debug bundle
-#   5. Optionally tests with a deep link
+#   2. Builds the web frontend (dist-dom) if needed
+#   3. Builds a debug bundle (faster than release, includes symbols)
+#   4. Clears macOS Launch Services cache
+#   5. Registers the fresh debug bundle
+#   6. Optionally tests with a deep link
 #
 # When to use:
 #   - Testing deep link handling (nearx:// URLs)
@@ -50,6 +51,8 @@ APP_NAME="NEARx"
 BINARY_NAME="nearx-tauri"
 DEBUG_BUNDLE_PATH="target/debug/bundle/macos/${APP_NAME}.app"
 SAMPLE_DEEP_LINK="nearx://v1/tx/ABC123"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+FRONTEND_DIST="$PROJECT_ROOT/dist-dom"
 
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}  NEARx Deep Link Development Helper${NC}"
@@ -71,10 +74,11 @@ if [[ "$MODE" == "--help" || "$MODE" == "-h" || "$MODE" == "help" ]]; then
     echo ""
     echo "What it does:"
     echo "  1. Kills any running instances of NEARx"
-    echo "  2. Builds a debug .app bundle with symbols"
-    echo "  3. Clears macOS Launch Services cache"
-    echo "  4. Registers the fresh debug bundle"
-    echo "  5. Optionally tests with nearx://v1/tx/ABC123"
+    echo "  2. Builds web frontend (dist-dom) if needed"
+    echo "  3. Builds a debug .app bundle with symbols"
+    echo "  4. Clears macOS Launch Services cache"
+    echo "  5. Registers the fresh debug bundle"
+    echo "  6. Optionally tests with nearx://v1/tx/ABC123"
     echo ""
     echo "When to use:"
     echo "  • Testing deep link handling (nearx:// URLs)"
@@ -99,15 +103,15 @@ if [[ "$MODE" == "clean" ]]; then
 fi
 
 # Step 1: Kill running instances
-echo -e "${YELLOW}[1/5] Killing running instances...${NC}"
+echo -e "${YELLOW}[1/6] Killing running instances...${NC}"
 if killall "$BINARY_NAME" 2>/dev/null; then
-    echo -e "${GREEN}Killed running instance of ${BINARY_NAME}${NC}"
+    echo -e "${GREEN}✓ Killed running instance of ${BINARY_NAME}${NC}"
 else
     echo "  No running instances found"
 fi
 
 if killall "$APP_NAME" 2>/dev/null; then
-    echo -e "${GREEN}Killed running instance of ${APP_NAME}${NC}"
+    echo -e "${GREEN}✓ Killed running instance of ${APP_NAME}${NC}"
 else
     echo "  No running instances found"
 fi
@@ -116,7 +120,7 @@ sleep 1  # Give processes time to exit
 echo ""
 
 # Step 2: Find and list all registered app locations
-echo -e "${YELLOW}[2/5] Finding registered app locations...${NC}"
+echo -e "${YELLOW}[2/6] Finding registered app locations...${NC}"
 REGISTERED_PATHS=$(mdfind "kMDItemCFBundleIdentifier == '${BUNDLE_ID}'" 2>/dev/null || echo "")
 
 if [[ -n "$REGISTERED_PATHS" ]]; then
@@ -130,23 +134,56 @@ fi
 echo ""
 
 # Step 3: Clear Launch Services cache
-echo -e "${YELLOW}[3/5] Clearing Launch Services cache...${NC}"
+echo -e "${YELLOW}[3/6] Clearing Launch Services cache...${NC}"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
     -kill -r -domain local -domain system -domain user
 
-echo -e "${GREEN}Launch Services cache cleared${NC}"
+echo -e "${GREEN}✓ Launch Services cache cleared${NC}"
 sleep 2  # Give macOS time to rebuild cache
 echo ""
 
 if [[ "$MODE" == "clean" ]]; then
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}Cleanup complete${NC}"
+    echo -e "${GREEN}✓ Cleanup complete${NC}"
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     exit 0
 fi
 
-# Step 4: Build debug binary and create bundle
-echo -e "${YELLOW}[4/5] Building debug binary...${NC}"
+# Step 4: Build web frontend
+echo -e "${YELLOW}[4/6] Building web frontend...${NC}"
+
+if [[ ! -d "$FRONTEND_DIST" ]]; then
+    echo -e "${BLUE}Frontend not built yet, running trunk build...${NC}"
+    echo ""
+
+    cd "$PROJECT_ROOT"
+
+    # Check if trunk is installed
+    if ! command -v trunk &> /dev/null; then
+        echo -e "${RED}Error: trunk is not installed${NC}"
+        echo ""
+        echo "Install trunk with:"
+        echo "  cargo install --locked trunk"
+        echo ""
+        exit 1
+    fi
+
+    if trunk build --config Trunk-dom.toml; then
+        echo ""
+        echo -e "${GREEN}✓ Frontend built successfully${NC}"
+    else
+        echo ""
+        echo -e "${RED}Frontend build failed${NC}"
+        exit 1
+    fi
+else
+    echo -e "${GREEN}✓ Frontend already built at $FRONTEND_DIST${NC}"
+    echo -e "${BLUE}  (Run 'rm -rf dist-dom' and re-run to rebuild)${NC}"
+fi
+echo ""
+
+# Step 5: Build debug binary and create bundle
+echo -e "${YELLOW}[5/6] Building debug binary...${NC}"
 echo -e "${BLUE}Running: cargo build${NC}"
 echo ""
 
@@ -154,7 +191,7 @@ cd "$(dirname "$0")/src-tauri"  # Ensure we're in src-tauri directory
 
 if cargo build; then
     echo ""
-    echo -e "${GREEN}Debug binary built successfully${NC}"
+    echo -e "${GREEN}✓ Debug binary built successfully${NC}"
 else
     echo ""
     echo -e "${RED}Build failed${NC}"
@@ -162,8 +199,8 @@ else
 fi
 echo ""
 
-# Step 4.5: Create .app bundle structure manually
-echo -e "${YELLOW}[4.5/5] Creating .app bundle structure...${NC}"
+# Step 5.5: Create .app bundle structure manually
+echo -e "${YELLOW}[5.5/6] Creating .app bundle structure...${NC}"
 
 cd ..  # Back to tauri-workspace directory
 
@@ -225,30 +262,30 @@ cat > "$BUNDLE_CONTENTS/Info.plist" <<EOF
 </plist>
 EOF
 
-echo -e "${GREEN}Debug bundle created${NC}"
+echo -e "${GREEN}✓ Debug bundle created${NC}"
 echo -e "${BLUE}Bundle location:${NC}"
 echo "  $DEBUG_BUNDLE_PATH"
 echo ""
 
-# Step 5: Register the bundle
-echo -e "${YELLOW}[5/5] Registering bundle with Launch Services...${NC}"
+# Step 6: Register the bundle
+echo -e "${YELLOW}[6/6] Registering bundle with Launch Services...${NC}"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
     -f "$DEBUG_BUNDLE_PATH"
 
-echo -e "${GREEN}Bundle registered${NC}"
+echo -e "${GREEN}✓ Bundle registered${NC}"
 echo ""
 
 # Verify registration
 echo -e "${BLUE}Verifying registration...${NC}"
 sleep 1
 if mdfind "kMDItemCFBundleIdentifier == '${BUNDLE_ID}'" 2>/dev/null | grep -q "$DEBUG_BUNDLE_PATH"; then
-    echo -e "${GREEN}Registration verified${NC}"
+    echo -e "${GREEN}✓ Registration verified${NC}"
 else
     echo -e "${YELLOW}Registration not yet visible (may take a few seconds)${NC}"
 fi
 echo ""
 
-# Step 6: Optional deep link test
+# Step 7: Optional deep link test
 if [[ "$MODE" == "test" ]]; then
     echo -e "${YELLOW}[TEST] Opening sample deep link...${NC}"
     echo -e "${BLUE}URL: ${SAMPLE_DEEP_LINK}${NC}"
@@ -257,14 +294,14 @@ if [[ "$MODE" == "test" ]]; then
     sleep 1  # Give registration time to propagate
     open "$SAMPLE_DEEP_LINK"
 
-    echo -e "${GREEN}Deep link sent to macOS${NC}"
+    echo -e "${GREEN}✓ Deep link sent to macOS${NC}"
     echo -e "${BLUE}  Check the app logs for deep link processing${NC}"
     echo ""
 fi
 
 # Summary
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}Setup complete${NC}"
+echo -e "${GREEN}✓ Setup complete${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 echo -e "${BLUE}Next steps:${NC}"
@@ -280,6 +317,7 @@ echo "    ./dev-deep-links.sh test"
 echo ""
 echo -e "${BLUE}Notes:${NC}"
 echo "  • Debug bundle includes debug symbols and logging"
+echo "  • Frontend is built from dist-dom (use 'trunk build --config Trunk-dom.toml' to rebuild)"
 echo "  • Use 'cargo tauri dev' for general UI development (no deep links)"
 echo "  • Use this script for deep link testing"
 echo "  • Run './dev-deep-links.sh clean' to remove old registrations"

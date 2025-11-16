@@ -7,7 +7,7 @@
 #[cfg(feature = "native")]
 mod native;
 
-#[cfg(feature = "egui-web")]
+#[cfg(any(feature = "egui-web", feature = "dom-web"))]
 mod web;
 
 // Export platform-specific implementations with priority:
@@ -17,7 +17,7 @@ mod web;
 #[cfg(feature = "native")]
 pub use native::{copy_to_clipboard, History};
 
-#[cfg(all(feature = "egui-web", not(feature = "native")))]
+#[cfg(all(any(feature = "egui-web", feature = "dom-web"), not(feature = "native")))]
 pub use web::{copy_to_clipboard, History};
 
 // Re-export types that are common across platforms
