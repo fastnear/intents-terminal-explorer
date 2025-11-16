@@ -92,7 +92,7 @@
       }
 
       .nx-row:hover {
-        background: var(--hover-bg, #151b23);
+        background: var(--panel-alt, #121722);
       }
 
       .nx-row--selected {
@@ -101,7 +101,7 @@
 
       .nx-row--owned {
         font-weight: 500;
-        color: var(--accent-soft, #66b3ff);
+        color: var(--accent, #66b3ff);
       }
 
       #row-details {
@@ -140,8 +140,8 @@
         right: 12px;
         padding: 6px 10px;
         border-radius: 8px;
-        background: var(--toast-bg, #111827);
-        border: 1px solid var(--accent-soft, #66b3ff);
+        background: var(--panel, #0f131a);
+        border: 1px solid var(--accent, #66b3ff);
         font-size: 12px;
         max-width: 360px;
         white-space: pre-wrap;
@@ -150,26 +150,57 @@
   </head>
   <body>
     <div id="nearx-root">
-      <div id="row-filter">
+      <div id="row-filter" role="search">
         <input
           id="nearx-filter"
           type="text"
           placeholder="Filter (press / to focus)…"
           autocomplete="off"
+          aria-label="Transaction filter"
         />
-        <button id="nearx-owned-toggle" type="button">Owned only</button>
+        <button
+          id="nearx-owned-toggle"
+          type="button"
+          aria-label="Toggle owned-only filter"
+          aria-pressed="false"
+        >
+          Owned only
+        </button>
       </div>
 
-      <div id="row-main">
-        <div id="pane-blocks" class="nx-pane nx-pane--blocks"></div>
-        <div id="pane-txs" class="nx-pane nx-pane--txs"></div>
+      <div id="row-main" role="main">
+        <div
+          id="pane-blocks"
+          class="nx-pane nx-pane--blocks"
+          role="list"
+          aria-label="Blocks"
+          tabindex="0"
+        ></div>
+        <div
+          id="pane-txs"
+          class="nx-pane nx-pane--txs"
+          role="list"
+          aria-label="Transactions"
+          tabindex="0"
+        ></div>
       </div>
 
-      <div id="row-details">
-        <pre id="pane-details" class="nx-details"></pre>
+      <div id="row-details" role="complementary">
+        <pre
+          id="pane-details"
+          class="nx-details"
+          aria-label="Transaction details"
+          tabindex="0"
+        ></pre>
       </div>
 
-      <div id="nearx-toast" class="nx-toast" hidden></div>
+      <div
+        id="nearx-toast"
+        class="nx-toast"
+        role="status"
+        aria-live="polite"
+        hidden
+      ></div>
     </div>
 
     <!-- Bridges you already have -->
