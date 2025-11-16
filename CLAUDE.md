@@ -1592,6 +1592,32 @@ ratacat/
   - XSS-hardened security posture
   - Graceful degradation with runtime toggles
 
+### Pure DOM Frontend (v0.4.3)
+- **Problem**: egui/eframe dependencies added complexity, canvas rendering caused compatibility issues, wasm_guard.js masked real errors
+- **Solution**: Complete removal of egui, replaced with pure DOM + JSON bridge architecture
+- **Key Changes**:
+  - **New `dom-web` feature**: Zero egui dependencies, only wasm-bindgen + web APIs
+  - **Removed dependencies**: egui, eframe, egui_extras, egui_ratatui, soft_ratatui (all commented out)
+  - **Removed wasm_guard.js**: Errors now visible in browser/Tauri console instead of overlay
+  - **Headless pattern**: `WasmApp` exposes `App` via `UiSnapshot` (JSON state) and `UiAction` (JSON commands)
+  - **Binary**: `nearx-web-dom` replaces `nearx-web` (egui version deprecated)
+  - **Trunk config**: `Trunk-dom.toml` uses `dom-web` feature, outputs to `dist-dom/`
+- **Architecture**:
+  - **Rust (WASM)**: `src/bin/nearx-web-dom.rs` - 375 lines, no egui imports
+  - **JavaScript**: `web/app.js` - DOM renderer with snapshot → render → action pattern
+  - **HTML**: `index-dom.html` - Pure DOM structure with flexbox layout
+  - **Data flow**: RPC events → App state → JSON snapshot → DOM render → User action → App update
+- **Benefits**:
+  - **Smaller bundle**: 3.7MB WASM (no egui overhead)
+  - **Better debugging**: Real errors visible in console, no masking overlay
+  - **Native UX**: Regular web text selection, scrolling, focus management
+  - **Maximum compatibility**: Works in any modern browser, no WebGL required
+  - **Same build for Tauri**: Desktop app uses identical `dist-dom/` output
+- **Verification**:
+  - ✅ `cargo tree -i egui` → "did not match any packages"
+  - ✅ Clean Trunk build with zero canvas/WebGL dependencies
+  - ✅ All keyboard shortcuts work (arrows, vim keys, Tab, Space, etc.)
+
 ### Unified Clipboard System (v0.4.1)
 - **Problem**: Inline clipboard code duplicated across web and Tauri binaries, no fallback chain for reliability
 - **Solution**: Platform abstraction with JavaScript bridge and 4-tier fallback chain
