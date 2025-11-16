@@ -782,8 +782,8 @@ trunk build --config Trunk-dom.toml --release
 **Critical Build Details:**
 - Binary: `nearx-web-dom` (specified in `Trunk-dom.toml`)
 - HTML: `index-dom.html` (clean DOM structure, no canvas)
-- Features: `--no-default-features --features egui-web` (feature name kept for compatibility, but no egui used)
-- Output: `dist-dom/` directory (separate from egui build)
+- Features: `--no-default-features --features dom-web` (pure WASM dependencies, zero egui)
+- Output: `dist-dom/` directory (separate from legacy egui build)
 
 **File Structure:**
 ```
@@ -857,7 +857,7 @@ trunk build --config Trunk-dom.toml
 
 # Check WASM target compiles without warnings
 cargo check --bin nearx-web-dom --target wasm32-unknown-unknown \
-  --no-default-features --features egui-web
+  --no-default-features --features dom-web
 
 # Verify dist-dom structure
 ls dist-dom/

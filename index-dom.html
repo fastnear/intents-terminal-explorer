@@ -177,10 +177,6 @@
     <link data-trunk rel="copy-file" href="web/deep_link.js" />
     <script defer src="deep_link.js"></script>
 
-    <!-- WASM error guard (dev helper - surfaces errors inline) -->
-    <link data-trunk rel="copy-file" href="web/wasm_guard.js" />
-    <script defer src="wasm_guard.js"></script>
-
     <!-- Clipboard / platform bridge (works in web, Tauri, extension) -->
     <link data-trunk rel="copy-file" href="web/platform.js" />
     <script src="platform.js"></script>
@@ -195,7 +191,7 @@
       rel="rust"
       data-bin="nearx-web-dom"
       data-cargo-no-default-features
-      data-cargo-features="egui-web"
+      data-cargo-features="dom-web"
     />
   </body>
 </html>
