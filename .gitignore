@@ -8,6 +8,7 @@
 # Wasm/Web
 /dist
 /dist-egui
+/dist-dom
 *.wasm
 
 # IDE / OS
@@ -30,6 +31,7 @@ ratacat_debug.log
 # Web build artifacts (Trunk)
 /dist/
 /dist-egui/
+/dist-dom/
 **/dist/
 
 # Playwright E2E artifacts
