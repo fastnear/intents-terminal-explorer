@@ -4,10 +4,10 @@
   "version": "0.4.0",
   "identifier": "com.fastnear.nearx",
   "build": {
-    "beforeDevCommand": "trunk serve --config ../../Trunk-dom.toml",
-    "beforeBuildCommand": "trunk build --config ../../Trunk-dom.toml --release",
+    "beforeDevCommand": "trunk serve",
+    "beforeBuildCommand": "trunk build --release",
     "devUrl": "http://127.0.0.1:8084",
-    "frontendDist": "../../dist-dom"
+    "frontendDist": "../dist"
   },
   "app": {
     "withGlobalTauri": true,

@@ -7,22 +7,9 @@ use crate::history::{BlockPersist, HistoryHit};
 use anyhow::Result;
 
 /// Clipboard support for web using web-sys
-pub fn copy_to_clipboard(content: &str) -> bool {
-    #[cfg(feature = "egui-web")]
-    {
-        if let Some(window) = web_sys::window() {
-            let clipboard = window.navigator().clipboard();
-            let promise = clipboard.write_text(content);
-            // Fire and forget - we can't easily await in this sync context
-            // In real usage, this works fine for copy operations
-            drop(promise);
-            true
-        } else {
-            false
-        }
-    }
-
-    #[cfg(not(feature = "egui-web"))]
+pub fn copy_to_clipboard(_content: &str) -> bool {
+    // Clipboard is now handled by web/platform.js via JavaScript bridge
+    // This stub exists for API compatibility but isn't used
     false
 }
 

@@ -341,7 +341,7 @@ fn validate_url(url: &str, name: &str) -> Result<()> {
 /// Avoids runtime env reads on WASM (which cause panics).
 pub fn fastnear_token() -> Option<String> {
     // Highest priority: user auth (web/tauri) if present
-    #[cfg(feature = "egui-web")]
+    #[cfg(target_arch = "wasm32")]
     {
         if let Some(t) = crate::auth::token_string() {
             if !t.is_empty() {

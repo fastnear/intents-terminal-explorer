@@ -1,7 +1,7 @@
 // DOM frontend for NEARx using WasmApp.
 //
-// Expects the wasm-bindgen JS glue for the `nearx-web-dom` binary to be
-// available as `nearx-web-dom.js` in the same directory.
+// Trunk auto-loads the WASM and exposes it as window.wasmBindings.
+// We just need to access WasmApp from there.
 //
 // HTML requirements (see index-dom.html):
 //
@@ -20,14 +20,17 @@
 //   <div id="nearx-toast" class="nx-toast" hidden></div>
 // </div>
 
-import init, { WasmApp } from "./nearx-web-dom.js";
-
 let wasmApp = null;
 let lastSnapshot = null;
 let suppressFilterEvent = false;
 
 async function main() {
-  await init();
+  // Wait for Trunk's auto-injected WASM loader
+  while (!window.wasmBindings) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+
+  const { WasmApp } = window.wasmBindings;
   wasmApp = new WasmApp();
 
   hookEvents();

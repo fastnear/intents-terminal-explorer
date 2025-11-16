@@ -1,37 +1,37 @@
 [build]
 # The index HTML file to drive the bundling process
-target = "index-egui.html"
+target = "index.html"
 
 # Build in release mode for production (smaller WASM)
 # Set to false for faster development builds
 release = false
 
 # Output directory for built assets
-dist = "dist-egui"
+dist = "dist"
 
 # Public URL base path (use "/" for root, or "./" for Tauri/relative paths)
 public_url = "./"
 
 # Optimize the WASM bundle
 [build.rust]
-# Features to enable for the egui web build
+# Features to enable for the DOM web build
 no_default_features = true
-features = ["egui-web"]
+features = ["dom-web"]
 
-# Binary to build (nearx-web with egui)
-bin = "nearx-web"
+# Binary to build (nearx-web-dom)
+bin = "nearx-web-dom"
 
 [watch]
 # Paths to watch for changes during development
-watch = ["src/"]
+watch = ["src/", "web/"]
 
 # Paths to ignore
-ignore = ["dist-egui/", "target/"]
+ignore = ["dist-dom/", "dist-egui/", "target/"]
 
 [serve]
 # Development server configuration
 addresses = ["127.0.0.1"]
-port = 8083
+port = 8084
 
 # Open browser automatically
 open = true
