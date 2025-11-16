@@ -73,6 +73,28 @@ pub struct UiSnapshot {
 
     /// Toast notification (if any)
     pub toast: Option<String>,
+
+    // === TUI-matching additions ===
+    /// Current FPS
+    pub fps: u32,
+
+    /// Dynamic title for blocks pane (e.g., "Blocks (5 / 100)")
+    pub blocks_title: String,
+
+    /// Dynamic title for txs pane (e.g., "Txs (own: 2 of 5)")
+    pub txs_title: String,
+
+    /// Dynamic title for details pane (e.g., "Press 'c' to copy")
+    pub details_title: String,
+
+    /// Loading state (archival fetch in progress)
+    pub loading_block: Option<u64>,
+
+    /// Viewing cached block (not in main buffer)
+    pub is_viewing_cached: bool,
+
+    /// Count of pinned marks (for footer badge)
+    pub pinned_marks_count: usize,
 }
 
 impl UiSnapshot {
@@ -117,6 +139,37 @@ impl UiSnapshot {
 
         let toast = app.toast_message().map(|s| s.to_string());
 
+        // Dynamic titles (match TUI logic from ui.rs)
+        let blocks_title = if app.is_viewing_cached_block() {
+            "Blocks (cached) · ← Recent".to_string()
+        } else if blocks.len() < blocks_total {
+            format!("Blocks ({} / {})", blocks.len(), blocks_total)
+        } else {
+            "Blocks".to_string()
+        };
+
+        let owned_count = selected_block_height
+            .map(|height| app.owned_count(height))
+            .unwrap_or(0);
+        let txs_title = if app.owned_only_filter() {
+            format!("Txs (own: {} of {})", owned_count.min(txs_total), txs_total)
+        } else if txs.len() < txs_total {
+            format!("Txs ({} / {})", txs.len(), txs_total)
+        } else {
+            format!("Txs ({})", txs.len())
+        };
+
+        let pane_focused = app.pane() == 2;
+        let details_title = if pane_focused {
+            if app.details_fullscreen() {
+                "Transaction details - Press 'c' to copy • Spacebar exits fullscreen".to_string()
+            } else {
+                "Transaction details - Press 'c' to copy • Spacebar to expand".to_string()
+            }
+        } else {
+            "Transaction details".to_string()
+        };
+
         UiSnapshot {
             pane: app.pane() as u8,
             filter_query: app.filter_query().to_string(),
@@ -129,6 +182,13 @@ impl UiSnapshot {
             details: app.details_pretty_string(),
             details_fullscreen: app.details_fullscreen(),
             toast,
+            fps: app.fps(),
+            blocks_title,
+            txs_title,
+            details_title,
+            loading_block: app.loading_block(),
+            is_viewing_cached: app.is_viewing_cached_block(),
+            pinned_marks_count: 0, // TODO: marks not available in web yet
         }
     }
 }
