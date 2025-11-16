@@ -1,46 +1,32 @@
 // DOM frontend for Ratacat/NEARx using WasmApp.
 //
-// Requires wasm-bindgen output under ./pkg/nearx-web-dom.js:
+// Requires wasm-bindgen output under ./pkg/nearx_web_dom.js:
 //
-//   cargo build --bin nearx-web-dom --features dom-web \
+//   cargo build --bin nearx-web-dom --features web-dom \
 //     --target wasm32-unknown-unknown
 //
 //   wasm-bindgen \
 //     --target web \
 //     --no-typescript \
 //     --out-dir web/pkg \
+//     --out-name nearx_web_dom \
 //     target/wasm32-unknown-unknown/debug/nearx-web-dom.wasm
 //
 // Then open web/index.html in a browser (or via Tauri).
+
+import init, * as wasm from "./pkg/nearx_web_dom.js";
 
 let wasmApp = null;
 let lastSnapshot = null;
 let suppressFilterEvent = false;
 
 async function main() {
-  // Wait for WASM module to load (from index.html) with timeout
-  const startTime = Date.now();
-  const timeout = 5000; // 5 seconds
-  while (!window.wasm_bindgen) {
-    if (Date.now() - startTime > timeout) {
-      console.error("[nearx-web-dom] Timeout waiting for WASM module to load");
-      document.body.innerHTML = `
-        <div style="display: flex; align-items: center; justify-content: center; height: 100vh; font-family: system-ui; color: #ff6b6b;">
-          <div style="text-align: center; max-width: 500px; padding: 20px;">
-            <h1>Failed to load WASM module</h1>
-            <p>The WebAssembly module failed to load within 5 seconds.</p>
-            <p>This might be due to a network issue or CORS policy.</p>
-            <button onclick="location.reload()" style="padding: 8px 16px; margin-top: 16px; cursor: pointer;">Reload Page</button>
-          </div>
-        </div>
-      `;
-      return;
-    }
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
+  await init();
 
-  const { WasmApp } = window.wasm_bindgen;
-  wasmApp = new WasmApp();
+  // Make wasm exports available for router_shim.js (nearx_auth_callback).
+  window.wasm_bindgen = wasm;
+
+  wasmApp = new wasm.WasmApp();
 
   hookEvents();
   const snap = snapshot();
@@ -116,6 +102,18 @@ function hookEvents() {
       return;
     }
 
+    // 'c' → copy JSON via copy_api (pane-aware).
+    if (e.key === "c" || e.key === "C") {
+      if (e.ctrlKey || e.metaKey) {
+        // On web, Ctrl+C is used for browser copy; keep it simple:
+        // plain 'c' copies, Ctrl+C is normal browser copy.
+        return;
+      }
+      e.preventDefault();
+      apply({ type: "CopyFocusedJson" });
+      return;
+    }
+
     const navKeys = [
       "ArrowUp",
       "ArrowDown",
@@ -139,7 +137,6 @@ function hookEvents() {
       "u",
       "U",
       "Escape",
-      "c",
     ];
 
     if (!navKeys.includes(e.key)) return;

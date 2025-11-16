@@ -17,105 +17,66 @@ use serde::{Deserialize, Serialize};
 
 use tokio::sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver};
 
-use nearx::{App, AppEvent, Config, Source};
+use nearx::{App, AppEvent, BlockRow, Config, Source, TxLite};
 
 /// One row in the Blocks pane (filtered view).
 #[derive(Debug, Clone, Serialize)]
 pub struct UiBlockRow {
-    pub index: usize,          // index within filtered list
-    pub height: u64,           // block height
-    pub hash: String,          // block hash
-    pub when: String,          // human-readable "when"
-    pub tx_count: usize,       // total tx in block
-    pub owned_tx_count: usize, // tx in block involving owned accounts
-    pub is_selected: bool,     // row is currently selected
+    pub index: usize,
+    pub height: u64,
+    pub hash: String,
+    pub when: String,
+    pub tx_count: usize,
+    pub owned_tx_count: usize,
+    pub is_selected: bool,
 }
 
 /// One row in the Transactions pane (filtered view).
 #[derive(Debug, Clone, Serialize)]
 pub struct UiTxRow {
-    pub index: usize,     // index within filtered list
-    pub hash: String,     // tx hash
+    pub index: usize,
+    pub hash: String,
     pub signer_id: String,
     pub receiver_id: String,
     pub is_selected: bool,
-    pub is_owned: bool, // tx involves an owned account (signer/receiver)
+    pub is_owned: bool,
 }
 
-/// Complete UI snapshot for DOM rendering.
+/// DOM-facing snapshot of App state (Rust → JS).
 #[derive(Debug, Clone, Serialize)]
 pub struct UiSnapshot {
     /// 0 = Blocks, 1 = Txs, 2 = Details
     pub pane: u8,
 
-    /// Current filter query (text)
     pub filter_query: String,
-
-    /// Owned-only filter toggle
     pub owned_only_filter: bool,
 
-    /// Blocks pane rows (filtered)
     pub blocks: Vec<UiBlockRow>,
-    /// Total number of blocks in buffer (unfiltered)
     pub blocks_total: usize,
-
-    /// Height of currently-selected block (if any)
     pub selected_block_height: Option<u64>,
 
-    /// Transactions pane rows (filtered)
     pub txs: Vec<UiTxRow>,
-    /// Total number of txs in current block (unfiltered)
     pub txs_total: usize,
 
-    /// Pretty-printed JSON in the details pane
     pub details: String,
-
-    /// Details fullscreen flag (Space toggles)
     pub details_fullscreen: bool,
 
-    /// Toast notification (if any)
     pub toast: Option<String>,
-
-    // === TUI-matching additions ===
-    /// Current FPS
-    pub fps: u32,
-
-    /// Dynamic title for blocks pane (e.g., "Blocks (5 / 100)")
-    pub blocks_title: String,
-
-    /// Dynamic title for txs pane (e.g., "Txs (own: 2 of 5)")
-    pub txs_title: String,
-
-    /// Dynamic title for details pane (e.g., "Press 'c' to copy")
-    pub details_title: String,
 
     /// Loading state (archival fetch in progress)
     pub loading_block: Option<u64>,
-
-    /// Viewing cached block (not in main buffer)
-    pub is_viewing_cached: bool,
-
-    /// Count of pinned marks (for footer badge)
-    pub pinned_marks_count: usize,
 }
 
 impl UiSnapshot {
     pub fn from_app(app: &App) -> Self {
+        let pane = app.pane() as u8;
+
         // Blocks (filtered)
         let (blocks_filtered, selected_block_idx_opt, blocks_total) = app.filtered_blocks();
-
         let blocks: Vec<UiBlockRow> = blocks_filtered
             .into_iter()
             .enumerate()
-            .map(|(idx, b)| UiBlockRow {
-                index: idx,
-                height: b.height,
-                hash: b.hash.clone(),
-                when: b.when.clone(),
-                tx_count: b.transactions.len(),
-                owned_tx_count: app.owned_count(b.height),
-                is_selected: selected_block_idx_opt == Some(idx),
-            })
+            .map(|(idx, b)| UiSnapshot::block_row_from(idx, b, app, selected_block_idx_opt))
             .collect();
 
         let selected_block_height = app.selected_block_height();
@@ -125,55 +86,16 @@ impl UiSnapshot {
         let txs: Vec<UiTxRow> = txs_vec
             .into_iter()
             .enumerate()
-            .map(|(idx, tx)| {
-                let signer = tx.signer_id.clone().unwrap_or_default();
-                let receiver = tx.receiver_id.clone().unwrap_or_default();
-                UiTxRow {
-                    index: idx,
-                    hash: tx.hash.clone(),
-                    signer_id: signer,
-                    receiver_id: receiver,
-                    is_selected: idx == selected_tx_idx,
-                    is_owned: app.is_owned_tx(&tx),
-                }
-            })
+            .map(|(idx, tx)| UiSnapshot::tx_row_from(idx, &tx, selected_tx_idx, app))
             .collect();
 
+        let details = app.details_pretty_string();
+        let details_fullscreen = app.details_fullscreen();
         let toast = app.toast_message().map(|s| s.to_string());
-
-        // Dynamic titles (match TUI logic from ui.rs)
-        let blocks_title = if app.is_viewing_cached_block() {
-            "Blocks (cached) · ← Recent".to_string()
-        } else if blocks.len() < blocks_total {
-            format!("Blocks ({} / {})", blocks.len(), blocks_total)
-        } else {
-            "Blocks".to_string()
-        };
-
-        let owned_count = selected_block_height
-            .map(|height| app.owned_count(height))
-            .unwrap_or(0);
-        let txs_title = if app.owned_only_filter() {
-            format!("Txs (own: {} of {})", owned_count.min(txs_total), txs_total)
-        } else if txs.len() < txs_total {
-            format!("Txs ({} / {})", txs.len(), txs_total)
-        } else {
-            format!("Txs ({})", txs.len())
-        };
-
-        let pane_focused = app.pane() == 2;
-        let details_title = if pane_focused {
-            if app.details_fullscreen() {
-                "Transaction details - Press 'c' to copy • Spacebar exits fullscreen".to_string()
-            } else {
-                "Transaction details - Press 'c' to copy • Spacebar to expand".to_string()
-            }
-        } else {
-            "Transaction details".to_string()
-        };
+        let loading_block = app.loading_block();
 
         UiSnapshot {
-            pane: app.pane() as u8,
+            pane,
             filter_query: app.filter_query().to_string(),
             owned_only_filter: app.owned_only_filter(),
             blocks,
@@ -181,46 +103,66 @@ impl UiSnapshot {
             selected_block_height,
             txs,
             txs_total,
-            details: app.details_pretty_string(),
-            details_fullscreen: app.details_fullscreen(),
+            details,
+            details_fullscreen,
             toast,
-            fps: app.fps(),
-            blocks_title,
-            txs_title,
-            details_title,
-            loading_block: app.loading_block(),
-            is_viewing_cached: app.is_viewing_cached_block(),
-            pinned_marks_count: 0, // TODO: marks not available in web yet
+            loading_block,
+        }
+    }
+
+    fn block_row_from(
+        index: usize,
+        b: &BlockRow,
+        app: &App,
+        selected_block_idx_opt: Option<usize>,
+    ) -> UiBlockRow {
+        UiBlockRow {
+            index,
+            height: b.height,
+            hash: b.hash.clone(),
+            when: b.when.clone(),
+            tx_count: b.tx_count,
+            owned_tx_count: app.owned_count(b.height),
+            is_selected: selected_block_idx_opt == Some(index),
+        }
+    }
+
+    fn tx_row_from(
+        index: usize,
+        tx: &TxLite,
+        selected_tx_idx: usize,
+        app: &App,
+    ) -> UiTxRow {
+        let signer = tx.signer_id.clone().unwrap_or_default();
+        let receiver = tx.receiver_id.clone().unwrap_or_default();
+        UiTxRow {
+            index,
+            hash: tx.hash.clone(),
+            signer_id: signer,
+            receiver_id: receiver,
+            is_selected: index == selected_tx_idx,
+            is_owned: app.is_owned_tx(tx),
         }
     }
 }
 
-/// Actions that JS can send to Rust.
-///
-/// These are intentionally small and high-level; JS owns DOM details,
-/// Rust owns navigation and selection logic.
+/// Actions from DOM → Rust.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum UiAction {
-    /// Update filter text (immediate apply).
+    // Filter & focus
     SetFilter { text: String },
-
-    /// Focus a pane directly: 0 = Blocks, 1 = Txs, 2 = Details.
     FocusPane { pane: u8 },
 
-    /// Select a block row by index in the filtered list.
+    // Selection
     SelectBlock { index: usize },
-
-    /// Select a tx row by index in the filtered list.
     SelectTx { index: usize },
 
-    /// Toggle owned-only filter.
+    // Toggles
     ToggleOwnedOnly,
-
-    /// Toggle details fullscreen mode.
     ToggleDetailsFullscreen,
 
-    /// Keyboard navigation (Arrow keys, PageUp/Down, Tab, Enter, Space, j/k/h/l, etc.).
+    // Navigation keys (arrows, page up/down, j/k/h/l, tab, space, etc.).
     Key {
         code: String,
         ctrl: bool,
@@ -228,6 +170,9 @@ pub enum UiAction {
         shift: bool,
         meta: bool,
     },
+
+    // Copy the focused pane JSON (Blocks/Txs/Details).
+    CopyFocusedJson,
 }
 
 /// Initialize theme CSS variables on page load.
@@ -385,33 +330,20 @@ impl WasmApp {
 
     fn apply_action(&mut self, action: UiAction) {
         match action {
-            UiAction::SetFilter { text } => {
-                self.app.set_filter_query(text);
-            }
-            UiAction::FocusPane { pane } => {
-                self.app.set_pane_direct(pane as usize);
-            }
-            UiAction::SelectBlock { index } => {
-                self.app.select_block_clamped(index);
-            }
-            UiAction::SelectTx { index } => {
-                self.app.select_tx_clamped(index);
-            }
-            UiAction::ToggleOwnedOnly => {
-                self.app.toggle_owned_filter();
-            }
-            UiAction::ToggleDetailsFullscreen => {
-                self.app.toggle_details_fullscreen();
-            }
+            UiAction::SetFilter { text } => self.app.set_filter_query(text),
+            UiAction::FocusPane { pane } => self.app.set_pane_direct(pane as usize),
+            UiAction::SelectBlock { index } => self.app.select_block_clamped(index),
+            UiAction::SelectTx { index } => self.app.select_tx_clamped(index),
+            UiAction::ToggleOwnedOnly => self.app.toggle_owned_filter(),
+            UiAction::ToggleDetailsFullscreen => self.app.toggle_details_fullscreen(),
             UiAction::Key {
                 code,
                 ctrl,
                 alt: _,
                 shift,
                 meta,
-            } => {
-                self.handle_key(code, ctrl || meta, shift);
-            }
+            } => self.handle_key(code, ctrl || meta, shift),
+            UiAction::CopyFocusedJson => self.handle_copy(),
         }
     }
 
@@ -450,11 +382,24 @@ impl WasmApp {
             // Ctrl+U: toggle owned-only filter (keyboard path).
             "u" | "U" if ctrl => self.app.toggle_owned_filter(),
 
-            // Escape: let DOM handle filter focus; no-op here.
-            "Escape" => {}
+            // Quit is a no-op on web/Tauri.
+            "q" | "Q" => {}
 
-            // Everything else currently ignored.
             _ => {}
+        }
+    }
+
+    fn handle_copy(&mut self) {
+        if nearx::copy_api::copy_current(&self.app) {
+            let msg = match self.app.pane() {
+                0 => "Copied block info".to_string(),
+                1 => "Copied tx hash".to_string(),
+                2 => "Copied details".to_string(),
+                _ => "Copied".to_string(),
+            };
+            self.app.show_toast(msg);
+        } else {
+            self.app.show_toast("Copy failed".to_string());
         }
     }
 }

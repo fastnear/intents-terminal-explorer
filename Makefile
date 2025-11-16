@@ -23,6 +23,7 @@ web:
 	@wasm-bindgen \
 		--target web \
 		--out-dir web/pkg \
+		--out-name nearx_web_dom \
 		--no-typescript \
 		target/wasm32-unknown-unknown/debug/nearx-web-dom.wasm
 	@echo "✅ Web build complete → web/"
@@ -40,6 +41,7 @@ web-release:
 	@wasm-bindgen \
 		--target web \
 		--out-dir web/pkg \
+		--out-name nearx_web_dom \
 		--no-typescript \
 		target/wasm32-unknown-unknown/release/nearx-web-dom.wasm
 	@echo "✅ Web build complete (release) → web/"
