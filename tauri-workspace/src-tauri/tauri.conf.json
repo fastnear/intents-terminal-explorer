@@ -26,9 +26,7 @@
     }
   },
   "bundle": {
-    "resources": [
-      "../../native-host/target/release/ratacat-native-host"
-    ]
+    "resources": []
   },
   "plugins": {
     "deep-link": {
