@@ -1,9 +1,9 @@
 // DOM frontend for NEARx using WasmApp.
 //
-// Trunk auto-loads the WASM and exposes it as window.wasmBindings.
+// WASM module is loaded via index.html and exposed as window.wasm_bindgen.
 // We just need to access WasmApp from there.
 //
-// HTML requirements (see index-dom.html):
+// HTML requirements (see index.html):
 //
 // <div id="nearx-root">
 //   <div id="row-filter">
@@ -50,12 +50,12 @@ function highlightJSON(json) {
 }
 
 async function main() {
-  // Wait for Trunk's auto-injected WASM loader
-  while (!window.wasmBindings) {
+  // Wait for WASM module to load (from index.html)
+  while (!window.wasm_bindgen) {
     await new Promise(resolve => setTimeout(resolve, 10));
   }
 
-  const { WasmApp } = window.wasmBindings;
+  const { WasmApp } = window.wasm_bindgen;
   wasmApp = new WasmApp();
 
   hookEvents();
