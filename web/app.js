@@ -181,6 +181,11 @@ function hookEvents() {
       return;
     }
 
+    // When help modal is open, ignore all other keys (only ? and Esc allowed above)
+    if (lastSnapshot && lastSnapshot.show_shortcuts) {
+      return;
+    }
+
     // '/' or 'f' / 'F' → focus filter (like TUI).
     if (e.key === "/" || e.key === "f" || e.key === "F") {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
