@@ -58,6 +58,9 @@ impl WasmApp {
         let (archival_tx, archival_rx) = unbounded_channel::<u64>();
         let archival_fetch_tx = Some(archival_tx);
 
+        // Initialize tx_details_fetch channel (WASM version)
+        let (tx_details_tx, tx_details_rx) = unbounded_channel::<String>();
+
         // Build config for the RPC poller.
         let cfg_default_filter = default_filter.clone();
         let cfg_fps = fps;
@@ -118,6 +121,28 @@ impl WasmApp {
                 log::info!("[WasmApp] Archival fetch task spawned");
             }
 
+            // Spawn WASM tx_details_fetch task if auth token configured
+            if config.fastnear_auth_token.is_some() {
+                let api_url = config.fastnear_api_url.clone();
+                let auth_token = config.fastnear_auth_token.clone();
+                let tx_details_event_tx = event_tx.clone();
+
+                spawn_local(async move {
+                    nearx::tx_details_fetch_wasm::run_tx_details_fetch_wasm(
+                        tx_details_rx,
+                        tx_details_event_tx,
+                        api_url,
+                        auth_token,
+                    ).await;
+                });
+
+                log::info!(
+                    "[WasmApp] Tx details fetch task spawned - API: {}, Auth: {}",
+                    config.fastnear_api_url,
+                    if config.fastnear_auth_token.is_some() { "present" } else { "missing" }
+                );
+            }
+
             if let Err(e) = nearx::source_rpc::run_rpc(&config, event_tx).await {
                 log::error!("[WasmApp] RPC poller error: {e}");
             }
@@ -129,9 +154,13 @@ impl WasmApp {
             keep_blocks,
             default_filter,
             archival_fetch_tx,
-            fastnear_api_url,
-            fastnear_auth_token,
-            None, // No tx details fetch in web mode yet
+            fastnear_api_url.clone(),
+            fastnear_auth_token.clone(),
+            if fastnear_auth_token.is_some() {
+                Some(tx_details_tx)
+            } else {
+                None
+            },
         );
 
         WasmApp {

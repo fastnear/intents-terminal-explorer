@@ -79,6 +79,9 @@ pub mod archival_fetch;
 #[cfg(target_arch = "wasm32")]
 pub mod archival_fetch_wasm;
 
+#[cfg(target_arch = "wasm32")]
+pub mod tx_details_fetch_wasm;
+
 pub mod source_rpc;
 
 #[cfg(feature = "native")]

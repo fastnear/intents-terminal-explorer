@@ -277,6 +277,9 @@ pub struct App {
     cached_blocks: HashMap<u64, BlockRow>, // height -> block
     cached_block_order: Vec<u64>,          // LRU tracking for cache eviction
 
+    // Performance optimization: O(1) height lookup index for forward blocks list
+    blocks_by_height: HashMap<u64, usize>, // height -> index in blocks vector
+
     // Archival fetch state (for fetching historical blocks beyond cache)
     loading_block: Option<u64>, // Block height currently being fetched from archival
     archival_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<u64>>, // Channel to request archival fetches
@@ -386,6 +389,7 @@ impl App {
             marks_selection: 0,
             cached_blocks: HashMap::new(),
             cached_block_order: Vec::new(),
+            blocks_by_height: HashMap::new(),
             loading_block: None,
             archival_fetch_tx,
             fastnear_api_url,
@@ -448,8 +452,18 @@ impl App {
         }
     }
 
+    /// Rebuild the blocks_by_height index from the current blocks vector
+    /// Called after any structural changes to the blocks vector (insert/remove)
+    fn rebuild_blocks_index(&mut self) {
+        self.blocks_by_height.clear();
+        for (idx, block) in self.blocks.iter().enumerate() {
+            self.blocks_by_height.insert(block.height, idx);
+        }
+    }
+
     /// Find the array index for a given block height
     /// Returns None if height is None (auto-follow mode) or block not found
+    /// Uses O(1) HashMap lookup instead of O(n) linear search
     fn find_block_index(&self, height: Option<u64>) -> Option<usize> {
         if self.blocks.is_empty() {
             return None;
@@ -457,7 +471,7 @@ impl App {
 
         match height {
             None => None, // Auto-follow mode: return None to trigger auto-follow logic in current_block()
-            Some(h) => self.blocks.iter().position(|b| b.height == h),
+            Some(h) => self.blocks_by_height.get(&h).copied(),
         }
     }
 
@@ -2121,6 +2135,9 @@ impl App {
                 self.blocks.pop();
             }
 
+            // Rebuild index after structural change
+            self.rebuild_blocks_index();
+
             self.log_debug(format!(
                 "[HISTORICAL_INSERT] Block #{} inserted at index {} (sorted position)",
                 height, insert_pos
@@ -2132,6 +2149,9 @@ impl App {
                 // Remove oldest block
                 self.blocks.pop();
             }
+
+            // Rebuild index after structural change
+            self.rebuild_blocks_index();
         }
 
         // Height-based selection behavior
