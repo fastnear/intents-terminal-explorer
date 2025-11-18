@@ -77,6 +77,8 @@ async fn main() -> Result<()> {
         } else {
             None
         },
+        cfg.fastnear_api_url.clone(),
+        cfg.fastnear_auth_token.clone(),
     );
 
     // Apply deep link route from CLI args (if provided)

@@ -281,6 +281,13 @@ pub struct App {
     loading_block: Option<u64>, // Block height currently being fetched from archival
     archival_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<u64>>, // Channel to request archival fetches
 
+    // FastNEAR API configuration
+    fastnear_api_url: String,
+    fastnear_auth_token: Option<String>,
+
+    // Full transaction details cache (from FastNEAR API)
+    full_tx_cache: HashMap<String, String>, // tx_hash -> full JSON
+
     /// When true, new live blocks from RPC are ignored.
     /// Set when user is pinned far behind the live tip (>50 blocks past focal).
     live_updates_paused: bool,
@@ -325,6 +332,8 @@ impl App {
         keep_blocks: usize,
         default_filter: String,
         archival_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<u64>>,
+        fastnear_api_url: String,
+        fastnear_auth_token: Option<String>,
     ) -> Self {
         let filter_compiled = if default_filter.is_empty() {
             CompiledFilter::default()
@@ -360,6 +369,9 @@ impl App {
             cached_block_order: Vec::new(),
             loading_block: None,
             archival_fetch_tx,
+            fastnear_api_url,
+            fastnear_auth_token,
+            full_tx_cache: HashMap::new(),
             live_updates_paused: false, // Start with live updates enabled
             back_slots: Vec::new(),
             back_anchor_height: None,
@@ -392,6 +404,15 @@ impl App {
     }
     pub fn sel_tx(&self) -> usize {
         self.sel_tx
+    }
+
+    // Test FastNEAR API integration
+    pub fn test_fastnear_api(&mut self) {
+        log::info!("[App] Testing FastNEAR API at: {}", self.fastnear_api_url);
+        if let Some(token) = &self.fastnear_auth_token {
+            log::info!("[App] Using auth token: {}... ({} chars)", &token[..6], token.len());
+        }
+        self.toast(format!("FastNEAR API configured at: {}", self.fastnear_api_url));
     }
     pub fn is_viewing_cached_block(&self) -> bool {
         if let Some(height) = self.sel_block_height {
@@ -718,6 +739,36 @@ impl App {
     }
 
     /// Get raw JSON of currently selected transaction (for fullscreen display/copying)
+    /// Get the hash of the currently selected transaction
+    pub fn get_selected_tx_hash(&self) -> Option<String> {
+        if let Some(block) = self.current_block() {
+            if let Some(tx) = block.transactions.get(self.sel_tx) {
+                return Some(tx.hash.clone());
+            }
+        }
+        None
+    }
+
+    /// Request background fetch of full transaction details from FastNEAR API
+    pub fn request_tx_details_fetch(&self, tx_hash: String) {
+        // For now, we'll implement this in the binary where we have access to the event channel
+        // This is a placeholder that can be called from the UI
+        self.log_debug(format!("Request to fetch full transaction details for: {}", tx_hash));
+    }
+
+    /// Store fetched transaction details in cache
+    pub fn store_tx_details(&mut self, tx_hash: String, full_json: String) {
+        self.full_tx_cache.insert(tx_hash.clone(), full_json.clone());
+
+        // If we're currently viewing this transaction in fullscreen, update display
+        if self.details_fullscreen &&
+           self.fullscreen_content_type == FullscreenContentType::TransactionRawJson &&
+           self.get_selected_tx_hash() == Some(tx_hash.clone()) {
+            self.set_details_json(full_json);
+            self.log_debug(format!("Updated fullscreen display with FastNEAR API data for tx {}", tx_hash));
+        }
+    }
+
     pub fn get_raw_tx_json(&self) -> String {
         if let Some(block) = self.current_block() {
             if let Some(tx) = block.transactions.get(self.sel_tx) {
@@ -1054,8 +1105,27 @@ impl App {
                     }
                 }
                 FullscreenContentType::TransactionRawJson => {
-                    let raw = self.get_raw_tx_json();
-                    self.set_details_json(raw);
+                    // Check if we have enhanced transaction data from FastNEAR API
+                    if let Some(tx_hash) = self.get_selected_tx_hash() {
+                        if let Some(full_json) = self.full_tx_cache.get(&tx_hash) {
+                            // Use the full transaction data from FastNEAR API
+                            self.set_details_json(full_json.clone());
+                            self.log_debug(format!("Using cached FastNEAR API data for tx {}", tx_hash));
+                        } else {
+                            // Fall back to basic transaction data
+                            let raw = self.get_raw_tx_json();
+                            self.set_details_json(raw);
+
+                            // Trigger background fetch if we have API configured
+                            if self.fastnear_auth_token.is_some() {
+                                self.request_tx_details_fetch(tx_hash.clone());
+                            }
+                        }
+                    } else {
+                        // No transaction selected
+                        let raw = self.get_raw_tx_json();
+                        self.set_details_json(raw);
+                    }
                 }
                 FullscreenContentType::ParsedDetails => {
                     // Already in buffer, no-op

@@ -78,6 +78,7 @@ impl WasmApp {
                 near_node_url: "https://rpc.mainnet.fastnear.com/".to_string(),
                 near_node_url_explicit: false,
                 archival_rpc_url: Some("https://archival-rpc.mainnet.fastnear.com/".to_string()),
+                fastnear_api_url: "https://api.fastnear.com".to_string(),
                 rpc_timeout_ms: 8_000,
                 rpc_retries: 2,
                 fastnear_auth_token: {
@@ -121,6 +122,8 @@ impl WasmApp {
             keep_blocks,
             default_filter,
             archival_fetch_tx,
+            config.fastnear_api_url.clone(),
+            config.fastnear_auth_token.clone(),
         );
 
         WasmApp {

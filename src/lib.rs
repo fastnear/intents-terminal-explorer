@@ -34,6 +34,9 @@ pub mod util_text;
 // RPC utilities (same direct JSON-RPC implementation for both native and web)
 pub mod rpc_utils;
 
+// FastNEAR Explorer API client
+pub mod fastnear_api;
+
 // Theme system (available on all platforms, with platform-specific helpers)
 pub mod theme;
 

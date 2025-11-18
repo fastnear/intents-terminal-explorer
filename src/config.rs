@@ -61,6 +61,10 @@ pub struct CliArgs {
     #[arg(long, env = "ARCHIVAL_RPC_URL")]
     pub archival_rpc_url: Option<String>,
 
+    /// FastNEAR Explorer API endpoint URL for fetching full transaction details
+    #[arg(long, env = "FASTNEAR_API_URL")]
+    pub fastnear_api_url: Option<String>,
+
     /// RPC polling interval in milliseconds (100-10000)
     #[arg(long, env = "POLL_INTERVAL_MS")]
     pub poll_interval_ms: Option<u64>,
@@ -125,6 +129,7 @@ pub struct Config {
     pub near_node_url: String,
     pub near_node_url_explicit: bool, // true if set via env var or CLI
     pub archival_rpc_url: Option<String>,
+    pub fastnear_api_url: String,
     pub rpc_timeout_ms: u64,
     #[allow(dead_code)]
     pub rpc_retries: u32,
@@ -183,6 +188,13 @@ pub fn load() -> Result<Config> {
     if let Some(ref url) = archival_rpc_url {
         validate_url(url, "ARCHIVAL_RPC_URL")?;
     }
+
+    // FastNEAR Explorer API URL
+    let fastnear_api_url = args
+        .fastnear_api_url
+        .or_else(|| env::var("FASTNEAR_API_URL").ok())
+        .unwrap_or_else(|| "https://api.fastnear.com".to_string());
+    validate_url(&fastnear_api_url, "FASTNEAR_API_URL")?;
 
     let ws_url = args
         .ws_url
@@ -309,6 +321,7 @@ pub fn load() -> Result<Config> {
         near_node_url,
         near_node_url_explicit,
         archival_rpc_url,
+        fastnear_api_url,
         rpc_timeout_ms,
         rpc_retries,
         fastnear_auth_token: args.fastnear_auth_token.or_else(|| {
