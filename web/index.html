@@ -70,13 +70,13 @@
         flex: 1;
         min-height: 0;
         display: grid;
-        grid-template-rows: 60% 40%;
+        grid-template-rows: 45% 55%;  /* More room for details pane */
         gap: 2px;  /* Minimal gaps like TUI */
       }
 
       @media (max-width: 800px) {
         #nearx-body {
-          grid-template-rows: 25% 25% 50%;
+          grid-template-rows: 20% 20% 60%;  /* More room for details on mobile too */
         }
       }
 
@@ -239,17 +239,51 @@
 
       #nearx-toast {
         position: fixed;
-        bottom: 12px;
-        right: 12px;
-        padding: 6px 10px;
-        border-radius: 8px;
-        background: var(--panel-alt, #111827);
-        border: 1px solid var(--success, #6bdc96);
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 16px 32px;  /* Bigger padding for impact */
+        border-radius: 0;  /* Sharp DOS corners */
+        z-index: 9999;  /* Ensure toast appears above all other elements */
+        /* DOS dither pattern background */
+        background:
+          repeating-conic-gradient(
+            var(--bg, #0a0a0a) 0% 25%,
+            var(--panel, #0f131a) 0% 50%
+          )
+          50% / 2px 2px,
+          var(--bg, #0a0a0a);
+        background-blend-mode: multiply;
+        /* Double border DOS style */
+        border: 2px solid var(--success, #6bdc96);
+        box-shadow:
+          inset -1px -1px 0 var(--success, #6bdc96),
+          inset 1px 1px 0 var(--success, #6bdc96),
+          0 0 0 1px var(--bg, #0a0a0a),
+          4px 4px 0 rgba(0, 0, 0, 0.5);  /* DOS drop shadow */
         color: var(--success, #6bdc96);
+        font-family: "JetBrains Mono", "Consolas", "Courier New", monospace;
         font-weight: bold;
-        font-size: 15px;
-        max-width: 360px;
-        white-space: pre-wrap;
+        font-size: 18px;  /* Bigger text */
+        text-align: center;
+        min-width: 320px;  /* Wider minimum */
+        max-width: 50%;
+        white-space: pre;
+        text-transform: uppercase;  /* DOS style uppercase */
+        letter-spacing: 1px;
+        /* Add fade-in animation with more impact */
+        animation: toast-fade-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+
+      @keyframes toast-fade-in {
+        from {
+          opacity: 0;
+          transform: translate(-50%, -50%) scale(0.6) rotateX(90deg);
+        }
+        to {
+          opacity: 1;
+          transform: translate(-50%, -50%) scale(1) rotateX(0deg);
+        }
       }
 
       /* Help modal */

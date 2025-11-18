@@ -93,3 +93,37 @@ pub fn format_near_compact(yoctonear: u128) -> String {
         format!("{yoctonear}y")
     }
 }
+
+// Serialization helpers for WASM targets to handle large numbers
+#[cfg(target_arch = "wasm32")]
+use serde::Serializer;
+
+/// Serialize u64 as string for JavaScript compatibility
+#[cfg(target_arch = "wasm32")]
+pub fn serialize_u64_as_string<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&value.to_string())
+}
+
+/// Serialize Option<u64> as string for JavaScript compatibility
+#[cfg(target_arch = "wasm32")]
+pub fn serialize_option_u64_as_string<S>(value: &Option<u64>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match value {
+        Some(v) => serializer.serialize_str(&v.to_string()),
+        None => serializer.serialize_none(),
+    }
+}
+
+/// Serialize u128 as string for JavaScript compatibility
+#[cfg(target_arch = "wasm32")]
+pub fn serialize_u128_as_string<S>(value: &u128, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&value.to_string())
+}

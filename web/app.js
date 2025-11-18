@@ -18,6 +18,7 @@ import init, * as wasm from "./pkg/nearx_web_dom.js";
 
 let wasmApp = null;
 let lastSnapshot = null;
+let clientToastActive = false;  // Track if client-side toast is showing
 let suppressFilterEvent = false;
 
 // Track viewport size to avoid redundant updates
@@ -146,7 +147,7 @@ function hookEvents() {
   });
 
   filter.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
+    if (e.key === "Escape" || e.key === "Enter") {
       e.preventDefault();
       filter.blur();
     }
@@ -212,9 +213,9 @@ function hookEvents() {
         const txPane = document.getElementById("pane-txs");
         const detailsPane = document.getElementById("pane-details");
 
-        blocksPane?.classList.toggle("focused", nextPane === 0);
-        txPane?.classList.toggle("focused", nextPane === 1);
-        detailsPane?.classList.toggle("focused", nextPane === 2);
+        blocksPane?.classList.toggle("nx-pane--focused", nextPane === 0);
+        txPane?.classList.toggle("nx-pane--focused", nextPane === 1);
+        detailsPane?.classList.toggle("nx-pane--focused", nextPane === 2);
       }
 
       // Sync to WASM (snapshot will confirm same state on next render)
@@ -386,45 +387,71 @@ function render(snapshot) {
     selectionSlot.textContent = snapshot.selection_slot_text || "";
   }
 
-  // Blocks pane: two-list rendering (forward + backfill)
-  blocksBody.innerHTML = "";
+  // Blocks pane: Update only what changed
   const blocks = snapshot.blocks || [];
-  const loadingBlock = snapshot.loading_block;
 
-  blocks.forEach((b) => {
-    const row = document.createElement("div");
-    row.className = "nx-row nx-row--block";
-
-    // Apply source-based styling (forward vs backfill)
-    if (b.source === "backfill_pending") {
-      row.classList.add("nx-row--backfill-pending");
-    } else if (b.source === "backfill_loading") {
-      row.classList.add("nx-row--backfill-loading");
-    } else {
-      row.classList.add("nx-row--forward");
-    }
-
-    if (b.is_selected) row.classList.add("nx-row--selected");
-    if (!b.available) row.style.opacity = "0.6";
-    row.dataset.index = String(b.index);
-    row.setAttribute("role", "option");
-    row.setAttribute("aria-selected", b.is_selected ? "true" : "false");
-
-    // Backfill placeholders use label directly (already formatted in Rust)
-    if (b.source === "backfill_pending" || b.source === "backfill_loading") {
-      // Use the pre-formatted label from Rust (e.g., "12345  |  archival lookup queued…")
-      const parts = [
-        `#${b.height}`,
-        b.source === "backfill_loading" ? "archival lookup in flight…" : "archival lookup queued…"
-      ];
-      row.innerHTML = parts.join(" · ");
-    } else {
-      // Forward blocks show full details
-      row.textContent = `#${b.height} · ${b.tx_count} tx · ${b.when}`;
-    }
-
-    blocksBody.appendChild(row);
+  // Get all existing rows keyed by height
+  const existingRows = new Map();
+  blocksBody.querySelectorAll('.nx-row--block').forEach(row => {
+    const height = row.dataset.height;
+    if (height) existingRows.set(height, row);
   });
+
+  // Process blocks in order
+  blocks.forEach((b, index) => {
+    const heightStr = String(b.height);
+    let row = existingRows.get(heightStr);
+
+    if (!row) {
+      // Create new row only if it doesn't exist
+      row = document.createElement("div");
+      row.className = "nx-row nx-row--block";
+      row.dataset.height = heightStr;
+      row.dataset.index = String(b.index);
+      row.setAttribute("role", "option");
+
+      // Apply source-based styling
+      if (b.source === "backfill_pending") {
+        row.classList.add("nx-row--backfill-pending");
+      } else if (b.source === "backfill_loading") {
+        row.classList.add("nx-row--backfill-loading");
+      } else {
+        row.classList.add("nx-row--forward");
+      }
+
+      if (!b.available) row.style.opacity = "0.6";
+
+      // Set content ONCE - it never changes for a given block
+      if (b.source === "backfill_pending" || b.source === "backfill_loading") {
+        row.textContent = `#${b.height} · ${b.source === "backfill_loading" ? "archival lookup in flight…" : "archival lookup queued…"}`;
+      } else {
+        row.textContent = `#${b.height} · ${b.tx_count} tx · ${b.when}`;
+      }
+
+      // Insert at correct position
+      if (index < blocksBody.children.length) {
+        blocksBody.insertBefore(row, blocksBody.children[index]);
+      } else {
+        blocksBody.appendChild(row);
+      }
+    } else {
+      // Update only selection state and index
+      row.dataset.index = String(b.index);
+      existingRows.delete(heightStr); // Mark as seen
+    }
+
+    // Update selection state (the only thing that changes)
+    if (b.is_selected) {
+      row.classList.add("nx-row--selected");
+      row.setAttribute("aria-selected", "true");
+    } else {
+      row.classList.remove("nx-row--selected");
+      row.setAttribute("aria-selected", "false");
+    }
+  });
+
+  // Remove any rows that are no longer in the snapshot
+  existingRows.forEach(row => row.remove());
 
   // Apply vertical centering via scroll offset (like TUI)
   if (snapshot.blocks_scroll_offset != null && snapshot.blocks_scroll_offset > 0) {
@@ -445,27 +472,60 @@ function render(snapshot) {
     blocksTitle.textContent = title;
   }
 
-  // Txs pane.
-  txBody.innerHTML = "";
+  // Txs pane: Update only what changed
   const txs = snapshot.txs || [];
-  txs.forEach((t) => {
-    const row = document.createElement("div");
-    row.className = "nx-row nx-row--tx";
-    if (t.is_selected) row.classList.add("nx-row--selected");
-    row.dataset.index = String(t.index);
-    row.setAttribute("role", "option");
-    row.setAttribute("aria-selected", t.is_selected ? "true" : "false");
 
-    const signer = t.signer_id || "";
-    const receiver = t.receiver_id || "";
-    const label =
-      signer && receiver
+  // Get all existing rows keyed by hash
+  const existingTxRows = new Map();
+  txBody.querySelectorAll('.nx-row--tx').forEach(row => {
+    const hash = row.dataset.hash;
+    if (hash) existingTxRows.set(hash, row);
+  });
+
+  // Process transactions in order
+  txs.forEach((t, index) => {
+    let row = existingTxRows.get(t.hash);
+
+    if (!row) {
+      // Create new row only if it doesn't exist
+      row = document.createElement("div");
+      row.className = "nx-row nx-row--tx";
+      row.dataset.hash = t.hash;
+      row.dataset.index = String(t.index);
+      row.setAttribute("role", "option");
+
+      // Set content ONCE - it never changes for a given tx
+      const signer = t.signer_id || "";
+      const receiver = t.receiver_id || "";
+      const label = signer && receiver
         ? `${signer} → ${receiver}`
         : signer || receiver || t.hash;
+      row.textContent = label;
 
-    row.textContent = label;
-    txBody.appendChild(row);
+      // Insert at correct position
+      if (index < txBody.children.length) {
+        txBody.insertBefore(row, txBody.children[index]);
+      } else {
+        txBody.appendChild(row);
+      }
+    } else {
+      // Update only index
+      row.dataset.index = String(t.index);
+      existingTxRows.delete(t.hash); // Mark as seen
+    }
+
+    // Update selection state (the only thing that changes)
+    if (t.is_selected) {
+      row.classList.add("nx-row--selected");
+      row.setAttribute("aria-selected", "true");
+    } else {
+      row.classList.remove("nx-row--selected");
+      row.setAttribute("aria-selected", "false");
+    }
   });
+
+  // Remove any rows that are no longer in the snapshot
+  existingTxRows.forEach(row => row.remove());
 
   // Tx title with position.
   if (txTitle) {
@@ -481,13 +541,21 @@ function render(snapshot) {
     txTitle.textContent = title;
   }
 
-  // Details pane: render windowed JSON (already windowed and formatted by Rust)
+  // Details pane: Only update if content actually changed
   const rawDetails = snapshot.details || "";
-  let html = syntaxHighlightJson(rawDetails);
+  const detailsChanged = detailsPre.dataset.lastDetails !== rawDetails;
 
-  // Add truncation message if content was cut off
-  if (snapshot.details_truncated) {
-    html += '<br><br><span style="color: var(--fg-dim); font-style: italic;">… large output truncated at 5000 lines; press \'c\' to copy full JSON</span>';
+  if (detailsChanged) {
+    let html = syntaxHighlightJson(rawDetails);
+
+    // Add truncation message if content was cut off
+    if (snapshot.details_truncated) {
+      html += '<br><br><span style="color: var(--fg-dim); font-style: italic;">… large output truncated at 5000 lines; press \'c\' to copy full JSON</span>';
+    }
+
+    detailsPre.innerHTML = html;
+    detailsPre.dataset.lastDetails = rawDetails;
+    detailsPre.scrollTop = 0; // Reset scroll when content changes
   }
 
   detailsPane.classList.toggle(
@@ -518,9 +586,7 @@ function render(snapshot) {
     detailsTitle.textContent = `Transaction details${scrollIndicator} – c: copy • Space: expand`;
   }
 
-  // Always show content (already windowed by Rust, no scrolling needed)
-  detailsPre.innerHTML = html;
-  detailsPre.scrollTop = 0; // Windowing handles scroll position, always show from top
+  // Content is already updated above only when changed
 
   // Footer.
   const parts = [];
@@ -531,8 +597,8 @@ function render(snapshot) {
 
   footer.textContent = parts.join("  •  ");
 
-  // Toast.
-  if (toastEl) {
+  // Toast - only update if no client toast is active
+  if (toastEl && !clientToastActive) {
     if (snapshot.toast) {
       toastEl.textContent = snapshot.toast;
       toastEl.hidden = false;
@@ -611,14 +677,17 @@ function showToastClientSide(message) {
   const toastEl = document.getElementById("nearx-toast");
   if (!toastEl) return;
 
-  toastEl.textContent = message;
+  // Add checkmark prefix like TUI
+  toastEl.textContent = `✓ ${message}`;
   toastEl.hidden = false;
+  clientToastActive = true;  // Mark client toast as active
 
-  // Auto-hide after 2 seconds (matches TUI behavior)
+  // Auto-hide after 3 seconds for better visibility
   setTimeout(() => {
     toastEl.hidden = true;
     toastEl.textContent = "";
-  }, 2000);
+    clientToastActive = false;  // Clear client toast flag
+  }, 3000);
 }
 
 /**
