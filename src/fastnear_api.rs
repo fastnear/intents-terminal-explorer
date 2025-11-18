@@ -49,14 +49,25 @@ pub async fn fetch_transaction_details(
     let data: Value = response.json().await
         .map_err(|e| anyhow!("Failed to parse FastNEAR response: {}", e))?;
 
+    log::debug!("[fastnear_api] Response structure: {:?}", data);
+
     // Extract first transaction from the response array
     if let Some(txs) = data["transactions"].as_array() {
+        log::info!("[fastnear_api] Found {} transactions in response", txs.len());
         if let Some(tx) = txs.first() {
-            log::info!("[fastnear_api] Successfully fetched transaction details");
+            // Log transaction structure preview
+            let tx_preview = if tx.is_object() {
+                format!("Object with {} keys", tx.as_object().map(|o| o.len()).unwrap_or(0))
+            } else {
+                "Non-object response".to_string()
+            };
+            log::info!("[fastnear_api] Successfully fetched transaction details: {}", tx_preview);
             return Ok(tx.clone());
         }
     }
 
+    log::warn!("[fastnear_api] No transactions found in response. Data structure: {:?}",
+              data.as_object().map(|o| o.keys().collect::<Vec<_>>()));
     Err(anyhow!("Transaction not found in FastNEAR response"))
 }
 

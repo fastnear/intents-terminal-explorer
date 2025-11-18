@@ -20,31 +20,42 @@ use crate::theme::{ratatui_helpers::c, Theme};
 // fall back to ANSI colors on older terminals.
 #[cfg(feature = "native")]
 fn supports_true_color() -> bool {
-    let colorterm = std::env::var("COLORTERM").ok();
-    let term = std::env::var("TERM").ok();
+    use std::sync::Once;
 
-    // Support both COLORTERM and modern TERM values
-    let supports = colorterm
-        .as_ref()
-        .map(|v| v == "truecolor" || v == "24bit")
-        .unwrap_or_else(|| {
-            // Fallback: check if TERM indicates 256 color support
-            // Modern terminals like iTerm2, Alacritty support true color even with xterm-256color
-            term.as_ref()
-                .map(|t| t.contains("256color") || t.contains("kitty") || t.contains("alacritty"))
-                .unwrap_or(false)
+    static mut CACHED_RESULT: Option<bool> = None;
+    static ONCE: Once = Once::new();
+
+    unsafe {
+        ONCE.call_once(|| {
+            let colorterm = std::env::var("COLORTERM").ok();
+            let term = std::env::var("TERM").ok();
+
+            // Support both COLORTERM and modern TERM values
+            let supports = colorterm
+                .as_ref()
+                .map(|v| v == "truecolor" || v == "24bit")
+                .unwrap_or_else(|| {
+                    // Fallback: check if TERM indicates 256 color support
+                    // Modern terminals like iTerm2, Alacritty support true color even with xterm-256color
+                    term.as_ref()
+                        .map(|t| t.contains("256color") || t.contains("kitty") || t.contains("alacritty"))
+                        .unwrap_or(false)
+                });
+
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "[ui] Terminal: COLORTERM={:?}, TERM={:?}, true_color={}",
+                    colorterm,
+                    term,
+                    supports
+                );
+            }
+
+            CACHED_RESULT = Some(supports);
         });
 
-    if log::log_enabled!(log::Level::Debug) {
-        log::debug!(
-            "[ui] Terminal: COLORTERM={:?}, TERM={:?}, true_color={}",
-            colorterm,
-            term,
-            supports
-        );
+        CACHED_RESULT.unwrap_or(false)
     }
-
-    supports
 }
 
 // Mark type used by both native and web builds
@@ -704,7 +715,12 @@ fn render_details_pane(f: &mut Frame, area: Rect, app: &mut App) {
                     format!(" Block Raw JSON{} - {} • ('c' to copy • Tab toggle scroll • spacebar exits fullscreen)", scroll_indicator, mode_indicator)
                 }
                 crate::app::FullscreenContentType::TransactionRawJson => {
-                    format!(" Transaction Raw JSON{} — {} • ('c' to copy • Tab toggle scroll • spacebar exits fullscreen) ", scroll_indicator, mode_indicator)
+                    let api_indicator = if app.is_showing_fastnear_data() {
+                        " [FastNEAR API]"
+                    } else {
+                        ""
+                    };
+                    format!(" Transaction Raw JSON{}{} — {} • ('c' to copy • Tab toggle scroll • spacebar exits fullscreen) ", api_indicator, scroll_indicator, mode_indicator)
                 }
                 crate::app::FullscreenContentType::ParsedDetails => {
                     format!(" Transaction Details{} — ('c' to copy • spacebar exits fullscreen) ", scroll_indicator)

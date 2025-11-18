@@ -293,6 +293,10 @@ pub struct App {
     filtered_blocks_cache: std::cell::RefCell<Option<(Vec<usize>, Option<usize>, usize)>>, // (indices, selected_idx, total)
     filter_cache_valid: std::cell::Cell<bool>, // Invalidate when filter or blocks change
 
+    // Navigation list cache (filtered block heights for arrow key navigation)
+    nav_list_cache: std::cell::RefCell<Option<Vec<u64>>>,
+    nav_cache_valid: std::cell::Cell<bool>,
+
     /// When true, new live blocks from RPC are ignored.
     /// Set when user is pinned far behind the live tip (>50 blocks past focal).
     live_updates_paused: bool,
@@ -318,6 +322,7 @@ pub struct App {
     fullscreen_content_type: FullscreenContentType, // What to show in fullscreen
     fullscreen_mode: FullscreenMode,            // Scroll (arrow keys scroll JSON) or Navigate (arrow keys move rows)
     details_viewport_height: u16,               // Actual visible height of details pane (set by UI layer)
+    showing_fastnear_data: bool,               // Whether current display is from FastNEAR API cache
 
     // Theme (single source of truth for all UI targets)
     theme: Theme,
@@ -346,6 +351,14 @@ impl App {
         } else {
             compile_filter(&default_filter)
         };
+
+        // Debug log auth token configuration
+        log::info!(
+            "[App::new] FastNEAR auth token: {}, API URL: {}, tx_details channel: {}",
+            if fastnear_auth_token.is_some() { "present" } else { "missing" },
+            &fastnear_api_url,
+            if tx_details_fetch_tx.is_some() { "created" } else { "not created" }
+        );
 
         Self {
             quit: false,
@@ -381,6 +394,8 @@ impl App {
             full_tx_cache: HashMap::new(),
             filtered_blocks_cache: std::cell::RefCell::new(None),
             filter_cache_valid: std::cell::Cell::new(false),
+            nav_list_cache: std::cell::RefCell::new(None),
+            nav_cache_valid: std::cell::Cell::new(false),
             live_updates_paused: false, // Start with live updates enabled
             back_slots: Vec::new(),
             back_anchor_height: None,
@@ -394,6 +409,7 @@ impl App {
             fullscreen_content_type: FullscreenContentType::ParsedDetails, // Default to parsed view
             fullscreen_mode: FullscreenMode::Scroll,            // Scroll mode by default
             details_viewport_height: 20,                        // Default estimate, will be updated by UI
+            showing_fastnear_data: false,                       // Not showing FastNEAR data initially
             theme: Theme::default(),                            // Single source of truth for UI colors
             #[cfg(feature = "native")]
             rat_styles_cache: None, // Computed on first use
@@ -481,6 +497,10 @@ impl App {
         self.loading_block
     }
 
+    pub fn is_showing_fastnear_data(&self) -> bool {
+        self.showing_fastnear_data
+    }
+
     /// Count how many transactions in a block match the current filter
     fn count_matching_txs(&self, block: &BlockRow) -> usize {
         if filter::is_empty(&self.filter_compiled) {
@@ -491,13 +511,8 @@ impl App {
             .transactions
             .iter()
             .filter(|tx| {
-                // Apply text filter
-                let v = json!({
-                    "hash": &tx.hash,
-                    "signer_id": tx.signer_id.as_deref().unwrap_or(""),
-                    "receiver_id": tx.receiver_id.as_deref().unwrap_or("")
-                });
-                tx_matches_filter(&v, &self.filter_compiled)
+                // Use optimized direct filtering without JSON serialization
+                filter::tx_lite_matches_filter(tx, &self.filter_compiled)
             })
             .count()
     }
@@ -506,6 +521,8 @@ impl App {
     fn invalidate_filter_cache(&self) {
         self.filter_cache_valid.set(false);
         self.filtered_blocks_cache.replace(None);
+        // Also invalidate navigation cache since it depends on filtered blocks
+        self.invalidate_nav_cache();
     }
 
     /// Returns blocks that have at least one matching transaction
@@ -642,6 +659,14 @@ impl App {
     /// Get the list of blocks to navigate through (respects current filter)
     /// Returns Vec of heights in display order (newest first)
     fn get_navigation_list(&self) -> Vec<u64> {
+        // Check if cache is valid
+        if self.nav_cache_valid.get() {
+            if let Some(cached) = self.nav_list_cache.borrow().as_ref() {
+                return cached.clone();
+            }
+        }
+
+        // Cache miss - rebuild navigation list
         // Build list from main buffer (filtered or not)
         let mut nav_list: Vec<u64> = if filter::is_empty(&self.filter_compiled) {
             self.blocks.iter().map(|b| b.height).collect()
@@ -668,7 +693,16 @@ impl App {
             }
         }
 
+        // Cache the result
+        *self.nav_list_cache.borrow_mut() = Some(nav_list.clone());
+        self.nav_cache_valid.set(true);
+
         nav_list
+    }
+
+    /// Invalidate navigation cache (call when blocks or filter changes)
+    fn invalidate_nav_cache(&self) {
+        self.nav_cache_valid.set(false);
     }
 
     /// Check if a specific block height is available (in buffer or cache)
@@ -691,15 +725,8 @@ impl App {
                 .transactions
                 .iter()
                 .filter(|tx| {
-                    // Apply text filter - pass complete tx data for filtering
-                    // Note: actions omitted here since ActionSummary doesn't derive Serialize
-                    // TODO: Add Serialize to ActionSummary for full filtering support
-                    let v = json!({
-                        "hash": &tx.hash,
-                        "signer_id": tx.signer_id.as_deref().unwrap_or(""),
-                        "receiver_id": tx.receiver_id.as_deref().unwrap_or("")
-                    });
-                    tx_matches_filter(&v, &self.filter_compiled)
+                    // Use optimized direct filtering without JSON serialization
+                    filter::tx_lite_matches_filter(tx, &self.filter_compiled)
                 })
                 .cloned()
                 .collect();
@@ -829,7 +856,25 @@ impl App {
 
     /// Store fetched transaction details in cache
     pub fn store_tx_details(&mut self, tx_hash: String, full_json: String) {
+        // Log cache state before insertion
+        let json_preview = if full_json.len() > 100 {
+            format!("{}...", &full_json[..100])
+        } else {
+            full_json.clone()
+        };
+
+        self.log_debug(format!(
+            "[store_tx_details] Storing tx {} in cache. Cache size before: {}. JSON preview: {}",
+            tx_hash, self.full_tx_cache.len(), json_preview
+        ));
+
         self.full_tx_cache.insert(tx_hash.clone(), full_json.clone());
+
+        self.log_debug(format!(
+            "[store_tx_details] Cache size after: {}. Keys: {:?}",
+            self.full_tx_cache.len(),
+            self.full_tx_cache.keys().collect::<Vec<_>>()
+        ));
 
         // If we're currently viewing this transaction in fullscreen, update display
         if self.details_fullscreen &&
@@ -1142,6 +1187,7 @@ impl App {
             self.details_fullscreen = false;
             self.fullscreen_content_type = FullscreenContentType::ParsedDetails;
             self.fullscreen_mode = FullscreenMode::Scroll;
+            self.showing_fastnear_data = false;
 
             // Restore the parsed transaction details
             self.select_tx();
@@ -1181,11 +1227,13 @@ impl App {
                         if let Some(full_json) = self.full_tx_cache.get(&tx_hash) {
                             // Use the full transaction data from FastNEAR API
                             self.set_details_json(full_json.clone());
+                            self.showing_fastnear_data = true;
                             self.log_debug(format!("Using cached FastNEAR API data for tx {}", tx_hash));
                         } else {
                             // Fall back to basic transaction data
                             let raw = self.get_raw_tx_json();
                             self.set_details_json(raw);
+                            self.showing_fastnear_data = false;
 
                             // No need to fetch here - already triggered in select_tx()
                         }
@@ -1193,6 +1241,7 @@ impl App {
                         // No transaction selected
                         let raw = self.get_raw_tx_json();
                         self.set_details_json(raw);
+                        self.showing_fastnear_data = false;
                     }
                 }
                 FullscreenContentType::ParsedDetails => {
@@ -1369,34 +1418,33 @@ impl App {
 
     /// Handle Up arrow key - behavior depends on which pane is focused
     pub fn up(&mut self) {
-        // Fullscreen Navigate mode: route to appropriate pane based on content type
-        if self.details_fullscreen && self.fullscreen_mode == FullscreenMode::Navigate {
+        self.up_with_depth(0)
+    }
+
+    /// Internal up() with recursion depth guard
+    fn up_with_depth(&mut self, depth: u32) {
+        const MAX_DEPTH: u32 = 2;
+        if depth >= MAX_DEPTH {
+            self.log_debug(format!("[WARN] Navigation up() recursion limit reached (depth {depth})"));
+            return;
+        }
+
+        // Determine which pane logic to use (direct dispatch, no recursion)
+        let target_pane = if self.details_fullscreen && self.fullscreen_mode == FullscreenMode::Navigate {
             match self.fullscreen_content_type {
-                FullscreenContentType::BlockRawJson => {
-                    // Navigate blocks (temporarily switch pane logic)
-                    let saved_pane = self.pane;
-                    self.pane = 0;
-                    self.up(); // Recursive call with pane 0
-                    self.pane = saved_pane;
-                    return;
-                }
-                FullscreenContentType::TransactionRawJson => {
-                    // Navigate transactions
-                    let saved_pane = self.pane;
-                    self.pane = 1;
-                    self.up(); // Recursive call with pane 1
-                    self.pane = saved_pane;
-                    return;
-                }
+                FullscreenContentType::BlockRawJson => 0,        // Use Blocks pane logic
+                FullscreenContentType::TransactionRawJson => 1,  // Use Txs pane logic
                 FullscreenContentType::ParsedDetails => {
                     // Parsed view has no selection, just scroll
                     self.scroll_details(-1);
                     return;
                 }
             }
-        }
+        } else {
+            self.pane  // Use current pane
+        };
 
-        match self.pane {
+        match target_pane {
             0 => {
                 // Blocks pane: navigate to previous block (newer)
                 self.log_debug(format!(
@@ -1473,34 +1521,33 @@ impl App {
     }
     /// Handle Down arrow key - behavior depends on which pane is focused
     pub fn down(&mut self) {
-        // Fullscreen Navigate mode: route to appropriate pane based on content type
-        if self.details_fullscreen && self.fullscreen_mode == FullscreenMode::Navigate {
+        self.down_with_depth(0)
+    }
+
+    /// Internal down() with recursion depth guard
+    fn down_with_depth(&mut self, depth: u32) {
+        const MAX_DEPTH: u32 = 2;
+        if depth >= MAX_DEPTH {
+            self.log_debug(format!("[WARN] Navigation down() recursion limit reached (depth {depth})"));
+            return;
+        }
+
+        // Determine which pane logic to use (direct dispatch, no recursion)
+        let target_pane = if self.details_fullscreen && self.fullscreen_mode == FullscreenMode::Navigate {
             match self.fullscreen_content_type {
-                FullscreenContentType::BlockRawJson => {
-                    // Navigate blocks (temporarily switch pane logic)
-                    let saved_pane = self.pane;
-                    self.pane = 0;
-                    self.down(); // Recursive call with pane 0
-                    self.pane = saved_pane;
-                    return;
-                }
-                FullscreenContentType::TransactionRawJson => {
-                    // Navigate transactions
-                    let saved_pane = self.pane;
-                    self.pane = 1;
-                    self.down(); // Recursive call with pane 1
-                    self.pane = saved_pane;
-                    return;
-                }
+                FullscreenContentType::BlockRawJson => 0,        // Use Blocks pane logic
+                FullscreenContentType::TransactionRawJson => 1,  // Use Txs pane logic
                 FullscreenContentType::ParsedDetails => {
                     // Parsed view has no selection, just scroll
                     self.scroll_details(1);
                     return;
                 }
             }
-        }
+        } else {
+            self.pane  // Use current pane
+        };
 
-        match self.pane {
+        match target_pane {
             0 => {
                 // Blocks pane: navigate to next block (older)
                 self.log_debug(format!(
@@ -1738,14 +1785,23 @@ impl App {
             return;
         }
 
-        // Call up()/down() repeatedly to leverage existing navigation logic
-        let steps = delta.abs();
-        for _ in 0..steps {
-            if delta > 0 {
-                self.down();
-            } else {
-                self.up();
+        // For Blocks/Txs panes: treat scroll as single navigation step (not multiple)
+        // For Details pane: scroll by delta lines
+        match self.pane {
+            0 | 1 => {
+                // Blocks/Txs: single navigation step regardless of delta magnitude
+                // This prevents multiplication of heavy work when scrolling
+                if delta > 0 {
+                    self.down();
+                } else {
+                    self.up();
+                }
             }
+            2 => {
+                // Details: scroll by delta lines (original behavior)
+                self.scroll_details(delta);
+            }
+            _ => {}
         }
     }
 

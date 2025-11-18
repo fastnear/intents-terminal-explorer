@@ -75,10 +75,17 @@ async fn main() -> Result<()> {
         let tx_events = tx.clone();
         let timeout_ms = cfg.rpc_timeout_ms;
 
+        log::info!(
+            "[main] Spawning tx_details_fetch task - API URL: {}, Auth: {}",
+            &api_url,
+            if auth_token.is_some() { "present" } else { "missing" }
+        );
+
         Some(tokio::spawn(async move {
             run_tx_details_fetch(api_url, auth_token, timeout_ms, tx_details_rx, tx_events).await;
         }))
     } else {
+        log::info!("[main] No FastNEAR auth token, skipping tx_details_fetch task");
         None
     };
 

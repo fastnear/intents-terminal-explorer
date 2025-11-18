@@ -151,6 +151,94 @@ pub fn tx_matches_filter(tx: &serde_json::Value, f: &CompiledFilter) -> bool {
     true
 }
 
+// Optimized version that works directly with TxLite without JSON serialization
+pub fn tx_lite_matches_filter(tx: &crate::types::TxLite, f: &CompiledFilter) -> bool {
+    if is_empty(f) {
+        return true;
+    }
+
+    let signer = tx.signer_id.as_deref().unwrap_or("").to_lowercase();
+    let receiver = tx.receiver_id.as_deref().unwrap_or("").to_lowercase();
+    let hash = tx.hash.to_lowercase();
+
+    let action_types: Vec<String> = if let Some(actions) = &tx.actions {
+        actions.iter().map(|a| {
+            use crate::types::ActionSummary;
+            match a {
+                ActionSummary::CreateAccount => "createaccount",
+                ActionSummary::DeployContract { .. } => "deploycontract",
+                ActionSummary::FunctionCall { .. } => "functioncall",
+                ActionSummary::Transfer { .. } => "transfer",
+                ActionSummary::Stake { .. } => "stake",
+                ActionSummary::AddKey { .. } => "addkey",
+                ActionSummary::DeleteKey { .. } => "deletekey",
+                ActionSummary::DeleteAccount { .. } => "deleteaccount",
+                ActionSummary::Delegate { .. } => "delegate",
+            }.to_string()
+        }).collect()
+    } else {
+        vec![]
+    };
+
+    let methods: Vec<String> = if let Some(actions) = &tx.actions {
+        actions.iter().filter_map(|a| {
+            if let crate::types::ActionSummary::FunctionCall { method_name, .. } = a {
+                Some(method_name.to_lowercase())
+            } else {
+                None
+            }
+        }).collect()
+    } else {
+        vec![]
+    };
+
+    let any = |vals: &[String], hay: &str| vals.is_empty() || vals.iter().any(|v| hay.contains(v));
+    let any_in = |vals: &[String], arr: &[String]| {
+        vals.is_empty() || vals.iter().any(|v| arr.iter().any(|x| x.contains(v)))
+    };
+
+    // acct matches signer OR receiver
+    if !(any(&f.acct, &signer) || any(&f.acct, &receiver)) {
+        return false;
+    }
+    if !any(&f.signer, &signer) {
+        return false;
+    }
+    if !any(&f.receiver, &receiver) {
+        return false;
+    }
+    if !any_in(&f.action, &action_types) {
+        return false;
+    }
+    if !any_in(&f.method, &methods) {
+        return false;
+    }
+
+    // For raw filter, only compute the expensive string if needed
+    if !f.raw.is_empty() {
+        // Only serialize to JSON if raw filter is actually being used
+        let json_val = serde_json::to_value(tx).unwrap_or(serde_json::Value::Null);
+        let raw = json_val.to_string().to_lowercase();
+        if !any(&f.raw, &raw) {
+            return false;
+        }
+    }
+
+    // hash field check (exact match on full hash)
+    if !any(&f.hash, &hash) {
+        return false;
+    }
+
+    // free text matches signer/receiver/hash/methods
+    if !f.free.is_empty() {
+        let hay = [signer, receiver, hash, methods.join(" ")].join(" ");
+        if !f.free.iter().any(|v| hay.contains(v)) {
+            return false;
+        }
+    }
+    true
+}
+
 pub fn is_empty(f: &CompiledFilter) -> bool {
     f.signer.is_empty()
         && f.receiver.is_empty()
