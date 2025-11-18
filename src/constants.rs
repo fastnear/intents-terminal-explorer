@@ -24,19 +24,19 @@ pub mod app {
     pub const TOAST_DURATION_SECS: u64 = 2;
 
     /// Maximum number of debug log lines to retain in memory
-    pub const MAX_DEBUG_LOG_LINES: usize = 500;
-
-    /// Maximum number of blocks to cache for navigation context
-    ///
-    /// This cache preserves ±50 blocks around the selected block when
-    /// the block ages out of the main rolling buffer.
-    pub const CACHE_SIZE_BLOCKS: usize = 50;
+    pub const MAX_DEBUG_LOG_LINES: usize = 50;
 
     /// Number of blocks to preserve around selection when caching
     ///
     /// When a selected block ages out, we cache this many blocks before
     /// and after it to maintain navigation context.
     pub const CACHE_CONTEXT_BLOCKS: usize = 50;
+
+    /// Maximum total cached blocks (safety limit = 6× context window)
+    ///
+    /// This prevents unbounded cache growth while allowing ample room for
+    /// navigation context around multiple pinned blocks.
+    pub const MAX_TOTAL_CACHED: usize = CACHE_CONTEXT_BLOCKS * 6;
 
     /// Window size for archival backfill around selected block
     ///
@@ -45,6 +45,19 @@ pub mod app {
     /// from the archival RPC endpoint. This enables smooth navigation through
     /// historical blocks without per-block fetch latency.
     pub const ARCHIVAL_CONTEXT_BLOCKS: u64 = 50;
+
+    /// Backward window size for chain-walking (ancestors of anchor block)
+    ///
+    /// Same as ARCHIVAL_CONTEXT_BLOCKS, but used for the backwards-fill
+    /// slot mechanism that gradually fetches ancestors.
+    pub const BACK_WINDOW: usize = ARCHIVAL_CONTEXT_BLOCKS as usize;
+
+    /// Forward window size for live update pause threshold
+    ///
+    /// When the live stream gets this many blocks ahead of the user's
+    /// selected anchor, live updates are paused to prevent jarring jumps.
+    /// Press ← in Blocks pane to resume.
+    pub const FRONT_WINDOW: u64 = ARCHIVAL_CONTEXT_BLOCKS;
 }
 
 /// User-facing message strings

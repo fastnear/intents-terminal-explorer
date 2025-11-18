@@ -47,9 +47,6 @@ enum BlockChangeReason {
     FilterChange, // Filter was applied/cleared (try to preserve tx)
 }
 
-const BACK_WINDOW: usize = 50;
-const FRONT_WINDOW: u64 = 50;
-
 /// Backwards-fill slot for the block list (ancestors of the anchor block).
 #[derive(Debug, Clone)]
 pub struct BackSlot {
@@ -321,7 +318,7 @@ impl App {
             back_slots: Vec::new(),
             back_anchor_height: None,
             back_next_request_at: None,
-            back_slots_target: BACK_WINDOW,
+            back_slots_target: crate::constants::app::BACK_WINDOW,
             debug_log: Vec::new(),
             debug_visible: false, // Hidden by default
             shortcuts_visible: false, // Hidden by default (Web/Tauri only for now)
@@ -755,7 +752,7 @@ impl App {
     }
 
     pub fn log_debug(&mut self, msg: String) {
-        const MAX_LOG_ENTRIES: usize = 50;
+        use crate::constants::app::MAX_DEBUG_LOG_LINES;
 
         // Write to file for debugging (native only - WASM doesn't have filesystem)
         #[cfg(not(target_arch = "wasm32"))]
@@ -774,7 +771,7 @@ impl App {
 
         // Also keep in memory for debug panel
         self.debug_log.push(msg);
-        if self.debug_log.len() > MAX_LOG_ENTRIES {
+        if self.debug_log.len() > MAX_DEBUG_LOG_LINES {
             self.debug_log.remove(0);
         }
     }
@@ -782,8 +779,7 @@ impl App {
     // ----- block cache methods -----
     /// Cache selected block and ±50 blocks around it for context navigation
     fn cache_block_with_context(&mut self, center_height: u64) {
-        use crate::constants::app::CACHE_CONTEXT_BLOCKS;
-        const MAX_TOTAL_CACHED: usize = 300; // Safety limit (3× context window)
+        use crate::constants::app::{CACHE_CONTEXT_BLOCKS, MAX_TOTAL_CACHED};
 
         // Find the center block's index
         let center_idx = match self.find_block_index(Some(center_height)) {
@@ -791,7 +787,7 @@ impl App {
             None => return, // Center block not in buffer, can't cache context
         };
 
-        // Cache blocks in range [center - 12, center + 12]
+        // Cache blocks in range [center - 50, center + 50] (±CACHE_CONTEXT_BLOCKS)
         let start_idx = center_idx.saturating_sub(CACHE_CONTEXT_BLOCKS);
         let end_idx = (center_idx + CACHE_CONTEXT_BLOCKS + 1).min(self.blocks.len());
 
@@ -1529,6 +1525,11 @@ impl App {
 
     /// Generic line scrolling based on current focused pane (for wheel events).
     /// Positive delta = down/next, negative delta = up/prev.
+    ///
+    /// Implementation note: This calls up()/down() in a loop to reuse existing
+    /// navigation logic (block selection, tx refresh, caching, etc.). Works well
+    /// for typical wheel deltas (±1 to ±3), but could be optimized for large
+    /// deltas (e.g., touchpad flings) if scroll performance becomes an issue.
     pub fn scroll_lines(&mut self, delta: i32) {
         if delta == 0 {
             return;
@@ -1794,7 +1795,7 @@ impl App {
                     let anchor_height = self.current_block().map(|b| b.height);
                     if let Some(anchor_h) = anchor_height {
                         let ahead = height.saturating_sub(anchor_h);
-                        if ahead > FRONT_WINDOW {
+                        if ahead > crate::constants::app::FRONT_WINDOW {
                             self.live_updates_paused = true;
                             self.log_debug(format!(
                                 "[live-paused] pausing at block #{} ({} ahead of anchor #{}) – press ← in Blocks to resume",
@@ -1900,10 +1901,6 @@ impl App {
                     self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
                 }
             }
-        }
-
-        // Keep archival window filled when pinned to a specific block
-        if !self.follow_blocks_latest {
         }
     }
 
