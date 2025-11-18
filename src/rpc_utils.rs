@@ -90,7 +90,7 @@ pub async fn rpc_post(
 pub async fn get_latest_block(url: &str, t: u64, auth_token: Option<&str>) -> Result<Value> {
     rpc_post(
         url,
-        &json!({"jsonrpc":"2.0","id":"ratacat","method":"block","params":{"finality":"final"}}),
+        &json!({"jsonrpc":"2.0","id":"nearx","method":"block","params":{"finality":"final"}}),
         t,
         auth_token,
     )
@@ -105,7 +105,23 @@ pub async fn get_block_by_height(
 ) -> Result<Value> {
     rpc_post(
         url,
-        &json!({"jsonrpc":"2.0","id":"ratacat","method":"block","params":{"block_id":h}}),
+        &json!({"jsonrpc":"2.0","id":"nearx","method":"block","params":{"block_id":h}}),
+        t,
+        auth_token,
+    )
+    .await
+}
+
+/// Fetch a block by its hash (for canonical chain-walking)
+pub async fn get_block_by_hash(
+    url: &str,
+    hash: &str,
+    t: u64,
+    auth_token: Option<&str>,
+) -> Result<Value> {
+    rpc_post(
+        url,
+        &json!({"jsonrpc":"2.0","id":"nearx","method":"block","params":{"block_id":hash}}),
         t,
         auth_token,
     )
@@ -115,7 +131,7 @@ pub async fn get_block_by_height(
 pub async fn get_chunk(url: &str, hash: &str, t: u64, auth_token: Option<&str>) -> Result<Value> {
     rpc_post(
         url,
-        &json!({"jsonrpc":"2.0","id":"ratacat","method":"chunk","params":{"chunk_id":hash}}),
+        &json!({"jsonrpc":"2.0","id":"nearx","method":"chunk","params":{"chunk_id":hash}}),
         t,
         auth_token,
     )
@@ -210,10 +226,16 @@ pub async fn fetch_block_with_txs(
     };
 
     let hash = b["header"]["hash"].as_str().unwrap_or("").to_string();
+    let prev_height = b["header"]["prev_height"].as_u64();
+    let prev_hash = b["header"]["prev_hash"]
+        .as_str()
+        .map(|s| s.to_string());
 
     Ok(BlockRow {
         height,
         hash,
+        prev_height,
+        prev_hash,
         timestamp: (timestamp / 1_000_000) as u64,
         tx_count: txs.len(),
         when,

@@ -4,8 +4,8 @@
   "version": "0.4.0",
   "identifier": "com.fastnear.nearx",
   "build": {
-    "beforeDevCommand": "make -C ../.. dev",
-    "beforeBuildCommand": "make -C ../.. web-release",
+    "beforeDevCommand": "make -C .. dev",
+    "beforeBuildCommand": "make -C .. web",
     "devUrl": "http://localhost:8000",
     "frontendDist": "../../web"
   },

@@ -14,8 +14,8 @@ path = "src/bin/nearx.rs"
 required-features = ["native"]
 
 [[bin]]
-name = "ratacat-proxy"
-path = "src/bin/ratacat-proxy.rs"
+name = "nearx-proxy"
+path = "src/bin/nearx-proxy.rs"
 required-features = ["proxy"]
 
 [[bin]]
@@ -26,7 +26,7 @@ required-features = ["dom-web"]
 [workspace]
 resolver = "2"
 members = [
-  ".",                       # ratacat root
+  ".",                       # nearx root
   "plugins/tx-analyzer",
   "plugins/validator-monitor"
 ]

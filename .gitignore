@@ -8,6 +8,10 @@
 # Wasm/Web (wasm-bindgen output)
 web/pkg/
 dist/  # Legacy Trunk output (should not exist, but ignore just in case)
+dist-*/  # Legacy dist variants (dist-dom, dist-egui, etc.)
+
+# Archive (old .bak files, legacy code)
+archive/
 
 # IDE / OS
 .idea/
@@ -15,16 +19,16 @@ dist/  # Legacy Trunk output (should not exist, but ignore just in case)
 .DS_Store
 
 # Application data
-ratacat_history.db
-ratacat_history.db-shm
-ratacat_history.db-wal
+nearx_history.db
+nearx_history.db-shm
+nearx_history.db-wal
 
 # Results and artifacts
 /results/
 
 # Logs / runtime
 *.log
-ratacat_debug.log
+nearx_debug.log
 
 # Playwright E2E artifacts
 node_modules/

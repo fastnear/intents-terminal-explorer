@@ -265,7 +265,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_unix_socket_communication() {
-        let socket_path = "/tmp/test_ratacat_plugin.sock";
+        let socket_path = "/tmp/test_nearx_plugin.sock";
 
         // Start server
         let server = IPCServer::bind_unix(socket_path).await.unwrap();

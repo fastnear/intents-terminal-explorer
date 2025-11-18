@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/tauri-schema.json",
-  "productName": "Ratacat Test",
+  "productName": "NEARx Test",
   "version": "0.1.0",
-  "identifier": "com.ratacat.test",
+  "identifier": "com.nearx.test",
   "build": {
     "devUrl": "../test-ui/index.html",
     "frontendDist": "../test-ui"
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Ratacat Deep Link Test",
+        "title": "NEARx Deep Link Test",
         "width": 900,
         "height": 700
       }
@@ -22,7 +22,7 @@
   },
   "bundle": {
     "resources": [
-      "../../native-host/target/release/ratacat-native-host"
+      "../../native-host/target/release/nearx-native-host"
     ]
   },
   "plugins": {

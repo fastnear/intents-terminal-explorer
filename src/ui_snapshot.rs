@@ -1,18 +1,15 @@
-//! Shared UI snapshot + action types for all frontends.
-//!
-//! - `UiSnapshot` is a DOM/JSON-friendly view of `App`,
-//!   used by the web/Tauri frontends.
-//! - `UiAction` is a high-level, frontend-agnostic input
-//!   (filter change, pane focus, selection, key presses, copy).
-//! - `apply_ui_action` is the single place where these actions
-//!   are translated into `App` mutations.
-//!
-//! The TUI, web DOM frontend, and any future GUI should all go
-//! through these types where possible to keep behavior in lockstep.
-
 use serde::{Deserialize, Serialize};
 
-use crate::{App, BlockRow, TxLite};
+use crate::{App, InputMode};
+
+/// Block source type for two-list architecture
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiBlockSource {
+    Forward,           // Live/cached block from forward list
+    BackfillPending,   // Backfill slot queued but not yet fetched
+    BackfillLoading,   // Backfill slot currently being fetched
+}
 
 /// One row in the Blocks pane (filtered view).
 #[derive(Debug, Clone, Serialize)]
@@ -22,8 +19,9 @@ pub struct UiBlockRow {
     pub hash: String,
     pub when: String,
     pub tx_count: usize,
-    pub owned_tx_count: usize,
+    pub available: bool,
     pub is_selected: bool,
+    pub source: UiBlockSource,  // NEW: tracks whether forward or backfill
 }
 
 /// One row in the Transactions pane (filtered view).
@@ -34,112 +32,188 @@ pub struct UiTxRow {
     pub signer_id: String,
     pub receiver_id: String,
     pub is_selected: bool,
-    pub is_owned: bool,
 }
 
-/// DOM-/JSON-friendly snapshot of `App` state (Rust → UI).
+/// DOM-/JSON-/TUI-friendly snapshot of `App` state (Rust → UI).
 #[derive(Debug, Clone, Serialize)]
 pub struct UiSnapshot {
     /// 0 = Blocks, 1 = Txs, 2 = Details
-    pub pane: u8,
+    pub pane: usize,
 
+    /// Selection slot text (shows current block/tx selection prominently)
+    pub selection_slot_text: String,
+
+    /// Current filter text.
     pub filter_query: String,
-    pub owned_only_filter: bool,
 
+    /// Whether the filter input is focused (InputMode::Filter).
+    pub filter_focused: bool,
+
+    /// Blocks pane rows (filtered + backfill combined).
     pub blocks: Vec<UiBlockRow>,
     pub blocks_total: usize,
+    pub blocks_scroll_offset: usize,  // NEW: for vertical centering
     pub selected_block_height: Option<u64>,
+    pub viewing_cached: bool,
 
+    /// Transactions pane rows (filtered).
     pub txs: Vec<UiTxRow>,
     pub txs_total: usize,
 
+    /// Details pane (windowed JSON for performance)
     pub details: String,
+    pub details_scroll: u16,      // Legacy field (line-based now)
+    pub details_scroll_line: usize, // Current scroll line (0-based)
+    pub details_total_lines: usize, // Total lines in buffer
+    pub details_truncated: bool,  // Whether content was truncated at MAX_LINES
     pub details_fullscreen: bool,
+    pub fullscreen_mode: String, // "Scroll" or "Navigate"
+    pub fullscreen_content_type: String, // "BlockRawJson", "TransactionRawJson", or "ParsedDetails"
 
+    /// Toast notification text (if any).
     pub toast: Option<String>,
+
+    /// Whether keyboard shortcuts overlay is visible (Web/Tauri render this).
+    pub show_shortcuts: bool,
+
+    /// Block height currently being fetched from archival RPC (if any).
+    pub loading_block: Option<u64>,
 }
 
 impl UiSnapshot {
     /// Build a snapshot from the current app state.
     pub fn from_app(app: &App) -> Self {
-        let pane = app.pane() as u8;
+        let pane = app.pane();
+        let selection_slot_text = app.selection_slot_text();
 
-        // Blocks (filtered view).
+        // Blocks: forward list (filtered, newest → oldest)
         let (blocks_filtered, selected_block_idx_opt, blocks_total) = app.filtered_blocks();
-        let blocks: Vec<UiBlockRow> = blocks_filtered
-            .into_iter()
-            .enumerate()
-            .map(|(idx, b)| UiSnapshot::block_row_from(idx, &b, app, selected_block_idx_opt))
-            .collect();
-
         let selected_block_height = app.selected_block_height();
 
-        // Transactions (filtered for current block).
+        let mut blocks: Vec<UiBlockRow> = blocks_filtered
+            .iter()
+            .enumerate()
+            .map(|(idx, b)| UiBlockRow {
+                index: idx,
+                height: b.height,
+                hash: b.hash.clone(),
+                when: b.when.clone(),
+                tx_count: b.tx_count,
+                available: app.is_block_height_available(b.height),
+                is_selected: selected_block_idx_opt == Some(idx),
+                source: UiBlockSource::Forward,
+            })
+            .collect();
+
+        // Blocks: append backfill slots (second list, backwards in time from anchor)
+        let loading_block = app.loading_block();
+        for slot in app.back_slots() {
+            // Skip if block already loaded into forward list/cache
+            if app.is_block_available(slot.height) {
+                continue;
+            }
+
+            let is_loading = loading_block == Some(slot.height);
+
+            blocks.push(UiBlockRow {
+                index: blocks.len(),  // Continue index sequence
+                height: slot.height,
+                hash: slot.hash.clone(),
+                when: String::new(),
+                tx_count: 0,
+                available: false,
+                is_selected: false,  // Placeholders never selected
+                source: if is_loading {
+                    UiBlockSource::BackfillLoading
+                } else {
+                    UiBlockSource::BackfillPending
+                },
+            });
+        }
+
+        // Compute scroll offset for vertical centering (like TUI ui.rs:439)
+        let viewport_rows = 24;  // Reasonable default for web viewport
+        let total_rows = blocks.len();
+        let mut blocks_scroll_offset = 0;
+
+        if viewport_rows > 0 && total_rows > viewport_rows {
+            if let Some(sel_idx) = blocks.iter().position(|r| r.is_selected) {
+                let mut offset = sel_idx.saturating_sub(viewport_rows / 2);
+                if offset + viewport_rows > total_rows {
+                    offset = total_rows.saturating_sub(viewport_rows);
+                }
+                blocks_scroll_offset = offset;
+            }
+        }
+
+        let viewing_cached = app.is_viewing_cached_block();
+
+        // Transactions (filtered for current block)
         let (txs_vec, selected_tx_idx, txs_total) = app.txs();
         let txs: Vec<UiTxRow> = txs_vec
             .into_iter()
             .enumerate()
-            .map(|(idx, tx)| UiSnapshot::tx_row_from(idx, &tx, selected_tx_idx, app))
+            .map(|(idx, tx)| UiTxRow {
+                index: idx,
+                hash: tx.hash.clone(),
+                signer_id: tx.signer_id.clone().unwrap_or_default(),
+                receiver_id: tx.receiver_id.clone().unwrap_or_default(),
+                is_selected: idx == selected_tx_idx,
+            })
             .collect();
 
-        let details = app.details_pretty_string();
+        // Details: use windowed view (prevents UI freeze on huge JSON)
+        let details = app.details_window();
+        let details_scroll = app.details_scroll(); // Legacy field (line-based now)
+        let (details_scroll_line, details_total_lines) = app.details_scroll_info();
+        let details_truncated = app.details_truncated();
+
         let details_fullscreen = app.details_fullscreen();
+        let fullscreen_mode = match app.fullscreen_mode() {
+            crate::app::FullscreenMode::Scroll => "Scroll".to_string(),
+            crate::app::FullscreenMode::Navigate => "Navigate".to_string(),
+        };
+        let fullscreen_content_type = match app.fullscreen_content_type() {
+            crate::app::FullscreenContentType::BlockRawJson => "BlockRawJson".to_string(),
+            crate::app::FullscreenContentType::TransactionRawJson => "TransactionRawJson".to_string(),
+            crate::app::FullscreenContentType::ParsedDetails => "ParsedDetails".to_string(),
+        };
         let toast = app.toast_message().map(|s| s.to_string());
+        let show_shortcuts = app.show_shortcuts();
+        let loading_block = app.loading_block();
+        let filter_query = app.filter_query().to_string();
+        let filter_focused = app.input_mode() == InputMode::Filter;
 
         UiSnapshot {
             pane,
-            filter_query: app.filter_query().to_string(),
-            owned_only_filter: app.owned_only_filter(),
+            selection_slot_text,
+            filter_query,
+            filter_focused,
             blocks,
             blocks_total,
+            blocks_scroll_offset,
             selected_block_height,
+            viewing_cached,
             txs,
             txs_total,
             details,
+            details_scroll,
+            details_scroll_line,
+            details_total_lines,
+            details_truncated,
             details_fullscreen,
+            fullscreen_mode,
+            fullscreen_content_type,
             toast,
-        }
-    }
-
-    fn block_row_from(
-        index: usize,
-        b: &BlockRow,
-        app: &App,
-        selected_block_idx_opt: Option<usize>,
-    ) -> UiBlockRow {
-        UiBlockRow {
-            index,
-            height: b.height,
-            hash: b.hash.clone(),
-            when: b.when.clone(),
-            tx_count: b.tx_count,
-            owned_tx_count: app.owned_count(b.height),
-            is_selected: selected_block_idx_opt == Some(index),
-        }
-    }
-
-    fn tx_row_from(
-        index: usize,
-        tx: &TxLite,
-        selected_tx_idx: usize,
-        app: &App,
-    ) -> UiTxRow {
-        let signer = tx.signer_id.clone().unwrap_or_default();
-        let receiver = tx.receiver_id.clone().unwrap_or_default();
-        UiTxRow {
-            index,
-            hash: tx.hash.clone(),
-            signer_id: signer,
-            receiver_id: receiver,
-            is_selected: index == selected_tx_idx,
-            is_owned: app.is_owned_tx(tx),
+            show_shortcuts,
+            loading_block,
         }
     }
 }
 
 /// Frontend-agnostic high-level UI actions (UI → Rust).
 ///
-/// These are what your TUI, web, and Tauri frontends should send into the core.
+/// These are what TUI/web/Tauri frontends should send into the core.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum UiAction {
@@ -147,7 +221,7 @@ pub enum UiAction {
     SetFilter { text: String },
 
     /// Focus a pane directly: 0 = Blocks, 1 = Txs, 2 = Details.
-    FocusPane { pane: u8 },
+    FocusPane { pane: usize },
 
     /// Select a block row by index in the filtered list.
     SelectBlock { index: usize },
@@ -155,11 +229,11 @@ pub enum UiAction {
     /// Select a tx row by index in the filtered list.
     SelectTx { index: usize },
 
-    /// Toggle owned-only filter.
-    ToggleOwnedOnly,
-
     /// Toggle details fullscreen mode.
     ToggleDetailsFullscreen,
+
+    /// Toggle keyboard shortcuts overlay (? key - Web/Tauri only for now).
+    ToggleShortcuts,
 
     /// Keyboard navigation (Arrow keys, PageUp/Down, Tab, Vim keys, etc.).
     Key {
@@ -177,14 +251,14 @@ pub enum UiAction {
 /// Apply a UI action to the core `App`.
 ///
 /// This is where navigation, selection, filters, and copy semantics live.
-/// All frontends should call this for behavior consistency.
+/// All DOM/TUI frontends should call this for behavior consistency.
 pub fn apply_ui_action(app: &mut App, action: UiAction) {
     match action {
         UiAction::SetFilter { text } => {
             app.set_filter_query(text);
         }
         UiAction::FocusPane { pane } => {
-            app.set_pane_direct(pane as usize);
+            app.set_pane_direct(pane);
         }
         UiAction::SelectBlock { index } => {
             app.select_block_clamped(index);
@@ -192,11 +266,11 @@ pub fn apply_ui_action(app: &mut App, action: UiAction) {
         UiAction::SelectTx { index } => {
             app.select_tx_clamped(index);
         }
-        UiAction::ToggleOwnedOnly => {
-            app.toggle_owned_filter();
-        }
         UiAction::ToggleDetailsFullscreen => {
             app.toggle_details_fullscreen();
+        }
+        UiAction::ToggleShortcuts => {
+            app.toggle_shortcuts();
         }
         UiAction::Key {
             code,
@@ -209,7 +283,51 @@ pub fn apply_ui_action(app: &mut App, action: UiAction) {
     }
 }
 
-fn handle_key(app: &mut App, code: &str, ctrl: bool, shift: bool) {
+fn handle_key(app: &mut App, code: &str, _ctrl: bool, shift: bool) {
+    // Special handling when Details is fullscreen: arrows scroll the buffer
+    if app.details_fullscreen() {
+        match code {
+            "ArrowUp" | "k" | "K" => {
+                app.scroll_details_lines(-1);
+                return;
+            }
+            "ArrowDown" | "j" | "J" => {
+                app.scroll_details_lines(1);
+                return;
+            }
+            "PageUp" => {
+                let n = app.details_viewport_lines() as isize;
+                app.scroll_details_lines(-n);
+                return;
+            }
+            "PageDown" => {
+                let n = app.details_viewport_lines() as isize;
+                app.scroll_details_lines(n);
+                return;
+            }
+            "Home" => {
+                app.details_home();
+                return;
+            }
+            "End" => {
+                app.details_end();
+                return;
+            }
+            " " => {
+                // Space exits fullscreen
+                app.toggle_details_fullscreen();
+                return;
+            }
+            "Escape" => {
+                // Esc exits fullscreen
+                app.toggle_details_fullscreen();
+                return;
+            }
+            _ => return, // Swallow all other keys in fullscreen
+        }
+    }
+
+    // Normal (non-fullscreen) handling
     match code {
         // Arrow navigation.
         "ArrowUp" => app.up(),
@@ -227,22 +345,41 @@ fn handle_key(app: &mut App, code: &str, ctrl: bool, shift: bool) {
         "PageUp" => app.page_up(20),
         "PageDown" => app.page_down(20),
 
-        // Home/End.
+        // Home/End in details.
         "Home" => app.home(),
         "End" => app.end(),
 
-        // Tab / Shift+Tab for pane cycling.
-        "Tab" if !shift => app.next_pane(),
-        "Tab" if shift => app.prev_pane(),
+        // Tab / Shift+Tab for pane cycling (BLOCKED in fullscreen to prevent impossible-to-exit state).
+        "Tab" if !shift => {
+            if !app.details_fullscreen() {
+                app.next_pane();
+            }
+            // Ignore Tab in fullscreen mode
+        }
+        "Tab" if shift => {
+            if !app.details_fullscreen() {
+                app.prev_pane();
+            }
+            // Ignore Shift+Tab in fullscreen mode
+        }
+
+        // Esc: priority-based handling (exit fullscreen > clear filter > no-op).
+        "Escape" => {
+            if app.details_fullscreen() {
+                // Priority 1: Exit fullscreen if open
+                app.toggle_details_fullscreen();
+            } else if !app.filter_query().is_empty() {
+                // Priority 2: Clear filter if non-empty
+                app.clear_filter();
+            }
+            // Priority 3: No-op (Esc does nothing if no fullscreen and no filter)
+        }
 
         // Enter: open selected tx into details.
         "Enter" => app.select_tx(),
 
         // Space: toggle details fullscreen.
         " " => app.toggle_details_fullscreen(),
-
-        // Ctrl+U: toggle owned-only filter.
-        "u" | "U" if ctrl => app.toggle_owned_filter(),
 
         // Quit is a no-op for web/Tauri; TUI can layer its own logic.
         "q" | "Q" => {}
@@ -253,7 +390,6 @@ fn handle_key(app: &mut App, code: &str, ctrl: bool, shift: bool) {
 }
 
 fn handle_copy(app: &mut App) {
-    // If you want this gated by a feature, you can wrap this in #[cfg(feature = "clipboard")] etc.
     if crate::copy_api::copy_current(app) {
         let msg = match app.pane() {
             0 => "Copied block".to_string(),

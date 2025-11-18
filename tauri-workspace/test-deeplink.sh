@@ -19,10 +19,10 @@ echo "3. Opening block link..."
 open "near://block/12345678"
 sleep 1
 
-echo "4. Opening ratacat link..."
-open "near://ratacat"
+echo "4. Opening nearx link..."
+open "near://nearx"
 
 echo ""
-echo "Done! Check the Ratacat window to see the received deep links."
+echo "Done! Check the NEARx window to see the received deep links."
 echo ""
 echo "Registered URL scheme: near://"

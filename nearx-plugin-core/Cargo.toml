@@ -1,5 +1,5 @@
 [package]
-name = "ratacat-plugin-core"
+name = "nearx-plugin-core"
 version = "0.1.0"
 edition = "2021"
 

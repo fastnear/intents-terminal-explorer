@@ -2300,6 +2300,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nearx-plugin-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bincode",
+ "chrono",
+ "crossbeam-channel",
+ "log",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "notify"
 version = "6.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2796,22 +2812,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "99d9a13982dcf210057a8a78572b2217b667c3beacbf3a0d8b454f6f82837d38"
 dependencies = [
  "getrandom 0.3.4",
-]
-
-[[package]]
-name = "ratacat-plugin-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bincode",
- "chrono",
- "crossbeam-channel",
- "log",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -3896,7 +3896,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "log",
- "ratacat-plugin-core",
+ "nearx-plugin-core",
  "serde",
  "serde_json",
  "tokio",
@@ -4024,7 +4024,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "log",
- "ratacat-plugin-core",
+ "nearx-plugin-core",
  "serde",
  "serde_json",
  "tokio",

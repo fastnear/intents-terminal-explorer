@@ -23,19 +23,19 @@ cargo run --bin nearx --features native -- --source rpc
 
 **Binary**: `nearx-web-dom`
 **Features**: `dom-web` (NO egui dependencies)
-**Config**: `Trunk-dom.toml`
+**Build**: `wasm-bindgen` via Makefile
 
 ```bash
 # Check build
 cargo check --bin nearx-web-dom --target wasm32-unknown-unknown --no-default-features --features dom-web
 
-# Development server (requires trunk)
-trunk serve --config Trunk-dom.toml
-# Opens at http://127.0.0.1:8084
+# Development server
+make dev
+# Opens at http://localhost:8000
 
 # Production build
-trunk build --config Trunk-dom.toml --release
-# Output: dist-dom/
+make web-release
+# Output: web/pkg/
 ```
 
 **Status**: ✅ Compiles successfully (minor unused import warning ok)
@@ -45,20 +45,20 @@ trunk build --config Trunk-dom.toml --release
 ## 3. Tauri Desktop App Mode ✅
 
 **Binary**: `nearx-tauri`
-**Frontend**: `dist-dom` (DOM-based, NOT egui)
+**Frontend**: `web/` directory (DOM-based, NO egui)
 **Config**: `tauri-workspace/src-tauri/tauri.conf.json`
 
 ```bash
-# Development mode (auto-builds frontend if needed via dev-deep-links.sh)
+# Development mode (auto-builds frontend via Makefile)
 cd tauri-workspace
 cargo tauri dev
 
 # Or use the helper script (macOS only)
-./tauri-workspace/dev-deep-links.sh
+./tauri-dev.sh
 ```
 
 **Status**: ✅ Config verified
-- `frontendDist`: `../../dist-dom` ✅
+- `frontendDist`: `../../web` ✅
 - `withGlobalTauri`: `true` ✅
 - Deep link scheme: `nearx://` ✅
 
@@ -68,34 +68,28 @@ cargo tauri dev
 
 ## Architecture Verification
 
-### DOM Build is Separate from egui ✅
+### DOM Build Architecture ✅
 
 ```bash
 # Verify DOM build has NO egui dependencies
 cargo tree --target wasm32-unknown-unknown --no-default-features --features dom-web \
-  | grep -E '(egui|eframe|soft_ratatui)'
+  | grep -E '(egui|eframe)'
 # → Should return empty
 ```
 
-### Feature Separation
-
-- **`egui-web`**: Uses egui, eframe, egui_ratatui, soft_ratatui
-  - Binary: `nearx-web`
-  - Config: `Trunk.toml`
-  - Output: `dist-egui/`
+### Current Architecture
 
 - **`dom-web`**: Pure DOM, wasm-bindgen only
   - Binary: `nearx-web-dom`
-  - Config: `Trunk-dom.toml`
-  - Output: `dist-dom/`
+  - Build: Direct wasm-bindgen via Makefile
+  - Output: `web/pkg/`
 
-### Build System: Trunk (Canonical Choice) ✅
+### Build System: wasm-bindgen (Direct) ✅
 
-Per Tauri v2 official docs and research:
-- Trunk is the canonical bundler for Rust WASM frontends
-- Officially supported: https://v2.tauri.app/start/frontend/trunk/
-- One build system serves both web and Tauri targets
-- No Vite needed for pure Rust WASM projects
+- No bundler needed for our simple static site
+- Makefile handles wasm-bindgen directly
+- Serves both web and Tauri targets
+- Maximum control and simplicity
 
 ---
 

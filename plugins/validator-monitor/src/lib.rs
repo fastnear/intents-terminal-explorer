@@ -1,5 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
-use ratacat_plugin_core::prelude::*;
+use nearx_plugin_core::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

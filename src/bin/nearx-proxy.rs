@@ -1,4 +1,4 @@
-//! Backend proxy server for Ratacat web frontend
+//! Backend proxy server for NEARx web frontend
 //!
 //! This server provides a lightweight HTTP API that wraps NEAR RPC calls,
 //! allowing the WASM frontend to access blockchain data without dealing with
@@ -13,7 +13,7 @@
 //!
 //! ## Usage
 //! ```bash
-//! cargo run --bin ratacat-proxy --features proxy
+//! cargo run --bin nearx-proxy --features proxy
 //! ```
 
 use axum::{

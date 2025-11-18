@@ -26,10 +26,12 @@ pub struct TxAction {
     pub method: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BlockRow {
     pub height: u64,
     pub hash: String,
+    pub prev_height: Option<u64>,
+    pub prev_hash: Option<String>,
     pub timestamp: u64,
     pub tx_count: usize,
     pub when: String,

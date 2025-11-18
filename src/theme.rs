@@ -22,6 +22,7 @@ pub struct Theme {
     pub accent: Rgb,        // Links / highlights
     pub accent_strong: Rgb, // Focused borders / active states
     pub sel_bg: Rgb,        // Selection background
+    pub hover_bg: Rgb,      // Hover background (Web/Tauri rows)
     pub success: Rgb,       // Success states
     pub warn: Rgb,          // Warning states
     pub error: Rgb,         // Error states
@@ -41,13 +42,14 @@ impl Default for Theme {
         Theme {
             bg: Rgb(0x0b, 0x0e, 0x14),            // #0b0e14 - backdrop
             panel: Rgb(0x0f, 0x13, 0x1a),         // #0f131a - unfocused pane bg
-            panel_alt: Rgb(0x12, 0x17, 0x22),     // #121722 - focused pane bg
+            panel_alt: Rgb(0x1a, 0x20, 0x30),     // #1a2030 - focused pane bg
             text: Rgb(0xe6, 0xed, 0xf3),          // #e6edf3 - primary text
             text_dim: Rgb(0xa2, 0xad, 0xbd),      // #a2adbd - secondary text
-            border: Rgb(0x1e, 0x24, 0x30),        // #1e2430 - unfocused borders
+            border: Rgb(0x5d, 0x63, 0x6d),        // #5d636d - unfocused borders
             accent: Rgb(0x66, 0xb3, 0xff),        // #66b3ff - links/highlights
             accent_strong: Rgb(0xff, 0xcc, 0x00), // #ffcc00 - focused borders (yellow)
             sel_bg: Rgb(0x1e, 0x2a, 0x3a),        // #1e2a3a - selection background
+            hover_bg: Rgb(0x15, 0x1b, 0x23),      // #151b23 - hover background
             success: Rgb(0x6b, 0xdc, 0x96),       // #6bdc96 - success
             warn: Rgb(0xff, 0xcc, 0x66),          // #ffcc66 - warnings
             error: Rgb(0xff, 0x6b, 0x6b),         // #ff6b6b - errors
@@ -86,6 +88,7 @@ impl Theme {
             ("--accent", self.accent.to_css_hex()),
             ("--accent-strong", self.accent_strong.to_css_hex()),
             ("--sel-bg", self.sel_bg.to_css_hex()),
+            ("--hover-bg", self.hover_bg.to_css_hex()),
             ("--success", self.success.to_css_hex()),
             ("--warn", self.warn.to_css_hex()),
             ("--error", self.error.to_css_hex()),
@@ -104,7 +107,7 @@ impl Theme {
 
 #[cfg(feature = "native")]
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-pub mod rat {
+pub mod ratatui_helpers {
     use super::{Rgb, Theme};
     use ratatui::style::{Color, Modifier, Style};
 
@@ -141,7 +144,6 @@ pub mod rat {
         }
     }
 }
-
 
 // ---------- Contrast calculation (for testing) ----------
 
@@ -217,6 +219,16 @@ mod tests {
         assert!(
             ratio >= 4.5,
             "Selected text should meet WCAG AA (got {ratio:.2}:1, need >=4.5:1)"
+        );
+    }
+
+    #[test]
+    fn wcag_unfocused_border_visible() {
+        let t = Theme::default();
+        let ratio = contrast_ratio(t.border, t.panel);
+        assert!(
+            ratio >= 3.0,
+            "Unfocused border should be visible (got {ratio:.2}:1, need >=3.0:1)"
         );
     }
 

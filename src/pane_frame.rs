@@ -14,7 +14,7 @@ use ratatui::{
 
 #[cfg(feature = "native")]
 use crate::theme::{
-    rat::{c, styles},
+    ratatui_helpers::{c, styles},
     Theme,
 };
 

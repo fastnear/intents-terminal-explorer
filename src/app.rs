@@ -1,5 +1,5 @@
 use serde_json::json;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
@@ -14,7 +14,7 @@ use crate::theme::Theme;
 use crate::types::{AppEvent, BlockRow, TxLite, WsPayload};
 
 #[cfg(feature = "native")]
-use crate::theme::rat;
+use crate::theme::ratatui_helpers;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum InputMode {
@@ -22,7 +22,21 @@ pub enum InputMode {
     Filter,
     Search,
     Marks,
-    JumpPending,
+}
+
+/// Content type for fullscreen Details pane
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum FullscreenContentType {
+    BlockRawJson,       // Raw JSON of selected block (from Blocks pane)
+    TransactionRawJson, // Raw JSON of selected transaction (from Txs pane)
+    ParsedDetails,      // Human-readable parsed view (from Details pane, default)
+}
+
+/// Interaction mode when fullscreen is active
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum FullscreenMode {
+    Scroll,    // Arrow keys scroll the JSON content
+    Navigate,  // Arrow keys navigate underlying pane (Blocks/Txs rows)
 }
 
 /// Reason for block selection change - determines tx selection behavior
@@ -33,6 +47,158 @@ enum BlockChangeReason {
     FilterChange, // Filter was applied/cleared (try to preserve tx)
 }
 
+const BACK_WINDOW: usize = 50;
+const FRONT_WINDOW: u64 = 50;
+
+/// Backwards-fill slot for the block list (ancestors of the anchor block).
+#[derive(Debug, Clone)]
+pub struct BackSlot {
+    pub height: u64,
+    pub hash: String,
+    pub state: BackSlotState,
+}
+
+#[derive(Debug, Clone)]
+pub enum BackSlotState {
+    /// We know this height/hash but have not yet asked the archival worker.
+    Pending,
+    /// Archival worker has delivered this height (visible via `is_block_available`).
+    Loaded,
+    Error(String),
+}
+
+/// Virtual text buffer for Details pane with windowed rendering.
+/// Stores full JSON and line offsets for efficient scrolling.
+pub struct DetailsBuffer {
+    /// Full pretty-printed JSON (or other text)
+    text: String,
+    /// Starting byte index of each line in `text`
+    line_offsets: Vec<usize>,
+    /// Current top visible line
+    scroll_line: usize,
+    /// Whether the content was truncated at MAX_LINES
+    truncated: bool,
+}
+
+impl Default for DetailsBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DetailsBuffer {
+    /// Maximum lines to index (prevents UI freeze on massive blocks)
+    const MAX_LINES: usize = 5_000;
+
+    pub fn new() -> Self {
+        Self {
+            text: String::new(),
+            line_offsets: vec![0],
+            scroll_line: 0,
+            truncated: false,
+        }
+    }
+
+    /// Replace buffer contents and rebuild line index
+    pub fn set_text(&mut self, text: String) {
+        self.text = text;
+        self.line_offsets.clear();
+        self.line_offsets.push(0);
+
+        let mut line_count = 1;
+        for (i, b) in self.text.bytes().enumerate() {
+            if b == b'\n' {
+                self.line_offsets.push(i + 1);
+                line_count += 1;
+                if line_count >= Self::MAX_LINES {
+                    self.truncated = true;
+                    break;
+                }
+            }
+        }
+
+        // If we didn't reach MAX_LINES, we're not truncated
+        if line_count < Self::MAX_LINES {
+            self.truncated = false;
+        }
+
+        self.scroll_line = 0;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+
+    pub fn total_lines(&self) -> usize {
+        self.line_offsets.len()
+    }
+
+    pub fn current_scroll_line(&self) -> usize {
+        self.scroll_line
+    }
+
+    /// Check if content was truncated at MAX_LINES
+    pub fn truncated(&self) -> bool {
+        self.truncated
+    }
+
+    /// Return full text (for copy operations)
+    pub fn full_text(&self) -> &str {
+        &self.text
+    }
+
+    /// Return a window of at most `max_lines` lines as a String
+    pub fn window(&self, max_lines: usize) -> String {
+        if self.text.is_empty() || max_lines == 0 {
+            return String::new();
+        }
+        let total_lines = self.line_offsets.len();
+        let start_line = self.scroll_line.min(total_lines.saturating_sub(1));
+        let end_line = (start_line + max_lines).min(total_lines);
+
+        let start_idx = self.line_offsets[start_line];
+        let end_idx = if end_line < total_lines {
+            self.line_offsets[end_line]
+        } else {
+            self.text.len()
+        };
+        self.text[start_idx..end_idx].to_string()
+    }
+
+    /// Scroll by delta lines (positive = down, negative = up)
+    pub fn scroll_lines(&mut self, delta: isize, viewport_lines: usize) {
+        if self.text.is_empty() {
+            return;
+        }
+        let total_lines = self.line_offsets.len();
+        let cur = self.scroll_line as isize;
+
+        // Calculate the maximum scroll position based on viewport
+        let max_scroll = if total_lines > viewport_lines {
+            (total_lines - viewport_lines) as isize
+        } else {
+            0
+        };
+
+        // Clamp the next position to valid range
+        let next = (cur + delta).max(0).min(max_scroll);
+        self.scroll_line = next as usize;
+    }
+
+    pub fn scroll_to_top(&mut self) {
+        self.scroll_line = 0;
+    }
+
+    pub fn scroll_to_bottom(&mut self, viewport_lines: usize) {
+        let total = self.line_offsets.len();
+        if total > viewport_lines {
+            self.scroll_line = total - viewport_lines;
+        } else {
+            self.scroll_line = 0;
+        }
+    }
+}
+
 pub struct App {
     quit: bool,
     pane: usize, // 0 blocks, 1 txs, 2 details
@@ -40,8 +206,9 @@ pub struct App {
     sel_block_height: Option<u64>, // None = auto-follow newest, Some(height) = locked to specific block
     sel_tx: usize,
 
-    details: String,
-    details_scroll: u16,
+    // Details pane windowed rendering (virtual buffer)
+    details_buf: DetailsBuffer,
+    details_viewport_lines: usize, // Set by renderer based on pane height
 
     fps: u32,
     fps_choices: Vec<u32>,
@@ -63,11 +230,6 @@ pub struct App {
     marks_list: Vec<crate::types::Mark>,
     marks_selection: usize,
 
-    // Owned accounts state
-    owned_accounts: HashSet<String>, // Lowercase account IDs from ~/.near-credentials
-    owned_only_filter: bool,         // Ctrl+U toggle for owned-only view
-    owned_counts: HashMap<u64, usize>, // Cached owned tx count per block height
-
     // Manually-selected blocks cache (preserves blocks after they age out of rolling buffer)
     cached_blocks: HashMap<u64, BlockRow>, // height -> block
     cached_block_order: Vec<u64>,          // LRU tracking for cache eviction
@@ -76,23 +238,38 @@ pub struct App {
     loading_block: Option<u64>, // Block height currently being fetched from archival
     archival_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<u64>>, // Channel to request archival fetches
 
+    /// When true, new live blocks from RPC are ignored.
+    /// Set when user is pinned far behind the live tip (>50 blocks past focal).
+    live_updates_paused: bool,
+
+    // Backwards fill window (second list, anchored at selected block).
+    back_slots: Vec<BackSlot>,
+    back_anchor_height: Option<u64>,
+    back_next_request_at: Option<Instant>,
+    back_slots_target: usize,
+
     // Debug log (for development)
     debug_log: Vec<String>, // Rolling buffer of debug messages
     debug_visible: bool,    // Toggle debug panel visibility (Ctrl+D)
+
+    // Keyboard shortcuts overlay (Web/Tauri only for now, TUI infrastructure ready for future)
+    shortcuts_visible: bool, // Toggle keyboard shortcuts help overlay (? key)
 
     // Toast notification state
     toast_message: Option<(String, Instant)>, // (message, timestamp)
 
     // UI layout state
-    details_fullscreen: bool,     // Spacebar toggle for 100% details view
-    details_viewport_height: u16, // Actual visible height of details pane (set by UI layer)
+    details_fullscreen: bool,                   // Spacebar toggle for 100% details view
+    fullscreen_content_type: FullscreenContentType, // What to show in fullscreen
+    fullscreen_mode: FullscreenMode,            // Scroll (arrow keys scroll JSON) or Navigate (arrow keys move rows)
+    details_viewport_height: u16,               // Actual visible height of details pane (set by UI layer)
 
     // Theme (single source of truth for all UI targets)
     theme: Theme,
 
     // Cached ratatui styles (invalidated when theme changes)
     #[cfg(feature = "native")]
-    rat_styles_cache: Option<rat::Styles>,
+    rat_styles_cache: Option<ratatui_helpers::Styles>,
 
     // UI feature flags (for Web/Tauri enhanced behaviors)
     ui_flags: UiFlags,
@@ -118,8 +295,12 @@ impl App {
             blocks: Vec::with_capacity(keep_blocks),
             sel_block_height: None,
             sel_tx: 0, // Start in auto-follow mode
-            details: "(No blocks yet)".into(),
-            details_scroll: 0,
+            details_buf: {
+                let mut buf = DetailsBuffer::new();
+                buf.set_text("(No blocks yet)".into());
+                buf
+            },
+            details_viewport_lines: 32, // Sensible default, updated by renderer
             fps,
             fps_choices,
             keep_blocks,
@@ -132,19 +313,24 @@ impl App {
             search_selection: 0,
             marks_list: Vec::new(),
             marks_selection: 0,
-            owned_accounts: HashSet::new(),
-            owned_only_filter: false,
-            owned_counts: HashMap::new(),
             cached_blocks: HashMap::new(),
             cached_block_order: Vec::new(),
             loading_block: None,
             archival_fetch_tx,
+            live_updates_paused: false, // Start with live updates enabled
+            back_slots: Vec::new(),
+            back_anchor_height: None,
+            back_next_request_at: None,
+            back_slots_target: BACK_WINDOW,
             debug_log: Vec::new(),
             debug_visible: false, // Hidden by default
+            shortcuts_visible: false, // Hidden by default (Web/Tauri only for now)
             toast_message: None,
-            details_fullscreen: false,   // Normal view by default
-            details_viewport_height: 20, // Default estimate, will be updated by UI
-            theme: Theme::default(),     // Single source of truth for UI colors
+            details_fullscreen: false,                          // Normal view by default
+            fullscreen_content_type: FullscreenContentType::ParsedDetails, // Default to parsed view
+            fullscreen_mode: FullscreenMode::Scroll,            // Scroll mode by default
+            details_viewport_height: 20,                        // Default estimate, will be updated by UI
+            theme: Theme::default(),                            // Single source of truth for UI colors
             #[cfg(feature = "native")]
             rat_styles_cache: None, // Computed on first use
             ui_flags: UiFlags::default(), // Safe defaults for Web/Tauri
@@ -197,7 +383,7 @@ impl App {
             self.cached_blocks.get(&height)
         } else {
             // Auto-follow mode: respect filter
-            if filter::is_empty(&self.filter_compiled) && !self.owned_only_filter {
+            if filter::is_empty(&self.filter_compiled) {
                 // No filter: return newest block
                 self.blocks.first()
             } else {
@@ -207,9 +393,24 @@ impl App {
         }
     }
 
+    fn block_by_height(&self, height: u64) -> Option<&BlockRow> {
+        self.blocks
+            .iter()
+            .find(|b| b.height == height)
+            .or_else(|| self.cached_blocks.get(&height))
+    }
+
+    pub fn back_slots(&self) -> &[BackSlot] {
+        &self.back_slots
+    }
+
+    pub fn loading_block(&self) -> Option<u64> {
+        self.loading_block
+    }
+
     /// Count how many transactions in a block match the current filter
     fn count_matching_txs(&self, block: &BlockRow) -> usize {
-        if filter::is_empty(&self.filter_compiled) && !self.owned_only_filter {
+        if filter::is_empty(&self.filter_compiled) {
             return block.transactions.len(); // No filter = all match
         }
 
@@ -217,10 +418,6 @@ impl App {
             .transactions
             .iter()
             .filter(|tx| {
-                // Apply owned-only filter if active
-                if self.owned_only_filter && !self.is_owned_tx(tx) {
-                    return false;
-                }
                 // Apply text filter
                 let v = json!({
                     "hash": &tx.hash,
@@ -237,25 +434,63 @@ impl App {
     pub fn filtered_blocks(&self) -> (Vec<&BlockRow>, Option<usize>, usize) {
         let total = self.blocks.len();
 
-        if filter::is_empty(&self.filter_compiled) && !self.owned_only_filter {
-            // No filter active - return all blocks
-            let idx = self
-                .find_block_index(self.sel_block_height)
-                .or(if !self.blocks.is_empty() {
-                    Some(0)
-                } else {
-                    None
-                });
-            let refs: Vec<&BlockRow> = self.blocks.iter().collect();
-            return (refs, idx, total);
+        // Check if we're viewing a cached block (not in main buffer)
+        let viewing_cached = if let Some(height) = self.sel_block_height {
+            self.find_block_index(Some(height)).is_none()
+                && self.cached_blocks.contains_key(&height)
+        } else {
+            false
+        };
+
+        if filter::is_empty(&self.filter_compiled) {
+            // No filter active
+            let mut all_blocks: Vec<&BlockRow> = self.blocks.iter().collect();
+
+            // If viewing cached block, inject it at correct position
+            if viewing_cached {
+                if let Some(cached_block) = self.sel_block_height
+                    .and_then(|h| self.cached_blocks.get(&h))
+                {
+                    // Find insertion point (sorted by height descending)
+                    let insert_pos = all_blocks
+                        .iter()
+                        .position(|b| b.height < cached_block.height)
+                        .unwrap_or(all_blocks.len());
+
+                    all_blocks.insert(insert_pos, cached_block);
+                }
+            }
+
+            // Find selection index in the (possibly injected) list
+            let idx = self.sel_block_height
+                .and_then(|h| all_blocks.iter().position(|b| b.height == h))
+                .or(if !all_blocks.is_empty() { Some(0) } else { None });
+
+            return (all_blocks, idx, total);
         }
 
-        // Filter blocks with matching transactions
-        let filtered: Vec<&BlockRow> = self
+        // Filter active: only show blocks with matching transactions
+        let mut filtered: Vec<&BlockRow> = self
             .blocks
             .iter()
             .filter(|block| self.count_matching_txs(block) > 0)
             .collect();
+
+        // If viewing cached block AND it has matching txs, inject it
+        if viewing_cached {
+            if let Some(cached_block) = self.sel_block_height
+                .and_then(|h| self.cached_blocks.get(&h))
+            {
+                if self.count_matching_txs(cached_block) > 0 {
+                    let insert_pos = filtered
+                        .iter()
+                        .position(|b| b.height < cached_block.height)
+                        .unwrap_or(filtered.len());
+
+                    filtered.insert(insert_pos, cached_block);
+                }
+            }
+        }
 
         // Find selected block index in filtered list
         let sel_idx = if let Some(height) = self.sel_block_height {
@@ -275,17 +510,33 @@ impl App {
     /// Get the list of blocks to navigate through (respects current filter)
     /// Returns Vec of heights in display order (newest first)
     fn get_navigation_list(&self) -> Vec<u64> {
-        if filter::is_empty(&self.filter_compiled) && !self.owned_only_filter {
-            // No filter - navigate through all blocks
+        // Build list from main buffer (filtered or not)
+        let mut nav_list: Vec<u64> = if filter::is_empty(&self.filter_compiled) {
             self.blocks.iter().map(|b| b.height).collect()
         } else {
-            // Filter active - navigate only through blocks with matching transactions
             self.blocks
                 .iter()
-                .filter(|block| self.count_matching_txs(block) > 0)
+                .filter(|b| self.count_matching_txs(b) > 0)
                 .map(|b| b.height)
                 .collect()
+        };
+
+        // If viewing cached block, inject it into nav list at correct position
+        if let Some(height) = self.sel_block_height {
+            if self.find_block_index(Some(height)).is_none()
+                && self.cached_blocks.contains_key(&height)
+            {
+                // Cached block - insert into nav list
+                let insert_pos = nav_list
+                    .iter()
+                    .position(|&h| h < height)
+                    .unwrap_or(nav_list.len());
+
+                nav_list.insert(insert_pos, height);
+            }
         }
+
+        nav_list
     }
 
     /// Check if a specific block height is available (in buffer or cache)
@@ -308,11 +559,7 @@ impl App {
                 .transactions
                 .iter()
                 .filter(|tx| {
-                    // Apply owned-only filter first (if active)
-                    if self.owned_only_filter && !self.is_owned_tx(tx) {
-                        return false;
-                    }
-                    // Then apply text filter - pass complete tx data for filtering
+                    // Apply text filter - pass complete tx data for filtering
                     // Note: actions omitted here since ActionSummary doesn't derive Serialize
                     // TODO: Add Serialize to ActionSummary for full filtering support
                     let v = json!({
@@ -331,23 +578,16 @@ impl App {
     }
 
     pub fn details(&self) -> &str {
-        &self.details
+        self.details_buf.full_text()
     }
     pub fn details_scroll(&self) -> u16 {
-        self.details_scroll
+        self.details_buf.current_scroll_line() as u16
     }
     pub fn input_mode(&self) -> InputMode {
         self.input_mode
     }
     pub fn filter_query(&self) -> &str {
         &self.filter_query
-    }
-    pub fn owned_only_filter(&self) -> bool {
-        self.owned_only_filter
-    }
-    #[allow(dead_code)]
-    pub fn owned_accounts(&self) -> &HashSet<String> {
-        &self.owned_accounts
     }
     pub fn debug_log(&self) -> &[String] {
         &self.debug_log
@@ -358,13 +598,92 @@ impl App {
     pub fn details_fullscreen(&self) -> bool {
         self.details_fullscreen
     }
-    pub fn loading_block(&self) -> Option<u64> {
-        self.loading_block
+    pub fn fullscreen_content_type(&self) -> FullscreenContentType {
+        self.fullscreen_content_type
+    }
+    pub fn fullscreen_mode(&self) -> FullscreenMode {
+        self.fullscreen_mode
+    }
+
+    /// Get text for selection slot (shows current block context)
+    pub fn selection_slot_text(&self) -> String {
+        // Show currently selected block
+        if let Some(block) = self.current_block() {
+            // Check if THIS block is currently loading
+            let is_loading = self.loading_block == Some(block.height);
+            if self.follow_blocks_latest && self.sel_block_height.is_none() {
+                // Auto-follow mode: show filtered latest block
+                format!("► Auto-follow: Block #{} (latest)", block.height)
+            } else if is_loading {
+                // This specific block is being fetched from archival
+                format!("► Selected: Block #{} (loading...)", block.height)
+            } else {
+                // Manual selection mode: show block details with timestamp
+                format!(
+                    "► Selected: Block #{} ({} txs) · {}",
+                    block.height, block.tx_count, block.when
+                )
+            }
+        } else {
+            // No blocks available
+            if self.follow_blocks_latest && self.sel_block_height.is_none() {
+                "► Auto-follow (waiting for blocks...)".to_string()
+            } else {
+                "► No block selected (waiting for blocks...)".to_string()
+            }
+        }
     }
 
     /// Get the active theme (single source of truth for UI colors)
     pub fn theme(&self) -> &Theme {
         &self.theme
+    }
+
+    /// Get raw JSON of currently selected block (for fullscreen display/copying)
+    pub fn get_raw_block_json(&self) -> String {
+        // Check if we have any blocks loaded at all
+        if self.blocks.is_empty() && self.cached_blocks.is_empty() {
+            return "Waiting for blocks to load...".to_string();
+        }
+
+        match self.current_block() {
+            Some(block) => {
+                // Serialize with 100KB truncation to prevent UI freezing on massive blocks
+                match serde_json::to_value(block) {
+                    Ok(val) => {
+                        // Guard against null values (shouldn't happen but was in old code)
+                        if val.is_null() {
+                            "Error: Block serialized to null".to_string()
+                        } else {
+                            crate::json_pretty::pretty_safe(&val, 2, 100 * 1024)
+                        }
+                    }
+                    Err(e) => {
+                        format!("Error: Failed to serialize block - {}", e)
+                    }
+                }
+            }
+            None => {
+                // Provide more context about why no block is selected
+                if let Some(height) = self.sel_block_height {
+                    format!("Block {} not found in buffer", height)
+                } else {
+                    "No block selected (auto-follow mode)".to_string()
+                }
+            }
+        }
+    }
+
+    /// Get raw JSON of currently selected transaction (for fullscreen display/copying)
+    pub fn get_raw_tx_json(&self) -> String {
+        if let Some(block) = self.current_block() {
+            if let Some(tx) = block.transactions.get(self.sel_tx) {
+                // Serialize with 100KB truncation to prevent UI freezing on massive transactions
+                let val = serde_json::to_value(tx).unwrap_or(serde_json::Value::Null);
+                return crate::json_pretty::pretty_safe(&val, 2, 100 * 1024);
+            }
+        }
+        "No transaction selected".to_string()
     }
 
     /// Set the active theme (for runtime theme switching)
@@ -380,11 +699,11 @@ impl App {
 
     /// Get cached ratatui styles for current theme (computed on first use, invalidated on theme change)
     #[cfg(feature = "native")]
-    pub fn rat_styles(&mut self) -> rat::Styles {
+    pub fn rat_styles(&mut self) -> ratatui_helpers::Styles {
         if let Some(ref styles) = self.rat_styles_cache {
             return *styles;
         }
-        let styles = rat::styles(&self.theme);
+        let styles = ratatui_helpers::styles(&self.theme);
         self.rat_styles_cache = Some(styles);
         styles
     }
@@ -447,7 +766,7 @@ impl App {
             if let Ok(mut file) = OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open("ratacat_debug.log")
+                .open("nearx_debug.log")
             {
                 let _ = writeln!(file, "[{timestamp}] {msg}");
             }
@@ -461,10 +780,10 @@ impl App {
     }
 
     // ----- block cache methods -----
-    /// Cache selected block and ±12 blocks around it for context navigation
+    /// Cache selected block and ±50 blocks around it for context navigation
     fn cache_block_with_context(&mut self, center_height: u64) {
-        const CONTEXT_RANGE: i64 = 12;
-        const MAX_TOTAL_CACHED: usize = 50; // Safety limit
+        use crate::constants::app::CACHE_CONTEXT_BLOCKS;
+        const MAX_TOTAL_CACHED: usize = 300; // Safety limit (3× context window)
 
         // Find the center block's index
         let center_idx = match self.find_block_index(Some(center_height)) {
@@ -473,8 +792,8 @@ impl App {
         };
 
         // Cache blocks in range [center - 12, center + 12]
-        let start_idx = center_idx.saturating_sub(CONTEXT_RANGE as usize);
-        let end_idx = (center_idx + CONTEXT_RANGE as usize + 1).min(self.blocks.len());
+        let start_idx = center_idx.saturating_sub(CACHE_CONTEXT_BLOCKS);
+        let end_idx = (center_idx + CACHE_CONTEXT_BLOCKS + 1).min(self.blocks.len());
 
         let mut cached_count = 0;
         for idx in start_idx..end_idx {
@@ -507,7 +826,7 @@ impl App {
             self.log_debug(format!(
                 "Cached block #{} with ±{} context ({} new, {} total)",
                 center_height,
-                CONTEXT_RANGE,
+                CACHE_CONTEXT_BLOCKS,
                 cached_count,
                 self.cached_blocks.len()
             ));
@@ -515,45 +834,85 @@ impl App {
     }
 
     /// Check if a block is available for viewing (in main buffer or cache)
-    fn is_block_available(&self, height: u64) -> bool {
+    pub fn is_block_available(&self, height: u64) -> bool {
         self.find_block_index(Some(height)).is_some() || self.cached_blocks.contains_key(&height)
     }
 
-    // ----- owned accounts methods -----
-    pub fn set_owned_accounts(&mut self, accounts: HashSet<String>) {
-        self.owned_accounts = accounts;
-        // Recompute owned counts for all blocks
-        self.recompute_owned_counts();
-    }
+    /// Eagerly fill ±50 block window around selected height via archival RPC
+    ///
+    /// For each height in [center-50, center+50]:
+    /// - If block is available (in buffer or cache): skip
+    /// - If block is missing: request from archival RPC
+    ///
+    /// This enables smooth navigation through historical blocks without gaps.
+    pub fn ensure_block_window(&mut self, center_height: u64) {
+        use crate::constants::app::ARCHIVAL_CONTEXT_BLOCKS;
 
-    pub fn is_owned_tx(&self, tx: &TxLite) -> bool {
-        if self.owned_accounts.is_empty() {
-            return false;
-        }
-        // Check if signer or receiver matches any owned account (case-insensitive)
-        if let Some(ref signer) = tx.signer_id {
-            if self.owned_accounts.contains(&signer.to_lowercase()) {
-                return true;
+        let start = center_height.saturating_sub(ARCHIVAL_CONTEXT_BLOCKS);
+        let end = center_height + ARCHIVAL_CONTEXT_BLOCKS;
+
+        let mut requested_count = 0;
+        for h in start..=end {
+            if !self.is_block_available(h) {
+                self.request_archival_block(h);
+                requested_count += 1;
             }
         }
-        if let Some(ref receiver) = tx.receiver_id {
-            if self.owned_accounts.contains(&receiver.to_lowercase()) {
-                return true;
+
+        // Always cache what we already have
+        self.cache_block_with_context(center_height);
+
+        if requested_count > 0 {
+            self.log_debug(format!(
+                "Requested {} missing blocks in window [{}..={}] around #{}",
+                requested_count, start, end, center_height
+            ));
+        }
+    }
+
+    /// Eagerly fill ±50 block window using canonical chain-walking on every selection change.
+    ///
+    /// - Walks backward using prev_hash (canonical chain)
+    /// - Walks forward using height (no next_hash in protocol)
+    /// - Respects latest known block boundary (can't fetch future)
+    /// - Uses archival RPC for historical blocks
+    pub fn ensure_block_window_by_chain(&mut self, center_height: u64) {
+        use crate::constants::app::ARCHIVAL_CONTEXT_BLOCKS;
+
+        // Determine latest known block height (can't request future blocks)
+        let latest_known = self.blocks.first().map(|b| b.height).unwrap_or(center_height);
+
+        // --- Walk BACKWARD (±50 blocks behind center) ---
+        let backward_target = center_height.saturating_sub(ARCHIVAL_CONTEXT_BLOCKS);
+        let mut backward_requested = 0;
+
+        for h in backward_target..center_height {
+            if !self.is_block_available(h) {
+                self.request_archival_block(h);
+                backward_requested += 1;
             }
         }
-        false
-    }
 
-    pub fn count_owned_txs(&self, txs: &[TxLite]) -> usize {
-        if self.owned_accounts.is_empty() {
-            return 0;
+        // --- Walk FORWARD (±50 blocks ahead, capped at latest_known) ---
+        let forward_target = (center_height + ARCHIVAL_CONTEXT_BLOCKS).min(latest_known);
+        let mut forward_requested = 0;
+
+        for h in (center_height + 1)..=forward_target {
+            if !self.is_block_available(h) {
+                self.request_archival_block(h);
+                forward_requested += 1;
+            }
         }
-        txs.iter().filter(|tx| self.is_owned_tx(tx)).count()
-    }
 
-    pub fn toggle_owned_filter(&mut self) {
-        self.owned_only_filter = !self.owned_only_filter;
-        self.sel_tx = 0; // Reset selection when filter changes
+        if backward_requested > 0 || forward_requested > 0 {
+            self.log_debug(format!(
+                "[CHAIN-WALK] Block #{}: requested {} backward, {} forward (latest: {})",
+                center_height, backward_requested, forward_requested, latest_known
+            ));
+        }
+
+        // Cache what we already have
+        self.cache_block_with_context(center_height);
     }
 
     /// Toggle debug panel visibility (Ctrl+D)
@@ -569,18 +928,87 @@ impl App {
         ));
     }
 
-    /// Toggle details fullscreen mode (Spacebar when details pane focused)
-    pub fn toggle_details_fullscreen(&mut self) {
-        if self.pane == 2 {
-            // Only toggle when details pane is focused
-            self.details_fullscreen = !self.details_fullscreen;
-            let mode = if self.details_fullscreen {
-                "fullscreen"
+    /// Get keyboard shortcuts overlay visibility state
+    pub fn show_shortcuts(&self) -> bool {
+        self.shortcuts_visible
+    }
+
+    /// Toggle keyboard shortcuts overlay (? key - Web/Tauri only for now)
+    pub fn toggle_shortcuts(&mut self) {
+        self.shortcuts_visible = !self.shortcuts_visible;
+        self.log_debug(format!(
+            "Shortcuts overlay: {}",
+            if self.shortcuts_visible {
+                "visible"
             } else {
-                "normal"
+                "hidden"
+            }
+        ));
+    }
+
+    /// Hide keyboard shortcuts overlay (Esc key)
+    pub fn hide_shortcuts(&mut self) {
+        self.shortcuts_visible = false;
+        self.log_debug("Shortcuts overlay: hidden".to_string());
+    }
+
+    /// Toggle details fullscreen mode (Spacebar - pane-aware)
+    pub fn toggle_details_fullscreen(&mut self) {
+        if self.details_fullscreen {
+            // Exit fullscreen - always return to parsed details view and reset to Scroll mode
+            self.details_fullscreen = false;
+            self.fullscreen_content_type = FullscreenContentType::ParsedDetails;
+            self.fullscreen_mode = FullscreenMode::Scroll;
+            self.log_debug("Exited fullscreen, back to parsed details".to_string());
+        } else {
+            // Enter fullscreen - content depends on which pane is focused, start in Scroll mode
+            self.details_fullscreen = true;
+            self.fullscreen_mode = FullscreenMode::Scroll;
+            self.fullscreen_content_type = match self.pane {
+                0 => FullscreenContentType::BlockRawJson,       // Blocks pane
+                1 => FullscreenContentType::TransactionRawJson, // Txs pane
+                2 => FullscreenContentType::ParsedDetails,      // Details pane
+                _ => FullscreenContentType::ParsedDetails,      // Fallback
             };
-            self.log_debug(format!("Details view: {mode}"));
+            let content_type = match self.fullscreen_content_type {
+                FullscreenContentType::BlockRawJson => "block raw JSON",
+                FullscreenContentType::TransactionRawJson => "transaction raw JSON",
+                FullscreenContentType::ParsedDetails => "parsed details",
+            };
+            self.log_debug(format!("Entered fullscreen showing: {content_type}"));
+
+            // Compute and cache the JSON content when entering fullscreen
+            match self.fullscreen_content_type {
+                FullscreenContentType::BlockRawJson => {
+                    let raw = self.get_raw_block_json();
+                    self.set_details_json(raw);
+
+                    // Eagerly fill ±50 block window
+                    if let Some(block) = self.current_block() {
+                        self.ensure_block_window(block.height);
+                    }
+                }
+                FullscreenContentType::TransactionRawJson => {
+                    let raw = self.get_raw_tx_json();
+                    self.set_details_json(raw);
+                }
+                FullscreenContentType::ParsedDetails => {
+                    // Already in buffer, no-op
+                }
+            }
         }
+    }
+
+    /// Toggle between Scroll and Navigate modes in fullscreen (Tab key)
+    pub fn toggle_fullscreen_mode(&mut self) {
+        self.fullscreen_mode = match self.fullscreen_mode {
+            FullscreenMode::Scroll => FullscreenMode::Navigate,
+            FullscreenMode::Navigate => FullscreenMode::Scroll,
+        };
+        self.log_debug(format!(
+            "Fullscreen mode: {:?}",
+            self.fullscreen_mode
+        ));
     }
 
     /// Return to auto-follow mode (track newest block)
@@ -592,20 +1020,6 @@ impl App {
         if !self.blocks.is_empty() {
             self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
             self.log_debug(format!("[USER_ACTION] Return to AUTO-FOLLOW mode (Home key pressed), was locked to height={old_height:?}"));
-        }
-    }
-
-    pub fn owned_count(&self, height: u64) -> usize {
-        self.owned_counts.get(&height).copied().unwrap_or(0)
-    }
-
-    fn recompute_owned_counts(&mut self) {
-        self.owned_counts.clear();
-        for block in &self.blocks {
-            let count = self.count_owned_txs(&block.transactions);
-            if count > 0 {
-                self.owned_counts.insert(block.height, count);
-            }
         }
     }
 
@@ -741,10 +1155,43 @@ impl App {
                 }
             }
         }
+
+        // If in fullscreen mode showing block JSON, update it when block changes
+        if self.details_fullscreen && self.fullscreen_content_type == FullscreenContentType::BlockRawJson {
+            let raw = self.get_raw_block_json();
+            self.set_details_json(raw);
+        }
     }
 
     /// Handle Up arrow key - behavior depends on which pane is focused
     pub fn up(&mut self) {
+        // Fullscreen Navigate mode: route to appropriate pane based on content type
+        if self.details_fullscreen && self.fullscreen_mode == FullscreenMode::Navigate {
+            match self.fullscreen_content_type {
+                FullscreenContentType::BlockRawJson => {
+                    // Navigate blocks (temporarily switch pane logic)
+                    let saved_pane = self.pane;
+                    self.pane = 0;
+                    self.up(); // Recursive call with pane 0
+                    self.pane = saved_pane;
+                    return;
+                }
+                FullscreenContentType::TransactionRawJson => {
+                    // Navigate transactions
+                    let saved_pane = self.pane;
+                    self.pane = 1;
+                    self.up(); // Recursive call with pane 1
+                    self.pane = saved_pane;
+                    return;
+                }
+                FullscreenContentType::ParsedDetails => {
+                    // Parsed view has no selection, just scroll
+                    self.scroll_details(-1);
+                    return;
+                }
+            }
+        }
+
         match self.pane {
             0 => {
                 // Blocks pane: navigate to previous block (newer)
@@ -783,8 +1230,8 @@ impl App {
                         if self.is_block_available(new_height) {
                             self.sel_block_height = Some(new_height);
                             self.follow_blocks_latest = false; // User navigation disables auto-follow
-                            self.details_scroll = 0;
                             self.cache_block_with_context(new_height);
+                            self.ensure_block_window_by_chain(new_height); // Chain-walk backfill
                             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                             self.log_debug(format!("Blocks UP -> #{new_height}"));
                         } else {
@@ -798,7 +1245,6 @@ impl App {
                     let new_height = nav_list[0];
                     self.sel_block_height = Some(new_height);
                     self.follow_blocks_latest = false; // User navigation disables auto-follow
-                    self.details_scroll = 0;
                     self.cache_block_with_context(new_height);
                     self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                     self.log_debug(format!(
@@ -810,7 +1256,6 @@ impl App {
                 // Tx pane: navigate to previous transaction
                 if self.sel_tx > 0 {
                     self.sel_tx -= 1;
-                    self.details_scroll = 0;
                     self.select_tx();
                     self.log_debug(format!("Tx UP, sel={}", self.sel_tx));
                 }
@@ -824,6 +1269,33 @@ impl App {
     }
     /// Handle Down arrow key - behavior depends on which pane is focused
     pub fn down(&mut self) {
+        // Fullscreen Navigate mode: route to appropriate pane based on content type
+        if self.details_fullscreen && self.fullscreen_mode == FullscreenMode::Navigate {
+            match self.fullscreen_content_type {
+                FullscreenContentType::BlockRawJson => {
+                    // Navigate blocks (temporarily switch pane logic)
+                    let saved_pane = self.pane;
+                    self.pane = 0;
+                    self.down(); // Recursive call with pane 0
+                    self.pane = saved_pane;
+                    return;
+                }
+                FullscreenContentType::TransactionRawJson => {
+                    // Navigate transactions
+                    let saved_pane = self.pane;
+                    self.pane = 1;
+                    self.down(); // Recursive call with pane 1
+                    self.pane = saved_pane;
+                    return;
+                }
+                FullscreenContentType::ParsedDetails => {
+                    // Parsed view has no selection, just scroll
+                    self.scroll_details(1);
+                    return;
+                }
+            }
+        }
+
         match self.pane {
             0 => {
                 // Blocks pane: navigate to next block (older)
@@ -851,7 +1323,6 @@ impl App {
                             let next_h = nav_list[1];
                             self.sel_block_height = Some(next_h);
                             self.follow_blocks_latest = false; // User navigation disables auto-follow
-                            self.details_scroll = 0;
                             self.cache_block_with_context(next_h);
                             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                             self.log_debug(format!(
@@ -876,8 +1347,8 @@ impl App {
                         if self.is_block_available(new_height) {
                             self.sel_block_height = Some(new_height);
                             self.follow_blocks_latest = false; // User navigation disables auto-follow
-                            self.details_scroll = 0;
                             self.cache_block_with_context(new_height);
+                            self.ensure_block_window_by_chain(new_height); // Chain-walk backfill
                             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                             self.log_debug(format!("Blocks DOWN -> #{new_height}"));
                         } else {
@@ -891,7 +1362,6 @@ impl App {
                     let new_height = nav_list[0];
                     self.sel_block_height = Some(new_height);
                     self.follow_blocks_latest = false; // User navigation disables auto-follow
-                    self.details_scroll = 0;
                     self.cache_block_with_context(new_height);
                     self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                     self.log_debug(format!(
@@ -904,7 +1374,6 @@ impl App {
                 let (txs, _, _) = self.txs();
                 if self.sel_tx + 1 < txs.len() {
                     self.sel_tx += 1;
-                    self.details_scroll = 0;
                     self.select_tx();
                     self.log_debug(format!("Tx DOWN, sel={}", self.sel_tx));
                 }
@@ -923,8 +1392,8 @@ impl App {
         if let Some(&height) = nav_list.get(idx) {
             self.sel_block_height = Some(height);
             self.follow_blocks_latest = false; // User interaction disables auto-follow
-            self.details_scroll = 0;
             self.cache_block_with_context(height);
+            self.ensure_block_window_by_chain(height); // Chain-walk backfill
             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
             self.log_debug(format!("Mouse select block #{height} (idx {idx})"));
         }
@@ -935,45 +1404,45 @@ impl App {
         let (txs, _, _) = self.txs();
         if idx < txs.len() {
             self.sel_tx = idx;
-            self.details_scroll = 0;
             self.select_tx();
             self.log_debug(format!("Mouse select tx (idx {idx})"));
         }
     }
 
+
     /// Left arrow: Jump to top of current list
     pub fn left(&mut self) {
         match self.pane {
             0 => {
-                // Jump to newest block (index 0)
+                // Blocks pane: "go to current" – jump to tip and resume live stream.
                 if !self.blocks.is_empty() {
-                    let newest_height = self.blocks[0].height;
-                    let current_idx = self.find_block_index(self.sel_block_height).unwrap_or(0);
+                    // Clear any manual anchor and resume following the live head.
+                    self.sel_block_height = None;
+                    self.follow_blocks_latest = true;
+                    self.live_updates_paused = false;
 
-                    if current_idx != 0 {
-                        self.sel_block_height = Some(newest_height); // Lock to newest
-                        self.follow_blocks_latest = false; // User navigation disables auto-follow
-                        self.details_scroll = 0;
-                        self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
-                        self.log_debug(format!("Left -> jump to newest #{newest_height}"));
-                    }
+                    // Reset backwards window so it re-anchors to the new selection.
+                    self.back_slots.clear();
+                    self.back_anchor_height = None;
+                    self.back_next_request_at = None;
+
+                    self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
                 }
             }
             1 => {
                 // Jump to first tx
                 if self.sel_tx != 0 {
                     self.sel_tx = 0;
-                    self.details_scroll = 0;
                     self.select_tx();
                     self.log_debug("Left -> jump to first tx".into());
                 }
             }
             2 => {
                 // Scroll to top of details
-                if self.details_scroll != 0 {
-                    self.details_scroll = 0;
+                if self.details_scroll() != 0 {
                     self.log_debug("Left -> scroll to top".into());
                 }
+                self.details_home();
             }
             _ => {}
         }
@@ -983,17 +1452,33 @@ impl App {
     pub fn right(&mut self) {
         match self.pane {
             0 => {
-                // Paginate down 12 blocks (toward older)
-                let current_idx = self.find_block_index(self.sel_block_height).unwrap_or(0);
-                let new_idx = (current_idx + 12).min(self.blocks.len().saturating_sub(1));
+                // Paginate down 12 blocks (toward older) - uses height-based navigation
+                let nav_list = self.get_navigation_list();
 
-                if new_idx != current_idx && !self.blocks.is_empty() {
-                    let new_height = self.blocks[new_idx].height;
-                    self.sel_block_height = Some(new_height); // Lock to specific height
-                    self.follow_blocks_latest = false; // User navigation disables auto-follow
-                    self.details_scroll = 0;
-                    self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
-                    self.log_debug(format!("Right -> paginate to block #{new_height}"));
+                if nav_list.is_empty() {
+                    return;
+                }
+
+                // Get current height (or default to newest)
+                let current_height = self.sel_block_height.unwrap_or_else(|| nav_list[0]);
+
+                // Find position in navigation list
+                if let Some(current_idx) = nav_list.iter().position(|&h| h == current_height) {
+                    // Jump 12 positions in navigation list (respects filter + sorted order)
+                    let new_idx = (current_idx + 12).min(nav_list.len() - 1);
+
+                    if new_idx != current_idx {
+                        let new_height = nav_list[new_idx];
+                        self.sel_block_height = Some(new_height); // Lock to specific height
+                        self.follow_blocks_latest = false; // User navigation disables auto-follow
+                        self.ensure_block_window_by_chain(new_height); // Trigger archival backfill
+                        self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
+
+                        self.log_debug(format!(
+                            "[NAV_RIGHT] Paginated from #{} to #{} (+12 in nav list, idx {} -> {})",
+                            current_height, new_height, current_idx, new_idx
+                        ));
+                    }
                 }
             }
             1 => {
@@ -1002,7 +1487,6 @@ impl App {
                 let new_sel = (self.sel_tx + 12).min(txs.len().saturating_sub(1));
                 if new_sel != self.sel_tx && !txs.is_empty() {
                     self.sel_tx = new_sel;
-                    self.details_scroll = 0;
                     self.select_tx();
                     self.log_debug(format!("Right -> paginate to tx {}", self.sel_tx));
                 }
@@ -1028,27 +1512,19 @@ impl App {
     }
     pub fn home(&mut self) {
         if self.pane == 2 {
-            self.details_scroll = 0;
+            self.details_home();
         }
     }
     pub fn end(&mut self) {
         if self.pane == 2 {
-            // Jump to bottom (clamped to actual content height)
-            let content_lines = self.details.lines().count() as u16;
-            self.details_scroll = content_lines.saturating_sub(15); // ~typical viewport size
+            // Jump to bottom using DetailsBuffer API
+            self.details_end();
         }
     }
 
     fn scroll_details(&mut self, delta: i32) {
-        let cur = self.details_scroll as i32;
-
-        // Calculate actual content height for max scroll
-        // Use actual viewport height (set by UI layer) for accurate clamping
-        let content_lines = self.details.lines().count() as u16;
-        let max_scroll = content_lines.saturating_sub(self.details_viewport_height);
-
-        let next = (cur + delta).max(0).min(max_scroll as i32);
-        self.details_scroll = next as u16;
+        // Delegate to DetailsBuffer scroll API
+        self.scroll_details_lines(delta as isize);
     }
 
     /// Generic line scrolling based on current focused pane (for wheel events).
@@ -1087,6 +1563,7 @@ impl App {
         }
     }
 
+
     pub fn select_tx(&mut self) {
         if let Some(b) = self.current_block() {
             let (filtered_txs, _, _) = self.txs();
@@ -1117,7 +1594,148 @@ impl App {
                     pretty_json["actions"] = json!(formatted_actions);
                 }
 
-                self.details = pretty(&pretty_json, 2);
+                self.set_details_json(pretty(&pretty_json, 2));
+
+                // If in fullscreen mode showing transaction JSON, update it
+                if self.details_fullscreen && self.fullscreen_content_type == FullscreenContentType::TransactionRawJson {
+                    let raw = self.get_raw_tx_json();
+                    self.set_details_json(raw);
+                }
+            }
+        }
+    }
+
+    /// Select first transaction, bypassing filter (for first block UX)
+    pub fn select_tx_bypass_filter(&mut self) {
+        // Clone the data we need before mutating self
+        let block_data = self.current_block().map(|b| (b.height, b.transactions.clone()));
+
+        if let Some((block_height, all_txs)) = block_data {
+            if let Some(tx) = all_txs.first() {
+                self.sel_tx = 0;
+
+                // Build PRETTY view with formatted actions (same as select_tx)
+                let mut pretty_json = json!({
+                    "hash": tx.hash,
+                    "block": block_height,
+                });
+
+                // Add signer/receiver if available
+                if let Some(ref signer) = tx.signer_id {
+                    pretty_json["signer"] = json!(signer);
+                }
+                if let Some(ref receiver) = tx.receiver_id {
+                    pretty_json["receiver"] = json!(receiver);
+                }
+                if let Some(nonce) = tx.nonce {
+                    pretty_json["nonce"] = json!(nonce);
+                }
+
+                // Format actions with human-readable gas/deposits
+                if let Some(ref actions) = tx.actions {
+                    let formatted_actions: Vec<serde_json::Value> = actions
+                        .iter()
+                        .map(crate::copy_payload::format_action)
+                        .collect();
+                    pretty_json["actions"] = json!(formatted_actions);
+                }
+
+                // Use pretty formatting to get properly formatted JSON string
+                let formatted_json = pretty(&pretty_json, 2);
+                self.set_details_json(formatted_json);
+            } else {
+                self.set_details_json("No transactions".to_string());
+            }
+        }
+    }
+
+    // ----- periodic tick for throttled backfill -----
+
+    /// Called periodically from event loop to throttle backward chain-walk
+    pub fn on_tick(&mut self, now: Instant) {
+        self.maybe_step_backchain(now);
+    }
+
+    fn maybe_step_backchain(&mut self, now: Instant) {
+        // Extract anchor block values we need (to avoid holding a borrow of self)
+        let (anchor_height, anchor_prev_height, anchor_prev_hash) =
+            if let Some(anchor) = self.current_block() {
+                (anchor.height, anchor.prev_height, anchor.prev_hash.clone())
+            } else {
+                self.back_slots.clear();
+                self.back_anchor_height = None;
+                self.back_next_request_at = None;
+                return;
+            };
+
+        // Anchor changed ⇒ reset the backward slots starting from its parent.
+        if self.back_anchor_height != Some(anchor_height) {
+            self.back_anchor_height = Some(anchor_height);
+            self.back_slots.clear();
+            self.back_next_request_at = None;
+
+            if let (Some(prev_height), Some(ref prev_hash)) =
+                (anchor_prev_height, &anchor_prev_hash)
+            {
+                self.back_slots.push(BackSlot {
+                    height: prev_height,
+                    hash: prev_hash.clone(),
+                    state: BackSlotState::Pending,
+                });
+            } else {
+                // Genesis or missing header metadata – nothing to backfill.
+                return;
+            }
+        }
+
+        if self.back_slots.len() >= self.back_slots_target {
+            return;
+        }
+
+        // Simple throttle: at most one archival request per second.
+        if let Some(next) = self.back_next_request_at {
+            if now < next {
+                return;
+            }
+        }
+
+        // First, request data for any slot whose block we don't have yet.
+        if let Some(slot) = self
+            .back_slots
+            .iter()
+            .find(|slot| !self.is_block_available(slot.height))
+        {
+            self.request_archival_block(slot.height);
+            self.back_next_request_at = Some(now + Duration::from_secs(1));
+            return;
+        }
+
+        // All known slots have data; try to extend one more ancestor step.
+        // Start with the anchor's prev pointers
+        let mut prev_height = anchor_prev_height;
+        let mut prev_hash = anchor_prev_hash;
+
+        // Walk through each slot to get the deepest prev_height/prev_hash
+        for slot in &self.back_slots {
+            if let Some(b) = self.block_by_height(slot.height) {
+                prev_height = b.prev_height;
+                prev_hash = b.prev_hash.clone();
+            } else {
+                // We don't yet have this slot's block, so we can't walk further back.
+                return;
+            }
+        }
+
+        if let (Some(height), Some(hash)) = (prev_height, prev_hash) {
+            if !self.back_slots.iter().any(|s| s.height == height)
+                && self.back_slots.len() < self.back_slots_target
+            {
+                self.back_slots.push(BackSlot {
+                    height,
+                    hash,
+                    state: BackSlotState::Pending,
+                });
+                self.back_next_request_at = Some(now + Duration::from_secs(1));
             }
         }
     }
@@ -1130,6 +1748,8 @@ impl App {
                 self.push_block(BlockRow {
                     height: data,
                     hash: "".into(),
+                    prev_height: None,
+                    prev_hash: None,
                     timestamp: 0,
                     tx_count: 0,
                     when: "".into(),
@@ -1143,28 +1763,54 @@ impl App {
                 if let Some(t) = data {
                     // For WS summary, show pretty-formatted JSON
                     let raw = serde_json::to_value(&t).unwrap_or(serde_json::json!({}));
-                    self.details = pretty(&raw, 2);
-                    self.details_scroll = 0;
+                    self.set_details_json(pretty(&raw, 2));
                 }
             }
-            AppEvent::NewBlock(b) => {
-                log::info!(
-                    "📥 App received NewBlock event - height: {}, txs: {}",
-                    b.height,
-                    b.tx_count
-                );
-                // Check if this block was being fetched from archival
-                if self.loading_block == Some(b.height) {
-                    self.loading_block = None; // Clear loading state
+            AppEvent::NewBlock(block) => {
+                let height = block.height;
+
+                if self.loading_block == Some(height) {
+                    self.loading_block = None;
                 }
-                self.push_block(b);
+
+                // If live updates are paused, drop blocks that are strictly in the future
+                // of our current anchor. Historical backfill still flows through.
+                if self.live_updates_paused {
+                    if let Some(anchor) = self.current_block() {
+                        if height > anchor.height {
+                            self.log_debug(format!(
+                                "[live-paused] dropping live block #{} (anchor #{})",
+                                height, anchor.height
+                            ));
+                            return;
+                        }
+                    }
+                }
+
+                // While not paused, stop accepting live blocks that are "too far ahead"
+                // of the selected anchor; the user can re-enable by pressing ← in the
+                // Blocks pane.
+                if !self.live_updates_paused {
+                    let anchor_height = self.current_block().map(|b| b.height);
+                    if let Some(anchor_h) = anchor_height {
+                        let ahead = height.saturating_sub(anchor_h);
+                        if ahead > FRONT_WINDOW {
+                            self.live_updates_paused = true;
+                            self.log_debug(format!(
+                                "[live-paused] pausing at block #{} ({} ahead of anchor #{}) – press ← in Blocks to resume",
+                                height, ahead, anchor_h
+                            ));
+                            return;
+                        }
+                    }
+                }
+
+                self.push_block(block);
             }
         }
     }
 
     fn push_block(&mut self, b: BlockRow) {
-        // Compute owned count for this block before inserting
-        let owned_count = self.count_owned_txs(&b.transactions);
         let height = b.height;
 
         // Log state BEFORE push
@@ -1176,37 +1822,64 @@ impl App {
             self.blocks.len()
         ));
 
-        self.blocks.insert(0, b);
-        if self.blocks.len() > self.keep_blocks {
-            // Remove oldest block and its count
-            if let Some(old_block) = self.blocks.pop() {
-                self.owned_counts.remove(&old_block.height);
-            }
-        }
+        // Determine if this is a historical block (older than current newest)
+        let is_historical = self.blocks.first()
+            .map(|newest| height < newest.height)
+            .unwrap_or(false);
 
-        // Store owned count if non-zero
-        if owned_count > 0 {
-            self.owned_counts.insert(height, owned_count);
+        if is_historical {
+            // Historical block: insert at correct sorted position (descending height)
+            let insert_pos = self.blocks
+                .iter()
+                .position(|existing| existing.height < height)
+                .unwrap_or(self.blocks.len());
+
+            self.blocks.insert(insert_pos, b);
+
+            // Evict oldest if over limit
+            if self.blocks.len() > self.keep_blocks {
+                self.blocks.pop();
+            }
+
+            self.log_debug(format!(
+                "[HISTORICAL_INSERT] Block #{} inserted at index {} (sorted position)",
+                height, insert_pos
+            ));
+        } else {
+            // Live streaming block: insert at front (newest position)
+            self.blocks.insert(0, b);
+            if self.blocks.len() > self.keep_blocks {
+                // Remove oldest block
+                self.blocks.pop();
+            }
         }
 
         // Height-based selection behavior
         if self.follow_blocks_latest {
-            // Auto-follow mode: always jump to newest matching block
-            if self.blocks.len() == 1 {
-                // First block: select it and reset tx
-                self.sel_block_height = None; // None = auto-follow newest
-                self.sel_tx = 0;
-                self.select_tx();
-                self.log_debug(format!(
-                    "[AUTO_FOLLOW] Block #{height} arr, FIRST block, staying in follow-latest mode"
-                ));
-            } else {
-                // Continue auto-follow (no auto-lock!)
-                let old_sel_height = self.sel_block_height;
-                self.sel_block_height = None; // Always jump to newest
-                self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
-                self.log_debug(format!("[AUTO_FOLLOW] Block #{height} arr, jumping to newest, sel_height: {old_sel_height:?} -> None"));
+            // Auto-lock on FIRST block that passes filter (check if we've never selected before)
+            if self.sel_block_height.is_none() {
+                // Haven't locked to any block yet - check if this one passes filter
+                let matching_txs = self.count_matching_txs(&self.blocks[0]);
+
+                if matching_txs > 0 || filter::is_empty(&self.filter_compiled) {
+                    // Block passes filter (or no filter active) - lock to it
+                    self.sel_block_height = Some(height);
+                    self.sel_tx = 0;
+                    self.ensure_block_window_by_chain(height); // Chain-walk backfill on first selection
+                    self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
+                    self.follow_blocks_latest = false; // Disable auto-follow after first matching block
+                    self.log_debug(format!(
+                        "[FIRST_BLOCK] Block #{height} matches filter ({} txs), auto-selected and LOCKED",
+                        matching_txs
+                    ));
+                } else {
+                    // Block doesn't pass filter - stay in auto-follow mode
+                    self.log_debug(format!(
+                        "[SKIP_BLOCK] Block #{height} has no matching txs, waiting for next block"
+                    ));
+                }
             }
+            // No else branch - subsequent blocks don't trigger auto-jump
         } else {
             // Manual mode: maintain locked block height (block may be in cache if aged out)
             if let Some(locked_height) = self.sel_block_height {
@@ -1227,6 +1900,10 @@ impl App {
                     self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
                 }
             }
+        }
+
+        // Keep archival window filled when pinned to a specific block
+        if !self.follow_blocks_latest {
         }
     }
 
@@ -1289,8 +1966,7 @@ impl App {
     pub fn display_tx_from_json(&mut self, raw_json: &str) {
         // Parse and display transaction from raw JSON
         if let Ok(tx) = serde_json::from_str::<serde_json::Value>(raw_json) {
-            self.details = pretty(&tx, 2);
-            self.details_scroll = 0;
+            self.set_details_json(pretty(&tx, 2));
         }
     }
 
@@ -1331,10 +2007,6 @@ impl App {
         self.marks_list.get(self.marks_selection)
     }
 
-    pub fn start_jump_pending(&mut self) {
-        self.input_mode = InputMode::JumpPending;
-    }
-
     pub fn current_context(&self) -> (u8, Option<u64>, Option<String>) {
         let pane = self.pane as u8;
         let height = self.current_block().map(|b| b.height);
@@ -1352,7 +2024,8 @@ impl App {
             if self.blocks.iter().any(|b| b.height == height) {
                 self.sel_block_height = Some(height); // Lock to specific block height
                 self.follow_blocks_latest = false; // Jumping to mark disables auto-follow
-                self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
+                self.ensure_block_window_by_chain(height); // Chain-walk backfill
+                    self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
             }
         }
         self.pane = mark.pane as usize;
@@ -1405,16 +2078,66 @@ impl App {
         self.validate_and_refresh_tx(BlockChangeReason::FilterChange);
     }
 
-    /// Get details as pretty-printed string
-    pub fn details_pretty_string(&self) -> String {
-        self.details.clone()
+    // ----- Details buffer API -----
+
+    /// Set Details pane content (replaces full buffer)
+    pub fn set_details_json(&mut self, json: String) {
+        self.details_buf.set_text(json);
     }
 
-    /// Get details as raw JSON string
+    /// Set viewport size (called by renderer based on pane height)
+    pub fn set_details_viewport_lines(&mut self, n: usize) {
+        self.details_viewport_lines = n.max(1);
+    }
+
+    /// Get viewport size (for key handling)
+    pub fn details_viewport_lines(&self) -> usize {
+        self.details_viewport_lines
+    }
+
+    /// Get windowed view of Details (for rendering)
+    pub fn details_window(&self) -> String {
+        self.details_buf.window(self.details_viewport_lines)
+    }
+
+    /// Check if details content was truncated
+    pub fn details_truncated(&self) -> bool {
+        self.details_buf.truncated()
+    }
+
+    /// Get full Details text (for copy operations)
+    pub fn details_full_text(&self) -> &str {
+        self.details_buf.full_text()
+    }
+
+    /// Get details as pretty-printed string (legacy compatibility)
+    pub fn details_pretty_string(&self) -> String {
+        self.details_buf.full_text().to_string()
+    }
+
+    /// Get details as raw JSON string (legacy compatibility)
     pub fn details_raw_string(&self) -> String {
-        // For now, return the same as pretty (already contains JSON)
-        // TODO: Could add a separate raw JSON field if needed
-        self.details.clone()
+        self.details_buf.full_text().to_string()
+    }
+
+    /// Scroll Details by delta lines
+    pub fn scroll_details_lines(&mut self, delta: isize) {
+        self.details_buf.scroll_lines(delta, self.details_viewport_lines);
+    }
+
+    /// Jump to top of Details
+    pub fn details_home(&mut self) {
+        self.details_buf.scroll_to_top();
+    }
+
+    /// Jump to bottom of Details
+    pub fn details_end(&mut self) {
+        self.details_buf.scroll_to_bottom(self.details_viewport_lines);
+    }
+
+    /// Get scroll info for status display
+    pub fn details_scroll_info(&self) -> (usize, usize) {
+        (self.details_buf.current_scroll_line(), self.details_buf.total_lines())
     }
 
     /// Get JSON for currently focused pane (for copy operation)
@@ -1434,11 +2157,7 @@ impl App {
             b.transactions
                 .iter()
                 .filter(|tx| {
-                    // Apply owned-only filter first (if active)
-                    if self.owned_only_filter && !self.is_owned_tx(tx) {
-                        return false;
-                    }
-                    // Then apply text filter
+                    // Apply text filter
                     if filter::is_empty(&self.filter_compiled) {
                         return true;
                     }
@@ -1563,17 +2282,8 @@ impl App {
                 self.select_tx_clamped(new_idx);
             }
             2 => {
-                // Details pane
-                // Scrolling is handled separately via viewport
-                if lines > 0 {
-                    self.details_scroll = self
-                        .details_scroll
-                        .saturating_add(lines.unsigned_abs() as u16);
-                } else {
-                    self.details_scroll = self
-                        .details_scroll
-                        .saturating_sub(lines.unsigned_abs() as u16);
-                }
+                // Details pane - use DetailsBuffer scroll API
+                self.scroll_details_lines(lines as isize);
             }
             _ => {}
         }

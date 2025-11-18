@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
-use ratacat_plugin_core::prelude::*;
+use nearx_plugin_core::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

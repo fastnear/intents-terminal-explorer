@@ -37,8 +37,8 @@ TRUNK_BUILD_ARGS="--locked" trunk build --release
 
 # 4. Extension packages
 cd extension
-zip -r ../ratacat-chrome-ext.zip manifest.chrome.json background.js content.js
-zip -r ../ratacat-firefox-ext.zip manifest.firefox.json background.js content.js
+zip -r ../nearx-chrome-ext.zip manifest.chrome.json background.js content.js
+zip -r ../nearx-firefox-ext.zip manifest.firefox.json background.js content.js
 ```
 
 ## 🧪 Test
@@ -61,7 +61,7 @@ open "near://tx/abc123"
 
 ```bash
 # Install Tauri app (macOS)
-cp -r tauri-workspace/target/release/bundle/macos/Ratacat.app /Applications/
+cp -r tauri-workspace/target/release/bundle/macos/NEARx.app /Applications/
 
 # Load Chrome extension (unpacked)
 # 1. Navigate to: chrome://extensions/
@@ -74,7 +74,7 @@ cp -r tauri-workspace/target/release/bundle/macos/Ratacat.app /Applications/
 # Edit: tauri-workspace/src-tauri/src/lib.rs line 280
 # Replace: "REPLACE_WITH_DEV_EXTENSION_ID" with copied ID
 # Rebuild: cd tauri-workspace && cargo tauri build
-# Reinstall: cp -r target/release/bundle/macos/Ratacat.app /Applications/
+# Reinstall: cp -r target/release/bundle/macos/NEARx.app /Applications/
 ```
 
 ## 🔍 Verify
@@ -82,14 +82,14 @@ cp -r tauri-workspace/target/release/bundle/macos/Ratacat.app /Applications/
 ```bash
 # Check native messaging manifest installed
 ls -la ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/
-# Should see: com.ratacat.native.json
+# Should see: com.nearx.native.json
 
-cat ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.ratacat.native.json
-# Verify: "path" points to Ratacat.app/Contents/Resources/.../ratacat-native-host
+cat ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.nearx.native.json
+# Verify: "path" points to NEARx.app/Contents/Resources/.../nearx-native-host
 
 # Check URL scheme registered
 /usr/libexec/PlistBuddy -c "Print CFBundleURLTypes" \
-  /Applications/Ratacat.app/Contents/Info.plist
+  /Applications/NEARx.app/Contents/Info.plist
 # Should see: URLSchemes = (near)
 ```
 
@@ -142,7 +142,7 @@ open "near://tx/test123"
 | Extension ID mismatch | Update lib.rs:280 + rebuild Tauri |
 | Deep link doesn't work | Check URL scheme: `/usr/libexec/PlistBuddy ...` |
 | Button doesn't appear | Check content.js loaded: Browser DevTools → Sources |
-| No "Connected to host" | Check manifest path: `cat ~/Library/.../com.ratacat.native.json` |
+| No "Connected to host" | Check manifest path: `cat ~/Library/.../com.nearx.native.json` |
 
 ---
 

@@ -36,9 +36,9 @@ pub async fn run_ws(cfg: &Config, tx: UnboundedSender<AppEvent>) -> Result<()> {
     let (ws, _) = connect_async(&cfg.ws_url).await?;
     let (mut ws_write, mut ws_read) = ws.split();
 
-    // Optional: identify as Ratacat client
+    // Optional: identify as NEARx client
     let _ = ws_write
-        .send(Message::Text(r#"{"ratacat":"hello"}"#.into()))
+        .send(Message::Text(r#"{"nearx":"hello"}"#.into()))
         .await;
 
     while let Some(msg) = ws_read.next().await {

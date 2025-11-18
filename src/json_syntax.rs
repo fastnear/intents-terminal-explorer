@@ -6,28 +6,22 @@ use ratatui::text::{Line, Span};
 
 /// Parse JSON string and produce colored Lines for ratatui rendering
 /// Uses theme colors with WCAG AAA compliance:
-/// - Keys: Soft cyan
-/// - String values: Yellow-green
-/// - Numbers: Warm orange
-/// - Booleans/null: Light blue
-/// - Braces/Brackets: Tan/beige
-pub fn colorize_json(json_str: &str, theme: &Theme) -> Vec<Line<'static>> {
-    let key_color = Color::Rgb(theme.json_key.0, theme.json_key.1, theme.json_key.2);
-    let string_color = Color::Rgb(
-        theme.json_string.0,
-        theme.json_string.1,
-        theme.json_string.2,
-    );
-    let number_color = Color::Rgb(
-        theme.json_number.0,
-        theme.json_number.1,
-        theme.json_number.2,
-    );
-    let boolean_color = Color::Rgb(theme.json_bool.0, theme.json_bool.1, theme.json_bool.2);
-    let struct_color = Color::Rgb(
-        theme.json_struct.0,
-        theme.json_struct.1,
-        theme.json_struct.2,
+/// - Keys: Soft cyan (#66DDEC)
+/// - String values: Yellow-green (#ABE338)
+/// - Numbers: Warm orange (#F5AB32)
+/// - Booleans/null: Light blue (#6BBEFF)
+/// - Braces/Brackets: Tan/beige (#D4D0AB)
+///
+/// Uses ANSI colors for maximum terminal compatibility.
+pub fn colorize_json(json_str: &str, _theme: &Theme) -> Vec<Line<'static>> {
+
+    // Use subtle RGB colors - "more white" for elegant appearance
+    let (key_color, string_color, number_color, boolean_color, struct_color) = (
+        Color::Rgb(180, 220, 230),  // Very light cyan for keys
+        Color::Rgb(210, 230, 180),  // Very light green for string values
+        Color::Rgb(230, 220, 180),  // Very light amber for numbers
+        Color::Rgb(220, 210, 240),  // Very light purple for booleans
+        Color::Rgb(240, 240, 230),  // Off-white for structure (brackets, colons, etc)
     );
     let mut lines = Vec::new();
     let mut current_line = Vec::new();
@@ -49,6 +43,8 @@ pub fn colorize_json(json_str: &str, theme: &Theme) -> Vec<Line<'static>> {
             '"' => {
                 let (string_content, is_key) = parse_string(&mut chars);
                 let color = if is_key { key_color } else { string_color };
+
+
                 current_line.push(Span::styled(
                     format!("\"{string_content}\""),
                     Style::default().fg(color),
@@ -85,6 +81,11 @@ pub fn colorize_json(json_str: &str, theme: &Theme) -> Vec<Line<'static>> {
     // Add final line if non-empty
     if !current_line.is_empty() {
         lines.push(Line::from(current_line));
+    }
+
+    // Remove any trailing empty lines (defensive cleanup)
+    while lines.last().is_some_and(|line| line.spans.is_empty()) {
+        lines.pop();
     }
 
     lines
@@ -186,5 +187,27 @@ mod tests {
 }"#;
         let lines = colorize_json(json, &theme);
         assert_eq!(lines.len(), 5);
+    }
+
+    #[test]
+    fn test_colors_applied() {
+        let theme = Theme::default();
+        let json = r#"{"key": "value"}"#;
+        let lines = colorize_json(json, &theme);
+
+        assert_eq!(lines.len(), 1);
+        let first_line = &lines[0];
+
+        // Should have multiple spans with different styles
+        assert!(first_line.spans.len() > 1);
+
+        // Check that at least one span has a style (not default)
+        let has_styled_spans = first_line.spans.iter().any(|span| span.style != Style::default());
+        assert!(has_styled_spans, "JSON colorizer should produce styled spans");
+
+        // Print debug info
+        for (i, span) in first_line.spans.iter().enumerate() {
+            eprintln!("Span {}: text={:?}, style={:?}", i, &span.content, &span.style);
+        }
     }
 }
