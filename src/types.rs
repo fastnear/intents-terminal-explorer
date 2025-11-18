@@ -76,6 +76,7 @@ pub enum ActionSummary {
     },
     FunctionCall {
         method_name: String,
+        #[serde(skip_serializing)]
         _args_base64: String,
         args_decoded: crate::near_args::DecodedArgs,
         #[cfg_attr(target_arch = "wasm32", serde(serialize_with = "crate::util_text::serialize_u64_as_string"))]
