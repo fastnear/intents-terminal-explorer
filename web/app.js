@@ -196,9 +196,28 @@ function hookEvents() {
       return;
     }
 
-    // Special handling for Tab - works even when filter is focused
+    // Special handling for Tab - instant visual feedback (optimistic UI)
     if (e.key === "Tab") {
       e.preventDefault();
+
+      // Optimistic UI: instantly update pane focus before WASM round-trip
+      if (lastSnapshot) {
+        const currentPane = lastSnapshot.pane;
+        const nextPane = e.shiftKey
+          ? (currentPane - 1 + 3) % 3  // Shift+Tab: backwards
+          : (currentPane + 1) % 3;      // Tab: forwards
+
+        // Instant visual update (no WASM delay)
+        const blocksPane = document.getElementById("pane-blocks");
+        const txPane = document.getElementById("pane-txs");
+        const detailsPane = document.getElementById("pane-details");
+
+        blocksPane?.classList.toggle("focused", nextPane === 0);
+        txPane?.classList.toggle("focused", nextPane === 1);
+        detailsPane?.classList.toggle("focused", nextPane === 2);
+      }
+
+      // Sync to WASM (snapshot will confirm same state on next render)
       apply({
         type: "Key",
         code: e.key,
