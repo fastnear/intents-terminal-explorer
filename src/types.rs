@@ -112,6 +112,7 @@ pub enum ActionSummary {
 pub enum AppEvent {
     FromWs(WsPayload),
     NewBlock(BlockRow),
+    FetchedTxDetails { tx_hash: String, json_data: String }, // Full tx data from FastNEAR API
     Quit,
 }
 

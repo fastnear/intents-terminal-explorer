@@ -120,10 +120,10 @@ futures = { version = "0.3", default-features = false, features = ["async-await"
 
 # NEAR Protocol crates
 # Note: All near-* crates are optional because they have C dependencies or depend on crates with C dependencies
-near-primitives = { version = "0.27.0", optional = true }
-near-crypto = { version = "0.27.0", optional = true }
+near-primitives = { version = "0.28.0", optional = true }
+near-crypto = { version = "0.28.0", optional = true }
 near-jsonrpc-client = { version = "0.15.0", features = ["any"], optional = true }
-near-jsonrpc-primitives = { version = "0.27.0", optional = true }
+near-jsonrpc-primitives = { version = "0.28.0", optional = true }
 near-account-id = { version = "1.0.0", optional = true }
 near-gas = { version = "0.2", features = ["serde", "borsh"], optional = true }
 near-token = { version = "0.2", features = ["serde", "borsh"], optional = true }

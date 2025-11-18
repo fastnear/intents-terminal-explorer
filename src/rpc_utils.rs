@@ -18,7 +18,7 @@ use gloo_timers::future::sleep;
 
 static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
 
-fn http_client() -> &'static reqwest::Client {
+pub fn http_client() -> &'static reqwest::Client {
     HTTP.get_or_init(|| {
         #[cfg(not(target_arch = "wasm32"))]
         {

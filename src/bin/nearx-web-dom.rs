@@ -64,6 +64,13 @@ impl WasmApp {
         let cfg_fps_choices = fps_choices.clone();
         let cfg_keep_blocks = keep_blocks;
 
+        // Extract FastNEAR configuration before the closure
+        let fastnear_api_url = "https://api.fastnear.com".to_string();
+        let fastnear_auth_token = {
+            let token = nearx::config::fastnear_token();
+            if token.is_empty() { None } else { Some(token) }
+        };
+
         spawn_local(async move {
             let config = Config {
                 source: Source::Rpc,
@@ -122,8 +129,9 @@ impl WasmApp {
             keep_blocks,
             default_filter,
             archival_fetch_tx,
-            config.fastnear_api_url.clone(),
-            config.fastnear_auth_token.clone(),
+            fastnear_api_url,
+            fastnear_auth_token,
+            None, // No tx details fetch in web mode yet
         );
 
         WasmApp {

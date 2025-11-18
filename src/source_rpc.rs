@@ -86,6 +86,12 @@ pub async fn run_rpc(cfg: &Config, tx: UnboundedSender<AppEvent>) -> Result<()> 
                             );
                             let _ = tx.send(AppEvent::NewBlock(row));
                             last_height = h;
+
+                            // Yield briefly to allow UI to process events and stay responsive
+                            #[cfg(not(target_arch = "wasm32"))]
+                            tokio::task::yield_now().await;
+                            #[cfg(target_arch = "wasm32")]
+                            sleep(Duration::from_millis(1)).await;
                         } else {
                             log::warn!("⚠️ Failed to fetch block {h}");
                         }

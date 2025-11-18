@@ -146,7 +146,7 @@ mod tests {
     fn test_focused_pane_mapping() {
         // This test assumes App::new() exists with reasonable defaults
         // In practice, we'd need a proper test app setup
-        let app = App::new(30, vec![30], 100, "".to_string(), None, "https://api.fastnear.com".to_string(), None);
+        let app = App::new(30, vec![30], 100, "".to_string(), None, "https://api.fastnear.com".to_string(), None, None);
 
         // Default pane should be 0 (Blocks)
         assert_eq!(focused_pane(&app), CopyPane::Blocks);

@@ -67,6 +67,21 @@ async fn main() -> Result<()> {
         None
     };
 
+    // Transaction details fetch channel (for FastNEAR API)
+    let (tx_details_tx, tx_details_rx) = unbounded_channel::<String>();
+    let tx_details_task: Option<JoinHandle<()>> = if cfg.fastnear_auth_token.is_some() {
+        let api_url = cfg.fastnear_api_url.clone();
+        let auth_token = cfg.fastnear_auth_token.clone();
+        let tx_events = tx.clone();
+        let timeout_ms = cfg.rpc_timeout_ms;
+
+        Some(tokio::spawn(async move {
+            run_tx_details_fetch(api_url, auth_token, timeout_ms, tx_details_rx, tx_events).await;
+        }))
+    } else {
+        None
+    };
+
     let mut app = App::new(
         cfg.render_fps,
         cfg.render_fps_choices.clone(),
@@ -79,6 +94,11 @@ async fn main() -> Result<()> {
         },
         cfg.fastnear_api_url.clone(),
         cfg.fastnear_auth_token.clone(),
+        if cfg.fastnear_auth_token.is_some() {
+            Some(tx_details_tx)
+        } else {
+            None
+        },
     );
 
     // Apply deep link route from CLI args (if provided)
@@ -120,6 +140,9 @@ async fn main() -> Result<()> {
     // cleanup
     source_task.abort();
     if let Some(task) = archival_task {
+        task.abort();
+    }
+    if let Some(task) = tx_details_task {
         task.abort();
     }
     if mouse_enabled {
@@ -484,4 +507,45 @@ async fn handle_key(app: &mut App, k: KeyEvent, history: &History, jump_marks: &
             }
         }
     }
+}
+
+
+/// Background task to fetch transaction details from FastNEAR API
+async fn run_tx_details_fetch(
+    api_url: String,
+    auth_token: Option<String>,
+    timeout_ms: u64,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+    tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
+) {
+    log::info!("[tx_details_fetch] Starting FastNEAR API transaction details fetcher");
+
+    while let Some(tx_hash) = rx.recv().await {
+        log::info!("[tx_details_fetch] Fetching details for tx: {}", tx_hash);
+
+        match nearx::fastnear_api::fetch_transaction_details(
+            &api_url,
+            &tx_hash,
+            timeout_ms,
+            auth_token.as_deref(),
+        ).await {
+            Ok(tx_data) => {
+                // Convert to pretty JSON string
+                let json_str = nearx::json_pretty::pretty_safe(&tx_data, 2, 100 * 1024);
+                
+                // Send back to the app
+                let _ = tx.send(AppEvent::FetchedTxDetails {
+                    tx_hash,
+                    json_data: json_str,
+                });
+                
+                log::info!("[tx_details_fetch] Successfully fetched transaction details");
+            }
+            Err(e) => {
+                log::error!("[tx_details_fetch] Failed to fetch tx {}: {}", tx_hash, e);
+            }
+        }
+    }
+
+    log::info!("[tx_details_fetch] Channel closed, shutting down");
 }

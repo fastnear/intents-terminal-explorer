@@ -284,9 +284,14 @@ pub struct App {
     // FastNEAR API configuration
     fastnear_api_url: String,
     fastnear_auth_token: Option<String>,
+    tx_details_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>, // Channel to request tx details fetches
 
     // Full transaction details cache (from FastNEAR API)
     full_tx_cache: HashMap<String, String>, // tx_hash -> full JSON
+
+    // Filtered blocks cache to avoid recomputation
+    filtered_blocks_cache: std::cell::RefCell<Option<(Vec<usize>, Option<usize>, usize)>>, // (indices, selected_idx, total)
+    filter_cache_valid: std::cell::Cell<bool>, // Invalidate when filter or blocks change
 
     /// When true, new live blocks from RPC are ignored.
     /// Set when user is pinned far behind the live tip (>50 blocks past focal).
@@ -334,6 +339,7 @@ impl App {
         archival_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<u64>>,
         fastnear_api_url: String,
         fastnear_auth_token: Option<String>,
+        tx_details_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     ) -> Self {
         let filter_compiled = if default_filter.is_empty() {
             CompiledFilter::default()
@@ -371,7 +377,10 @@ impl App {
             archival_fetch_tx,
             fastnear_api_url,
             fastnear_auth_token,
+            tx_details_fetch_tx,
             full_tx_cache: HashMap::new(),
+            filtered_blocks_cache: std::cell::RefCell::new(None),
+            filter_cache_valid: std::cell::Cell::new(false),
             live_updates_paused: false, // Start with live updates enabled
             back_slots: Vec::new(),
             back_anchor_height: None,
@@ -412,7 +421,7 @@ impl App {
         if let Some(token) = &self.fastnear_auth_token {
             log::info!("[App] Using auth token: {}... ({} chars)", &token[..6], token.len());
         }
-        self.toast(format!("FastNEAR API configured at: {}", self.fastnear_api_url));
+        self.show_toast(format!("FastNEAR API configured at: {}", self.fastnear_api_url));
     }
     pub fn is_viewing_cached_block(&self) -> bool {
         if let Some(height) = self.sel_block_height {
@@ -493,6 +502,12 @@ impl App {
             .count()
     }
 
+    /// Invalidate the filtered blocks cache
+    fn invalidate_filter_cache(&self) {
+        self.filter_cache_valid.set(false);
+        self.filtered_blocks_cache.replace(None);
+    }
+
     /// Returns blocks that have at least one matching transaction
     /// Returns (filtered_blocks, selected_index, total_count)
     pub fn filtered_blocks(&self) -> (Vec<&BlockRow>, Option<usize>, usize) {
@@ -533,12 +548,65 @@ impl App {
             return (all_blocks, idx, total);
         }
 
-        // Filter active: only show blocks with matching transactions
+        // Filter active: Check cache first
+        if self.filter_cache_valid.get() {
+            if let Some((indices, _cached_sel_idx, _cached_total)) = self.filtered_blocks_cache.borrow().as_ref() {
+                // Cache hit - reusing cached results
+
+                // Reconstruct filtered blocks from cached indices
+                let mut filtered: Vec<&BlockRow> = Vec::with_capacity(indices.len());
+                for &idx in indices {
+                    if let Some(block) = self.blocks.get(idx) {
+                        filtered.push(block);
+                    }
+                }
+
+                // Handle cached block injection if needed
+                if viewing_cached {
+                    if let Some(cached_block) = self.sel_block_height
+                        .and_then(|h| self.cached_blocks.get(&h))
+                    {
+                        if self.count_matching_txs(cached_block) > 0 {
+                            let insert_pos = filtered
+                                .iter()
+                                .position(|b| b.height < cached_block.height)
+                                .unwrap_or(filtered.len());
+                            filtered.insert(insert_pos, cached_block);
+                        }
+                    }
+                }
+
+                // Recalculate selection index (may have changed due to navigation)
+                let sel_idx = if let Some(height) = self.sel_block_height {
+                    filtered
+                        .iter()
+                        .position(|b| b.height == height)
+                        .or(if !filtered.is_empty() { Some(0) } else { None })
+                } else if !filtered.is_empty() {
+                    Some(0)
+                } else {
+                    None
+                };
+
+                return (filtered, sel_idx, total);
+            }
+        }
+
+        // Cache miss or invalid - compute filtered blocks
+
         let mut filtered: Vec<&BlockRow> = self
             .blocks
             .iter()
             .filter(|block| self.count_matching_txs(block) > 0)
             .collect();
+
+        // Cache the indices for next time (before any cached block injection)
+        let indices: Vec<usize> = filtered
+            .iter()
+            .filter_map(|block| self.blocks.iter().position(|b| std::ptr::eq(b, *block)))
+            .collect();
+        self.filter_cache_valid.set(true);
+        self.filtered_blocks_cache.replace(Some((indices, None, total)));
 
         // If viewing cached block AND it has matching txs, inject it
         if viewing_cached {
@@ -750,10 +818,13 @@ impl App {
     }
 
     /// Request background fetch of full transaction details from FastNEAR API
-    pub fn request_tx_details_fetch(&self, tx_hash: String) {
-        // For now, we'll implement this in the binary where we have access to the event channel
-        // This is a placeholder that can be called from the UI
-        self.log_debug(format!("Request to fetch full transaction details for: {}", tx_hash));
+    pub fn request_tx_details_fetch(&mut self, tx_hash: String) {
+        if let Some(tx) = &self.tx_details_fetch_tx {
+            let _ = tx.send(tx_hash.clone());
+            self.log_debug(format!("Sent request to fetch full transaction details for: {}", tx_hash));
+        } else {
+            self.log_debug(format!("No tx details fetch channel available for: {}", tx_hash));
+        }
     }
 
     /// Store fetched transaction details in cache
@@ -1116,10 +1187,7 @@ impl App {
                             let raw = self.get_raw_tx_json();
                             self.set_details_json(raw);
 
-                            // Trigger background fetch if we have API configured
-                            if self.fastnear_auth_token.is_some() {
-                                self.request_tx_details_fetch(tx_hash.clone());
-                            }
+                            // No need to fetch here - already triggered in select_tx()
                         }
                     } else {
                         // No transaction selected
@@ -1173,6 +1241,7 @@ impl App {
     pub fn apply_filter(&mut self) {
         self.filter_compiled = compile_filter(&self.filter_query);
         self.input_mode = InputMode::Normal;
+        self.invalidate_filter_cache(); // Filter changed
         self.validate_and_refresh_tx(BlockChangeReason::FilterChange); // Try to preserve tx
     }
 
@@ -1736,6 +1805,12 @@ impl App {
                     let raw = self.get_raw_tx_json();
                     self.set_details_json(raw);
                 }
+
+                // Pre-fetch full transaction details if not already cached
+                if self.fastnear_auth_token.is_some() && !self.full_tx_cache.contains_key(&tx.hash) {
+                    self.request_tx_details_fetch(tx.hash.clone());
+                    self.log_debug(format!("Pre-fetching transaction details for: {}", tx.hash));
+                }
             }
         }
     }
@@ -1945,11 +2020,18 @@ impl App {
 
                 self.push_block(block);
             }
+            AppEvent::FetchedTxDetails { tx_hash, json_data } => {
+                // Store the fetched transaction details in cache
+                self.store_tx_details(tx_hash, json_data);
+            }
         }
     }
 
     fn push_block(&mut self, b: BlockRow) {
         let height = b.height;
+
+        // Invalidate cache when blocks change
+        self.invalidate_filter_cache();
 
         // Log state BEFORE push
         self.log_debug(format!(
