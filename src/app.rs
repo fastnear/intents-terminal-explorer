@@ -834,38 +834,6 @@ impl App {
         self.find_block_index(Some(height)).is_some() || self.cached_blocks.contains_key(&height)
     }
 
-    /// Eagerly fill ±50 block window around selected height via archival RPC
-    ///
-    /// For each height in [center-50, center+50]:
-    /// - If block is available (in buffer or cache): skip
-    /// - If block is missing: request from archival RPC
-    ///
-    /// This enables smooth navigation through historical blocks without gaps.
-    pub fn ensure_block_window(&mut self, center_height: u64) {
-        use crate::constants::app::ARCHIVAL_CONTEXT_BLOCKS;
-
-        let start = center_height.saturating_sub(ARCHIVAL_CONTEXT_BLOCKS);
-        let end = center_height + ARCHIVAL_CONTEXT_BLOCKS;
-
-        let mut requested_count = 0;
-        for h in start..=end {
-            if !self.is_block_available(h) {
-                self.request_archival_block(h);
-                requested_count += 1;
-            }
-        }
-
-        // Always cache what we already have
-        self.cache_block_with_context(center_height);
-
-        if requested_count > 0 {
-            self.log_debug(format!(
-                "Requested {} missing blocks in window [{}..={}] around #{}",
-                requested_count, start, end, center_height
-            ));
-        }
-    }
-
     /// Eagerly fill ±50 block window using canonical chain-walking on every selection change.
     ///
     /// - Walks backward using prev_hash (canonical chain)
@@ -979,9 +947,9 @@ impl App {
                     let raw = self.get_raw_block_json();
                     self.set_details_json(raw);
 
-                    // Eagerly fill ±50 block window
+                    // Eagerly fill ±50 block window (chain-walk backfill)
                     if let Some(block) = self.current_block() {
-                        self.ensure_block_window(block.height);
+                        self.ensure_block_window_by_chain(block.height);
                     }
                 }
                 FullscreenContentType::TransactionRawJson => {
@@ -1226,8 +1194,7 @@ impl App {
                         if self.is_block_available(new_height) {
                             self.sel_block_height = Some(new_height);
                             self.follow_blocks_latest = false; // User navigation disables auto-follow
-                            self.cache_block_with_context(new_height);
-                            self.ensure_block_window_by_chain(new_height); // Chain-walk backfill
+                            self.ensure_block_window_by_chain(new_height); // Chain-walk backfill (also caches)
                             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                             self.log_debug(format!("Blocks UP -> #{new_height}"));
                         } else {
@@ -1241,7 +1208,7 @@ impl App {
                     let new_height = nav_list[0];
                     self.sel_block_height = Some(new_height);
                     self.follow_blocks_latest = false; // User navigation disables auto-follow
-                    self.cache_block_with_context(new_height);
+                    self.ensure_block_window_by_chain(new_height); // Chain-walk backfill (also caches)
                     self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                     self.log_debug(format!(
                         "Blocks UP -> not in list, jump to newest #{new_height}"
@@ -1343,8 +1310,7 @@ impl App {
                         if self.is_block_available(new_height) {
                             self.sel_block_height = Some(new_height);
                             self.follow_blocks_latest = false; // User navigation disables auto-follow
-                            self.cache_block_with_context(new_height);
-                            self.ensure_block_window_by_chain(new_height); // Chain-walk backfill
+                            self.ensure_block_window_by_chain(new_height); // Chain-walk backfill (also caches)
                             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                             self.log_debug(format!("Blocks DOWN -> #{new_height}"));
                         } else {
@@ -1358,7 +1324,7 @@ impl App {
                     let new_height = nav_list[0];
                     self.sel_block_height = Some(new_height);
                     self.follow_blocks_latest = false; // User navigation disables auto-follow
-                    self.cache_block_with_context(new_height);
+                    self.ensure_block_window_by_chain(new_height); // Chain-walk backfill (also caches)
                     self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                     self.log_debug(format!(
                         "Blocks DOWN -> not in list, jump to newest #{new_height}"
@@ -1388,8 +1354,7 @@ impl App {
         if let Some(&height) = nav_list.get(idx) {
             self.sel_block_height = Some(height);
             self.follow_blocks_latest = false; // User interaction disables auto-follow
-            self.cache_block_with_context(height);
-            self.ensure_block_window_by_chain(height); // Chain-walk backfill
+            self.ensure_block_window_by_chain(height); // Chain-walk backfill (also caches)
             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
             self.log_debug(format!("Mouse select block #{height} (idx {idx})"));
         }
