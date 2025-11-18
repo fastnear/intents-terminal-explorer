@@ -25,12 +25,12 @@ echo "     (Optional) trunk build --release  # if you publish static web bundle"
 echo "==> Tauri WASM (no-modules) build for webview"
 cargo build \
   --target wasm32-unknown-unknown \
-  --bin nearx-web \
+  --bin nearx-web-dom \
   --no-default-features \
-  --features egui-web \
+  --features dom-web \
   --release
 
-WASM="target/wasm32-unknown-unknown/release/nearx-web.wasm"
+WASM="target/wasm32-unknown-unknown/release/nearx-web-dom.wasm"
 if [[ ! -f "$WASM" ]]; then
   echo "error: expected $WASM"
   exit 2
@@ -42,14 +42,14 @@ if [[ "$LOCK_VER" != "$CLI_VER" ]]; then
   echo "warn: wasm-bindgen CLI ($CLI_VER) != Cargo.lock ($LOCK_VER)"
 fi
 
-mkdir -p dist-egui
+mkdir -p web/pkg
 wasm-bindgen \
   --target no-modules \
-  --out-dir dist-egui \
-  --out-name nearx-web \
+  --out-dir web/pkg \
+  --out-name nearx_web_dom \
   "$WASM"
 
-ls -l dist-egui/nearx-web.js dist-egui/nearx-web_bg.wasm >/dev/null
+ls -l web/pkg/nearx_web_dom.js web/pkg/nearx_web_dom_bg.wasm >/dev/null
 
 echo "==> Tauri desktop build"
 pushd tauri-workspace/src-tauri >/dev/null
@@ -65,7 +65,7 @@ git push origin HEAD --tags
 echo "==> Done"
 echo "Artifacts:"
 echo "  - Tauri bundles under: tauri-workspace/src-tauri/target/release/bundle/"
-echo "  - Webview WASM bundle for Tauri: dist-egui/"
+echo "  - Webview WASM bundle for Tauri: web/pkg/"
 echo
 echo "Release notes template:"
 cat <<EOF

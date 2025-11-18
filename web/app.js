@@ -357,9 +357,9 @@ function render(snapshot) {
   suppressFilterEvent = false;
 
   // Pane focus highlight (four-point focus system).
-  blocksPane.classList.toggle("focused", snapshot.pane === 0);
-  txPane.classList.toggle("focused", snapshot.pane === 1);
-  detailsPane.classList.toggle("focused", snapshot.pane === 2);
+  blocksPane.classList.toggle("nx-pane--focused", snapshot.pane === 0);
+  txPane.classList.toggle("nx-pane--focused", snapshot.pane === 1);
+  detailsPane.classList.toggle("nx-pane--focused", snapshot.pane === 2);
 
   // Selection slot (shows current block/tx selection prominently)
   const selectionSlot = document.getElementById("selection-slot");
