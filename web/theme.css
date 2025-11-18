@@ -13,10 +13,10 @@
    * --json-bg, --json-key, --json-string, --json-number, --json-bool, --json-struct
    */
 
-  /* Non-color styling metrics - DOS-ish flat design */
-  --radius: 0;                      /* square corners for TUI feel */
-  --stroke: 1px;                    /* thin borders like terminal */
-  --spacing: 2px;                   /* minimal gaps like TUI */
+  /* Non-color styling metrics */
+  --radius: 0;                      /* square corners for DOS feel */
+  --stroke: 1px;                    /* border width */
+  --spacing: 8px;                   /* item spacing */
 
   /* Computed hover states (fallback only - injected by theme.rs) */
   --hover-border: #6d7379;          /* border + ~10% brightness */
@@ -37,19 +37,14 @@ body {
   margin: 0;
   background-color: var(--bg);
   color: var(--fg);
-  font-family: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 13px;      /* DOS-like smaller font */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Mono", "Liberation Mono", Consolas, monospace;
+  font-size: 20px;      /* matches TUI 12pt terminal font (12pt × 1.666 = 20px) */
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
   -webkit-text-size-adjust: 100%;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   cursor: default;
-}
-
-/* Kill all modern web prettiness globally */
-* {
-  box-shadow: none !important;
 }
 
 /* Accessibility: ensure focus is always visible */
@@ -78,20 +73,17 @@ body {
   flex: 1;
   display: grid;
   grid-template-columns: 2.2fr 2.4fr 3.4fr; /* Blocks | Tx | Details ratio */
-  gap: 4px;
-  padding: 4px;
+  gap: 2px; /* Minimal gaps like TUI */
+  padding: 2px; /* Tight spacing for DOS feel */
 }
 
 .nx-header,
 .nx-footer {
-  padding: 3px 8px;
-  font-size: 11px;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  padding: 4px 8px;
+  font-size: 15px;
   color: var(--fg-dim);
-  background: #05070c;
-  border-bottom: 1px solid #202636;
+  background: #080b11;
+  border-bottom: 1px solid #141925;
 }
 
 /* Minimal scrollbar styling to match theme */
@@ -114,7 +106,7 @@ body {
 .nx-pane {
   border: 1px solid var(--border);
   background: var(--panel);
-  border-radius: 4px;
+  border-radius: 0; /* square corners */
   min-height: 0;              /* allow flex/grid to size panes */
   display: flex;
   flex-direction: column;
@@ -134,6 +126,10 @@ body {
   background: var(--panel-alt) !important;
   margin-top: -1px; /* Compensate for 2px top border to prevent layout shift */
   box-shadow: none !important; /* No glow effects - clean DOS aesthetic */
+}
+
+.nx-pane--focused .nx-pane-title {
+  color: var(--accent-strong);
 }
 
 .nx-pane-header {

@@ -1,0 +1,41 @@
+{
+  "$schema": "../gen/schemas/tauri-schema.json",
+  "productName": "NEARx",
+  "version": "0.4.0",
+  "identifier": "com.fastnear.nearx",
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "make -C .. web",
+    "devUrl": "http://localhost:8000",
+    "frontendDist": "../../web"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "NEARx - NEAR Blockchain Explorer",
+        "width": 1200,
+        "height": 800,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "devtools": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://accounts.google.com https://oauth2.googleapis.com https://rpc.mainnet.near.org https://rpc.testnet.near.org https://rpc.mainnet.fastnear.com https://rpc.testnet.fastnear.com https://archival-rpc.mainnet.fastnear.com https://archival-rpc.testnet.fastnear.com https://*.near.org http://localhost:* ws: wss:; font-src 'self'; base-uri 'none'; frame-ancestors 'none';",
+      "capabilities": ["main-capability"]
+    }
+  },
+  "bundle": {
+    "resources": []
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["nearx"]
+      }
+    }
+  }
+}

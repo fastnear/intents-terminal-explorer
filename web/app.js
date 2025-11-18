@@ -22,20 +22,61 @@ let suppressFilterEvent = false;
 
 // Track viewport size to avoid redundant updates
 let lastViewportLines = 0;
+let currentViewportLines = 40; // Default estimate, updated by updateDetailsViewport
 
+// Update details viewport dynamically
 function updateDetailsViewport() {
   const detailsPre = document.getElementById("pane-details-pre");
   if (!detailsPre || !wasmApp || !wasmApp.setDetailsViewportLines) return;
 
   const detailsHeight = detailsPre.clientHeight || 400;
-  const estimatedLineHeight = 16; // 12px font-size * 1.35 line-height ≈ 16px
+  const estimatedLineHeight = 16; // matches our row height
   const viewportLines = Math.max(1, Math.floor(detailsHeight / estimatedLineHeight));
 
   // Only update if changed
   if (viewportLines !== lastViewportLines) {
     lastViewportLines = viewportLines;
+    currentViewportLines = viewportLines;
     wasmApp.setDetailsViewportLines(viewportLines);
   }
+}
+
+// Set up ResizeObserver for viewport tracking
+function setupResizeObserver() {
+  const detailsPre = document.getElementById("pane-details-pre");
+  if (detailsPre && window.ResizeObserver) {
+    const resizeObserver = new ResizeObserver(() => {
+      updateDetailsViewport();
+    });
+    resizeObserver.observe(detailsPre);
+
+    // Initial measurement
+    updateDetailsViewport();
+  }
+}
+
+// Client-side toast management
+let activeToastTimeout = null;
+
+function showToastClientSide(message) {
+  const toastEl = document.getElementById("nearx-toast");
+  if (!toastEl) return;
+
+  // Clear any existing timeout
+  if (activeToastTimeout) {
+    clearTimeout(activeToastTimeout);
+  }
+
+  // Show toast immediately
+  toastEl.textContent = message;
+  toastEl.hidden = false;
+
+  // Auto-hide after 4 seconds
+  activeToastTimeout = setTimeout(() => {
+    toastEl.hidden = true;
+    toastEl.textContent = "";
+    activeToastTimeout = null;
+  }, 4000);
 }
 
 async function main() {
@@ -48,17 +89,8 @@ async function main() {
   wasmApp = new wasm.WasmApp();
   hookEvents();
 
-  // Set initial viewport size
-  updateDetailsViewport();
-
-  // Update viewport on resize
-  const detailsPre = document.getElementById("pane-details-pre");
-  if (detailsPre && window.ResizeObserver) {
-    const resizeObserver = new ResizeObserver(() => {
-      updateDetailsViewport();
-    });
-    resizeObserver.observe(detailsPre);
-  }
+  // Set up ResizeObserver for dynamic viewport tracking
+  setupResizeObserver();
 
   // Start continuous render loop (drains RPC events on every frame)
   startRenderLoop();
@@ -76,17 +108,29 @@ function apply(action) {
   render(lastSnapshot);
 }
 
-// Simple render loop - let DOM handle diffing
+// Poll at 10 Hz (100ms) instead of 60 FPS to avoid wasteful serialization
+// This matches ratacat's proven approach for better performance
 function startRenderLoop() {
-  function loop() {
+  function pollAndRender() {
     const snap = snapshot();  // Drains events from RPC poller
-    render(snap);            // DOM will optimize if nothing changed
-    requestAnimationFrame(loop);
+    render(snap);
+    setTimeout(pollAndRender, 100);  // 10 Hz polling
   }
-  requestAnimationFrame(loop);
+  pollAndRender();
 }
 
-/* ---------- JSON syntax highlight ---------- */
+/* ---------- JSON pretty-print + syntax highlight ---------- */
+
+function safePrettyJson(text) {
+  if (!text) return "";
+  try {
+    const obj = JSON.parse(text);
+    return JSON.stringify(obj, null, 2);
+  } catch {
+    // Already formatted or non-JSON; show as-is.
+    return text;
+  }
+}
 
 function syntaxHighlightJson(text) {
   // Basic HTML escaping
@@ -190,21 +234,7 @@ function hookEvents() {
       return;
     }
 
-    // Special handling for Tab - works even when filter is focused
-    if (e.key === "Tab") {
-      e.preventDefault();
-      apply({
-        type: "Key",
-        code: e.key,
-        ctrl: e.ctrlKey || e.metaKey,
-        alt: e.altKey,
-        shift: e.shiftKey,
-        meta: e.metaKey,
-      });
-      return;
-    }
-
-    // When typing into filter, let keystrokes through (Esc and Tab handled above).
+    // When typing into filter, let keystrokes through (Esc handled above).
     if (filterActive) return;
 
     // Plain 'c' → copy focused JSON (no modifiers).
@@ -222,6 +252,39 @@ function hookEvents() {
       }
     }
 
+    // Tab key → cycle panes with optimistic UI
+    if (e.key === "Tab") {
+      e.preventDefault(); // Prevent browser tab navigation
+
+      // Optimistic UI: instantly update pane focus before WASM round-trip
+      if (lastSnapshot) {
+        const currentPane = lastSnapshot.pane;
+        const nextPane = e.shiftKey
+          ? (currentPane - 1 + 3) % 3  // Shift+Tab: backwards
+          : (currentPane + 1) % 3;      // Tab: forwards
+
+        // Instant visual update (no WASM delay)
+        const blocksPane = document.getElementById("pane-blocks");
+        const txPane = document.getElementById("pane-txs");
+        const detailsPane = document.getElementById("pane-details");
+
+        blocksPane?.classList.toggle("nx-pane--focused", nextPane === 0);
+        txPane?.classList.toggle("nx-pane--focused", nextPane === 1);
+        detailsPane?.classList.toggle("nx-pane--focused", nextPane === 2);
+      }
+
+      // Sync to WASM (snapshot will confirm same state on next render)
+      apply({
+        type: "Key",
+        code: "Tab",
+        ctrl: e.ctrlKey || e.metaKey,
+        alt: e.altKey,
+        shift: e.shiftKey,
+        meta: e.metaKey
+      });
+      return;
+    }
+
     // Keys that map to UiAction::Key.
     const navKeys = [
       "ArrowUp",
@@ -232,7 +295,6 @@ function hookEvents() {
       "PageDown",
       "Home",
       "End",
-      "Tab",
       "Enter",
       " ",
       "Escape",  // Exit fullscreen / clear filter (priority-based)
@@ -296,6 +358,7 @@ function hookEvents() {
 
 // Store previous snapshot for scroll preservation
 let prevSnapshot = null;
+let prevBlocksHash = "";
 
 function render(snapshot) {
   const filter = document.getElementById("nearx-filter");
@@ -351,9 +414,9 @@ function render(snapshot) {
   suppressFilterEvent = false;
 
   // Pane focus highlight (four-point focus system).
-  blocksPane.classList.toggle("focused", snapshot.pane === 0);
-  txPane.classList.toggle("focused", snapshot.pane === 1);
-  detailsPane.classList.toggle("focused", snapshot.pane === 2);
+  blocksPane.classList.toggle("nx-pane--focused", snapshot.pane === 0);
+  txPane.classList.toggle("nx-pane--focused", snapshot.pane === 1);
+  detailsPane.classList.toggle("nx-pane--focused", snapshot.pane === 2);
 
   // Selection slot (shows current block/tx selection prominently)
   const selectionSlot = document.getElementById("selection-slot");
@@ -362,62 +425,84 @@ function render(snapshot) {
   }
 
   // Blocks pane: two-list rendering (forward + backfill)
-  blocksBody.innerHTML = "";
   const blocks = snapshot.blocks || [];
   const loadingBlock = snapshot.loading_block;
 
-  blocks.forEach((b) => {
-    const row = document.createElement("div");
-    row.className = "nx-row nx-row--block";
+  // Simple hash to detect if blocks have changed
+  const blocksHash = blocks.map(b => `${b.height}-${b.is_selected}`).join(",");
 
-    // Apply source-based styling (forward vs backfill)
-    if (b.source === "backfill_pending") {
-      row.classList.add("nx-row--backfill-pending");
-    } else if (b.source === "backfill_loading") {
-      row.classList.add("nx-row--backfill-loading");
-    } else {
-      row.classList.add("nx-row--forward");
+  // Skip re-rendering blocks if nothing changed
+  if (blocksHash === prevBlocksHash) {
+    // Still update the title in case counts changed
+    if (blocksTitle) {
+      let title = "Blocks";
+      if (snapshot.blocks_total != null) {
+        title = `Blocks (${blocks.length}/${snapshot.blocks_total})`;
+      }
+      if (snapshot.viewing_cached) {
+        title += " · cached (← recent)";
+      }
+      blocksTitle.textContent = title;
+    }
+  } else {
+    // Blocks have changed, re-render
+    blocksBody.innerHTML = "";
+
+    blocks.forEach((b) => {
+      const row = document.createElement("div");
+      row.className = "nx-row nx-row--block";
+
+      // Apply source-based styling (forward vs backfill)
+      if (b.source === "backfill_pending") {
+        row.classList.add("nx-row--backfill-pending");
+      } else if (b.source === "backfill_loading") {
+        row.classList.add("nx-row--backfill-loading");
+      } else {
+        row.classList.add("nx-row--forward");
+      }
+
+      if (b.is_selected) row.classList.add("nx-row--selected");
+      if (!b.available) row.style.opacity = "0.6";
+      row.dataset.index = String(b.index);
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", b.is_selected ? "true" : "false");
+
+      // Backfill placeholders use label directly (already formatted in Rust)
+      if (b.source === "backfill_pending" || b.source === "backfill_loading") {
+        // Use the pre-formatted label from Rust (e.g., "12345  |  archival lookup queued…")
+        const parts = [
+          `#${b.height}`,
+          b.source === "backfill_loading" ? "archival lookup in flight…" : "archival lookup queued…"
+        ];
+        row.innerHTML = parts.join(" · ");
+      } else {
+        // Forward blocks show full details
+        row.textContent = `#${b.height} · ${b.tx_count} tx · ${b.when}`;
+      }
+
+      blocksBody.appendChild(row);
+    });
+
+    // Apply vertical centering via scroll offset (like TUI)
+    if (snapshot.blocks_scroll_offset != null && snapshot.blocks_scroll_offset > 0) {
+      const rowHeight = 24;  // Approximate based on CSS line-height
+      blocksBody.scrollTop = snapshot.blocks_scroll_offset * rowHeight;
     }
 
-    if (b.is_selected) row.classList.add("nx-row--selected");
-    if (!b.available) row.style.opacity = "0.6";
-    row.dataset.index = String(b.index);
-    row.setAttribute("role", "option");
-    row.setAttribute("aria-selected", b.is_selected ? "true" : "false");
-
-    // Backfill placeholders use label directly (already formatted in Rust)
-    if (b.source === "backfill_pending" || b.source === "backfill_loading") {
-      // Use the pre-formatted label from Rust (e.g., "12345  |  archival lookup queued…")
-      const parts = [
-        `#${b.height}`,
-        b.source === "backfill_loading" ? "archival lookup in flight…" : "archival lookup queued…"
-      ];
-      row.innerHTML = parts.join(" · ");
-    } else {
-      // Forward blocks show full details
-      row.textContent = `#${b.height} · ${b.tx_count} tx · ${b.when}`;
+    // Blocks title with counts.
+    if (blocksTitle) {
+      let title = "Blocks";
+      if (snapshot.blocks_total != null) {
+        title = `Blocks (${blocks.length}/${snapshot.blocks_total})`;
+      }
+      if (snapshot.viewing_cached) {
+        title += " · cached (← recent)";
+      }
+      blocksTitle.textContent = title;
     }
 
-    blocksBody.appendChild(row);
-  });
-
-  // Apply vertical centering via scroll offset (like TUI)
-  if (snapshot.blocks_scroll_offset != null && snapshot.blocks_scroll_offset > 0) {
-    const rowHeight = 24;  // Approximate based on CSS line-height
-    blocksBody.scrollTop = snapshot.blocks_scroll_offset * rowHeight;
-  }
-
-  // Blocks title with counts.
-  if (blocksTitle) {
-    let title = "Blocks";
-    if (snapshot.viewing_cached) {
-      title = "Blocks (cached) — (↑↓ nav • ← recent)";
-    } else if (snapshot.blocks_total != null && blocks.length < snapshot.blocks_total) {
-      title = `Blocks (${blocks.length}/${snapshot.blocks_total}) — (↑↓ nav • Enter select)`;
-    } else {
-      title = "Blocks — (↑↓ nav • Enter select)";
-    }
-    blocksTitle.textContent = title;
+    // Update hash after rendering
+    prevBlocksHash = blocksHash;
   }
 
   // Txs pane.
@@ -444,26 +529,22 @@ function render(snapshot) {
 
   // Tx title with position.
   if (txTitle) {
-    let title = "Txs";
+    let title = "Tx hashes";
     const total = snapshot.txs_total ?? txs.length;
-    if (txs.length < total) {
-      title = `Txs (${txs.length}/${total}) — (↑↓ nav • Enter select)`;
-    } else if (total > 0) {
-      title = `Txs (${total}) — (↑↓ nav • Enter select)`;
-    } else {
-      title = "Txs — (↑↓ nav • Enter select)";
+    if (total > 0) {
+      const selIdx = txs.find((t) => t.is_selected)?.index ?? 0;
+      const pos = selIdx + 1;
+      title = `Tx hashes (${pos}/${total})`;
     }
     txTitle.textContent = title;
   }
 
-  // Details pane: render windowed JSON (already windowed and formatted by Rust)
-  const rawDetails = snapshot.details || "";
-  let html = syntaxHighlightJson(rawDetails);
+  // Viewport size is now handled by ResizeObserver for better responsiveness
 
-  // Add truncation message if content was cut off
-  if (snapshot.details_truncated) {
-    html += '<br><br><span style="color: var(--fg-dim); font-style: italic;">… large output truncated at 5000 lines; press \'c\' to copy full JSON</span>';
-  }
+  // Details pane: colorize JSON client-side
+  const rawDetails = snapshot.details || "";
+  const pretty = safePrettyJson(rawDetails);
+  const html = syntaxHighlightJson(pretty);
 
   detailsPane.classList.toggle(
     "nx-details--fullscreen",
@@ -479,16 +560,18 @@ function render(snapshot) {
       "ParsedDetails": "Transaction Details"
     }[snapshot.fullscreen_content_type] || "Details";
 
-    // Show scroll position: "(42/1234)" format to match TUI
-    const scrollIndicator = snapshot.details_total_lines > 1
-      ? ` (${(snapshot.details_scroll_line ?? 0) + 1}/${snapshot.details_total_lines})`
+    // Show scroll position: "Lines 1-40/523"
+    const scrollStart = (snapshot.details_scroll_line ?? 0) + 1;
+    const scrollEnd = Math.min(scrollStart + currentViewportLines - 1, snapshot.details_total_lines ?? 0);
+    const scrollIndicator = snapshot.details_total_lines > 0
+      ? ` (Lines ${scrollStart}-${scrollEnd}/${snapshot.details_total_lines})`
       : "";
 
-    detailsTitle.textContent = `${contentTypeLabel}${scrollIndicator} - ${modeLabel} • Tab=switch • c=copy • Space=exit`;
+    detailsTitle.textContent = `${contentTypeLabel} - ${modeLabel}${scrollIndicator} • Tab=switch • c=copy • Space=exit`;
   } else {
-    // Non-fullscreen: show scroll indicator if content has multiple lines
-    const scrollIndicator = snapshot.details_total_lines > 1
-      ? ` (${(snapshot.details_scroll_line ?? 0) + 1}/${snapshot.details_total_lines})`
+    // Non-fullscreen: show scroll indicator if content is large
+    const scrollIndicator = snapshot.details_total_lines > currentViewportLines
+      ? ` (${snapshot.details_scroll_line + 1}-${Math.min(snapshot.details_scroll_line + currentViewportLines, snapshot.details_total_lines)}/${snapshot.details_total_lines})`
       : "";
     detailsTitle.textContent = `Transaction details${scrollIndicator} – c: copy • Space: expand`;
   }
@@ -506,15 +589,11 @@ function render(snapshot) {
 
   footer.textContent = parts.join("  •  ");
 
-  // Toast.
-  if (toastEl) {
-    if (snapshot.toast) {
-      toastEl.textContent = snapshot.toast;
-      toastEl.hidden = false;
-    } else {
-      toastEl.hidden = true;
-      toastEl.textContent = "";
-    }
+  // Toast - handled client-side now for immediate feedback
+  // (keeping the check for backwards compatibility but preferring client-side)
+  if (toastEl && snapshot.toast && !activeToastTimeout) {
+    // Only show server toast if no client toast is active
+    showToastClientSide(snapshot.toast);
   }
 
   // Keyboard shortcuts modal visibility (driven by snapshot state).
@@ -541,23 +620,29 @@ function render(snapshot) {
 }
 
 /**
- * Handle copy action with on-demand content fetching.
- * Gets content from WASM only when needed (not on every frame).
+ * Handle copy action entirely client-side (no WASM round-trip).
+ * Extracts content based on focused pane and uses JavaScript clipboard API.
  */
 async function handleCopyClientSide(snapshot) {
   const paneNames = ["block", "transaction", "details"];
   const paneName = paneNames[snapshot.pane] || "data";
 
-  // Get content on-demand from WASM (only when user presses 'c')
-  if (!wasmApp || !wasmApp.getClipboardContent) {
-    showToastClientSide("Copy not available");
-    return;
+  // Extract content based on focused pane
+  let content = "";
+  switch (snapshot.pane) {
+    case 0: // Blocks
+      content = snapshot.raw_block_json;
+      break;
+    case 1: // Transactions
+      content = snapshot.raw_tx_json;
+      break;
+    case 2: // Details
+      content = snapshot.details;
+      break;
   }
 
-  const content = wasmApp.getClipboardContent();
-
   // Handle empty content
-  if (!content || content.startsWith("No ") || content === "") {
+  if (!content || content.startsWith("No ")) {
     showToastClientSide("Nothing to copy");
     return;
   }
@@ -579,22 +664,6 @@ async function handleCopyClientSide(snapshot) {
   }
 }
 
-/**
- * Show toast notification client-side (bypasses WASM snapshot polling).
- */
-function showToastClientSide(message) {
-  const toastEl = document.getElementById("nearx-toast");
-  if (!toastEl) return;
-
-  toastEl.textContent = message;
-  toastEl.hidden = false;
-
-  // Auto-hide after 2 seconds (matches TUI behavior)
-  setTimeout(() => {
-    toastEl.hidden = true;
-    toastEl.textContent = "";
-  }, 2000);
-}
 
 /**
  * Flash pane border to indicate copy success.

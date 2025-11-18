@@ -169,7 +169,12 @@
       "Bash(git log:*)",
       "Bash(make web-release:*)",
       "Bash(echo:*)",
-      "Bash(./test_renderer)"
+      "Bash(./test_renderer)",
+      "Bash(make kill-dev:*)",
+      "Bash(TAURI_SKIP_DEV_SERVER=true cargo tauri dev:*)",
+      "Bash(TAURI_CONFIG=tauri.test.conf.json cargo tauri dev:*)",
+      "WebFetch(domain:www.gnu.org)",
+      "Bash(make dev:*)"
     ],
     "deny": [],
     "ask": [],

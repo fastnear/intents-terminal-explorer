@@ -1,6 +1,12 @@
 # NEARx Build Automation
 # Option A: Static site with wasm-bindgen (no Trunk)
 
+# Load environment variables from .env file if it exists
+ifneq (,$(wildcard ./.env))
+    include .env
+    export
+endif
+
 .PHONY: help web web-release dev clean install-deps
 
 help:
@@ -48,9 +54,19 @@ web-release:
 
 # Start local dev server
 dev: web
-	@echo "🚀 Starting dev server at http://localhost:8000"
-	@echo "   Press Ctrl+C to stop"
-	@cd web && python3 -m http.server 8000
+	@if lsof -i :8000 > /dev/null 2>&1; then \
+		echo "❌ Port 8000 is already in use. Kill the process or use 'make kill-dev'"; \
+		exit 1; \
+	else \
+		echo "🚀 Starting dev server at http://localhost:8000"; \
+		echo "   Press Ctrl+C to stop"; \
+		cd web && python3 -m http.server 8000; \
+	fi
+
+# Kill any process using port 8000
+kill-dev:
+	@echo "🔫 Killing process on port 8000..."
+	@lsof -ti :8000 | xargs kill -9 2>/dev/null || echo "No process found on port 8000"
 
 # Clean build artifacts
 clean:

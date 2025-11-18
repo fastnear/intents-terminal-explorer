@@ -235,6 +235,11 @@ impl DetailsBuffer {
             self.scroll_line = 0;
         }
     }
+
+    /// Get raw text (for sending plain JSON to frontend)
+    pub fn get_raw_text(&self) -> &str {
+        &self.text
+    }
 }
 
 pub struct App {
@@ -1829,6 +1834,9 @@ impl App {
             AppEvent::NewBlock(block) => {
                 let height = block.height;
 
+                // Commented out to reduce console spam
+                // log::info!("[on_event] Received NewBlock event for block #{}", height);
+
                 if self.loading_block == Some(height) {
                     self.loading_block = None;
                 }
@@ -1882,6 +1890,10 @@ impl App {
             self.blocks.len()
         ));
 
+        // Commented out to reduce console spam
+        // log::info!("[push_block] Adding block #{} to buffer (current count: {})",
+        //           height, self.blocks.len());
+
         // Determine if this is a historical block (older than current newest)
         let is_historical = self.blocks.first()
             .map(|newest| height < newest.height)
@@ -1919,9 +1931,14 @@ impl App {
             // Auto-lock on FIRST block that passes filter (check if we've never selected before)
             if self.sel_block_height.is_none() {
                 // Haven't locked to any block yet - check if this one passes filter
-                let matching_txs = self.count_matching_txs(&self.blocks[0]);
+                let no_filter = filter::is_empty(&self.filter_compiled);
+                let matching_txs = if no_filter {
+                    1 // Skip expensive counting when no filter active
+                } else {
+                    self.count_matching_txs(&self.blocks[0])
+                };
 
-                if matching_txs > 0 || filter::is_empty(&self.filter_compiled) {
+                if matching_txs > 0 || no_filter {
                     // Block passes filter (or no filter active) - lock to it
                     self.sel_block_height = Some(height);
                     self.sel_tx = 0;

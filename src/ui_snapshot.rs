@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{App, InputMode};
 
+
 /// Block source type for two-list architecture
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -78,6 +79,12 @@ pub struct UiSnapshot {
 
     /// Block height currently being fetched from archival RPC (if any).
     pub loading_block: Option<u64>,
+
+    /// Raw JSON for current block (for copy functionality)
+    pub raw_block_json: String,
+
+    /// Raw JSON for current transaction (for copy functionality)
+    pub raw_tx_json: String,
 }
 
 impl UiSnapshot {
@@ -89,6 +96,10 @@ impl UiSnapshot {
         // Blocks: forward list (filtered, newest → oldest)
         let (blocks_filtered, selected_block_idx_opt, blocks_total) = app.filtered_blocks();
         let selected_block_height = app.selected_block_height();
+
+        // Commented out to reduce console spam
+        // log::debug!("[UiSnapshot] Creating snapshot with {} filtered blocks (total: {})",
+        //            blocks_filtered.len(), blocks_total);
 
         let mut blocks: Vec<UiBlockRow> = blocks_filtered
             .iter()
@@ -162,7 +173,7 @@ impl UiSnapshot {
             })
             .collect();
 
-        // Details: use windowed view (prevents UI freeze on huge JSON)
+        // Details: send plain JSON text (frontend will colorize)
         let details = app.details_window();
         let details_scroll = app.details_scroll(); // Legacy field (line-based now)
         let (details_scroll_line, details_total_lines) = app.details_scroll_info();
@@ -207,6 +218,8 @@ impl UiSnapshot {
             toast,
             show_shortcuts,
             loading_block,
+            raw_block_json: String::new(), // TODO: implement proper copy functionality
+            raw_tx_json: String::new(),    // TODO: implement proper copy functionality
         }
     }
 }

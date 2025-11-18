@@ -352,7 +352,7 @@ pub fn fastnear_token() -> String {
     // Web/Tauri (wasm): bake token at compile time if available.
     #[cfg(target_arch = "wasm32")]
     {
-        option_env!("FASTNEAR_API_TOKEN_WEB")
+        option_env!("FASTNEAR_AUTH_TOKEN")
             .unwrap_or("")
             .to_string()
     }

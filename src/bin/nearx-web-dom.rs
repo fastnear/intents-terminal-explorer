@@ -227,10 +227,20 @@ fn main() {
 impl WasmApp {
     fn drain_events(&mut self) {
         // Drain all pending RPC events
+        // let mut event_count = 0;
         loop {
             match self.event_rx.try_recv() {
-                Ok(ev) => self.app.on_event(ev),
-                Err(TryRecvError::Empty) => break,
+                Ok(ev) => {
+                    // event_count += 1;
+                    self.app.on_event(ev);
+                }
+                Err(TryRecvError::Empty) => {
+                    // Commented out to reduce console spam
+                    // if event_count > 0 {
+                    //     log::debug!("[drain_events] Processed {} events", event_count);
+                    // }
+                    break;
+                }
                 Err(TryRecvError::Disconnected) => {
                     log::warn!("[WasmApp] Event channel disconnected");
                     break;
