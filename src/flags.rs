@@ -7,18 +7,18 @@
 /// UI feature flags for controlling enhanced behaviors
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UiFlags {
-    /// Consume Tab/Shift+Tab after cycling panes so egui can't hijack focus.
+    /// Consume Tab/Shift+Tab after cycling panes to prevent browser's default focus behavior.
     ///
     /// When enabled, after Tab switches panes, we consume the key event to prevent
-    /// egui from moving focus to toolbar widgets or other UI elements.
+    /// the browser from moving focus to other DOM elements or browser UI.
     ///
     /// Default: `true` (recommended for Web/Tauri)
     pub consume_tab: bool,
 
-    /// Snap egui pixels_per_point to devicePixelRatio (for crisp canvas).
+    /// Snap rendering scale to devicePixelRatio for crisp display.
     ///
-    /// When enabled, aligns the egui rendering scale to the device's pixel ratio
-    /// (snapped to nearest 0.5) to avoid fractional resampling blur on the canvas.
+    /// When enabled, aligns the rendering scale to the device's pixel ratio
+    /// (snapped to nearest 0.5) to avoid fractional scaling blur in DOM rendering.
     ///
     /// Default: `true` (recommended for Web/Tauri)
     pub dpr_snap: bool,

@@ -28,10 +28,13 @@ pub struct TxAction {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BlockRow {
+    #[cfg_attr(target_arch = "wasm32", serde(serialize_with = "crate::util_text::serialize_u64_as_string"))]
     pub height: u64,
     pub hash: String,
+    #[cfg_attr(target_arch = "wasm32", serde(serialize_with = "crate::util_text::serialize_option_u64_as_string"))]
     pub prev_height: Option<u64>,
     pub prev_hash: Option<String>,
+    #[cfg_attr(target_arch = "wasm32", serde(serialize_with = "crate::util_text::serialize_u64_as_string"))]
     pub timestamp: u64,
     pub tx_count: usize,
     pub when: String,
@@ -45,16 +48,18 @@ pub struct TxLite {
     pub signer_id: Option<String>,
     pub receiver_id: Option<String>,
     pub actions: Option<Vec<ActionSummary>>,
+    #[cfg_attr(target_arch = "wasm32", serde(serialize_with = "crate::util_text::serialize_option_u64_as_string"))]
     pub nonce: Option<u64>,
 }
 
 /// Rich transaction details parsed from near-primitives
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TxDetailed {
     pub hash: String,
     pub signer_id: String,
     pub receiver_id: String,
     pub actions: Vec<ActionSummary>,
+    #[cfg_attr(target_arch = "wasm32", serde(serialize_with = "crate::util_text::serialize_u64_as_string"))]
     pub nonce: u64,
     #[allow(dead_code)]
     pub public_key: String,
@@ -73,13 +78,17 @@ pub enum ActionSummary {
         method_name: String,
         _args_base64: String,
         args_decoded: crate::near_args::DecodedArgs,
+        #[cfg_attr(target_arch = "wasm32", serde(serialize_with = "crate::util_text::serialize_u64_as_string"))]
         gas: u64,
+        #[cfg_attr(target_arch = "wasm32", serde(serialize_with = "crate::util_text::serialize_u128_as_string"))]
         deposit: u128,
     },
     Transfer {
+        #[cfg_attr(target_arch = "wasm32", serde(serialize_with = "crate::util_text::serialize_u128_as_string"))]
         deposit: u128,
     },
     Stake {
+        #[cfg_attr(target_arch = "wasm32", serde(serialize_with = "crate::util_text::serialize_u128_as_string"))]
         stake: u128,
         public_key: String,
     },

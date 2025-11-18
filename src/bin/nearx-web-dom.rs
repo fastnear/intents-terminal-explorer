@@ -48,11 +48,25 @@ impl WasmApp {
         // Channel for RPC -> App events.
         let (event_tx, event_rx) = unbounded_channel::<AppEvent>();
 
-        // Same defaults as the TUI / existing web path.
-        let fps: u32 = 60;
-        let fps_choices: Vec<u32> = vec![20, 30, 60];
-        let keep_blocks: usize = 100;
-        let default_filter = "acct:intents.near".to_string();
+        // Read ALL configuration from environment variables at compile time
+        let fps: u32 = option_env!("RENDER_FPS")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(30);
+        let fps_choices: Vec<u32> = option_env!("RENDER_FPS_CHOICES")
+            .map(|s| s.split(',').filter_map(|n| n.trim().parse().ok()).collect())
+            .unwrap_or_else(|| vec![20, 30, 60]);
+        let keep_blocks: usize = option_env!("KEEP_BLOCKS")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(100);
+
+        // Read filter configuration from environment variables at compile time
+        let default_filter = if let Some(filter) = option_env!("DEFAULT_FILTER") {
+            filter.to_string()
+        } else if let Some(accounts) = option_env!("WATCH_ACCOUNTS") {
+            format!("acct:{}", accounts)
+        } else {
+            "acct:intents.near".to_string()
+        };
 
         // Initialize archival fetch channel (WASM version)
         let (archival_tx, archival_rx) = unbounded_channel::<u64>();
@@ -71,13 +85,18 @@ impl WasmApp {
                 ws_fetch_blocks: false,
                 render_fps: cfg_fps,
                 render_fps_choices: cfg_fps_choices,
-                poll_interval_ms: 1000,
+                poll_interval_ms: option_env!("POLL_INTERVAL_MS")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(1000),
                 poll_max_catchup: 5,
                 poll_chunk_concurrency: 4,
                 keep_blocks: cfg_keep_blocks,
-                near_node_url: "https://rpc.mainnet.fastnear.com/".to_string(),
+                near_node_url: option_env!("NEAR_NODE_URL")
+                    .unwrap_or("https://rpc.mainnet.fastnear.com/")
+                    .to_string(),
                 near_node_url_explicit: false,
-                archival_rpc_url: Some("https://archival-rpc.mainnet.fastnear.com/".to_string()),
+                archival_rpc_url: option_env!("ARCHIVAL_RPC_URL")
+                    .map(|s| s.to_string()),
                 rpc_timeout_ms: 8_000,
                 rpc_retries: 2,
                 fastnear_auth_token: {

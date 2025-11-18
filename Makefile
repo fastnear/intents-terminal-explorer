@@ -14,7 +14,7 @@ help:
 # Build web frontend (debug mode)
 web:
 	@echo "🔨 Building WASM (debug)..."
-	@cargo build \
+	@FASTNEAR_AUTH_TOKEN="$(FASTNEAR_AUTH_TOKEN)" cargo build \
 		--target wasm32-unknown-unknown \
 		--no-default-features \
 		--features dom-web \
@@ -31,7 +31,7 @@ web:
 # Build web frontend (release mode, optimized)
 web-release:
 	@echo "🔨 Building WASM (release, optimized)..."
-	@cargo build \
+	@FASTNEAR_AUTH_TOKEN="$(FASTNEAR_AUTH_TOKEN)" cargo build \
 		--target wasm32-unknown-unknown \
 		--no-default-features \
 		--features dom-web \

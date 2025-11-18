@@ -960,6 +960,12 @@ impl App {
             self.fullscreen_content_type = FullscreenContentType::ParsedDetails;
             self.fullscreen_mode = FullscreenMode::Scroll;
             self.log_debug("Exited fullscreen, back to parsed details".to_string());
+
+            // Restore the appropriate formatted view based on current selection
+            if self.pane == 1 && self.current_block().is_some() {
+                // Re-select current transaction to show formatted view
+                self.select_tx();
+            }
         } else {
             // Enter fullscreen - content depends on which pane is focused, start in Scroll mode
             self.details_fullscreen = true;
@@ -1568,39 +1574,10 @@ impl App {
         if let Some(b) = self.current_block() {
             let (filtered_txs, _, _) = self.txs();
             if let Some(tx) = filtered_txs.get(self.sel_tx) {
-                // Build PRETTY view with formatted actions
-                let mut pretty_json = json!({
-                    "hash": tx.hash,
-                    "block": b.height,
-                });
-
-                // Add signer/receiver if available
-                if let Some(ref signer) = tx.signer_id {
-                    pretty_json["signer"] = json!(signer);
-                }
-                if let Some(ref receiver) = tx.receiver_id {
-                    pretty_json["receiver"] = json!(receiver);
-                }
-                if let Some(nonce) = tx.nonce {
-                    pretty_json["nonce"] = json!(nonce);
-                }
-
-                // Format actions with human-readable gas/deposits
-                if let Some(ref actions) = tx.actions {
-                    let formatted_actions: Vec<serde_json::Value> = actions
-                        .iter()
-                        .map(crate::copy_payload::format_action)
-                        .collect();
-                    pretty_json["actions"] = json!(formatted_actions);
-                }
-
-                self.set_details_json(pretty(&pretty_json, 2));
-
-                // If in fullscreen mode showing transaction JSON, update it
-                if self.details_fullscreen && self.fullscreen_content_type == FullscreenContentType::TransactionRawJson {
-                    let raw = self.get_raw_tx_json();
-                    self.set_details_json(raw);
-                }
+                // Show raw transaction JSON (full data)
+                let val = serde_json::to_value(tx).unwrap_or(serde_json::Value::Null);
+                let raw_json = crate::json_pretty::pretty_safe(&val, 2, 100 * 1024);
+                self.set_details_json(raw_json);
             }
         }
     }
@@ -1614,35 +1591,10 @@ impl App {
             if let Some(tx) = all_txs.first() {
                 self.sel_tx = 0;
 
-                // Build PRETTY view with formatted actions (same as select_tx)
-                let mut pretty_json = json!({
-                    "hash": tx.hash,
-                    "block": block_height,
-                });
-
-                // Add signer/receiver if available
-                if let Some(ref signer) = tx.signer_id {
-                    pretty_json["signer"] = json!(signer);
-                }
-                if let Some(ref receiver) = tx.receiver_id {
-                    pretty_json["receiver"] = json!(receiver);
-                }
-                if let Some(nonce) = tx.nonce {
-                    pretty_json["nonce"] = json!(nonce);
-                }
-
-                // Format actions with human-readable gas/deposits
-                if let Some(ref actions) = tx.actions {
-                    let formatted_actions: Vec<serde_json::Value> = actions
-                        .iter()
-                        .map(crate::copy_payload::format_action)
-                        .collect();
-                    pretty_json["actions"] = json!(formatted_actions);
-                }
-
-                // Use pretty formatting to get properly formatted JSON string
-                let formatted_json = pretty(&pretty_json, 2);
-                self.set_details_json(formatted_json);
+                // Show raw transaction JSON (full data)
+                let val = serde_json::to_value(tx).unwrap_or(serde_json::Value::Null);
+                let raw_json = crate::json_pretty::pretty_safe(&val, 2, 100 * 1024);
+                self.set_details_json(raw_json);
             } else {
                 self.set_details_json("No transactions".to_string());
             }

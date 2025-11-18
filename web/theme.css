@@ -157,6 +157,12 @@ body {
   transition: color 150ms ease;
 }
 
+/* Yellow + bold title when pane is focused (matches TUI) */
+.nx-pane--focused .nx-pane-title {
+  color: var(--accent-strong);
+  font-weight: bold;
+}
+
 /* Selection slot (prominent current selection indicator) */
 .nx-selection-slot {
   padding: 4px 8px;
