@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, egui]
+    branches: [main]
   pull_request:
     branches: [main]
 
@@ -39,16 +39,16 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy (native features)
-        run: cargo clippy -p ratacat -p ref-arb-scanner --features native --all-targets -- -D warnings
+        run: cargo clippy -p nearx -p ref-arb-scanner --features native --all-targets -- -D warnings
 
       - name: Clippy (web features)
-        run: cargo clippy -p ratacat --features egui-web --target wasm32-unknown-unknown -- -D warnings
+        run: cargo clippy -p nearx --features dom-web --target wasm32-unknown-unknown -- -D warnings
 
       - name: Test (native)
         run: cargo test --features native --all
 
       - name: Test (web)
-        run: cargo test -p ratacat --features egui-web --target wasm32-unknown-unknown
+        run: cargo test -p nearx --features dom-web --target wasm32-unknown-unknown
         continue-on-error: true  # WASM tests may not all pass yet
 
   native-host-build:
@@ -71,8 +71,8 @@ jobs:
         with:
           name: native-host-${{ matrix.os }}
           path: |
-            native-host/target/release/ratacat-native-host
-            native-host/target/release/ratacat-native-host.exe
+            native-host/target/release/nearx-native-host
+            native-host/target/release/nearx-native-host.exe
           if-no-files-found: ignore
 
   tauri-build:
@@ -141,7 +141,7 @@ jobs:
       - name: Package Chrome extension
         working-directory: extension
         run: |
-          zip -r ../ratacat-chrome-extension.zip \
+          zip -r ../nearx-chrome-extension.zip \
             manifest.chrome.json \
             background.js \
             content.js
@@ -149,7 +149,7 @@ jobs:
       - name: Package Firefox extension
         working-directory: extension
         run: |
-          zip -r ../ratacat-firefox-extension.zip \
+          zip -r ../nearx-firefox-extension.zip \
             manifest.firefox.json \
             background.js \
             content.js
@@ -158,13 +158,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: chrome-extension
-          path: ratacat-chrome-extension.zip
+          path: nearx-chrome-extension.zip
 
       - name: Upload Firefox extension
         uses: actions/upload-artifact@v4
         with:
           name: firefox-extension
-          path: ratacat-firefox-extension.zip
+          path: nearx-firefox-extension.zip
 
   web-build:
     name: Build Web (WASM)
@@ -176,14 +176,14 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Install Trunk
-        run: cargo install --locked trunk
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --locked
 
       - name: Build web app
-        run: trunk build --release
+        run: make web-release
 
       - name: Upload web artifacts
         uses: actions/upload-artifact@v4
         with:
           name: web-app
-          path: dist/
+          path: web/

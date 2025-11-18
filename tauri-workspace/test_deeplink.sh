@@ -15,7 +15,7 @@ fn main() {
     println!("Testing deep-link parser...\n");
 
     let tests = vec![
-        ("myapp://ratacat", "Ratacat"),
+        ("myapp://nearx", "Nearx"),
         ("myapp://tx/DEADBEEF", "Tx"),
         ("myapp://account/foo.near", "Account"),
         ("myapp://block/42", "Block"),

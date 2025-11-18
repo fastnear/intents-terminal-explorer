@@ -5,10 +5,13 @@
 # Environment
 .env
 
-# Wasm/Web
-/dist
-/dist-egui
-*.wasm
+# Wasm/Web (wasm-bindgen output)
+web/pkg/
+dist/  # Legacy Trunk output (should not exist, but ignore just in case)
+dist-*/  # Legacy dist variants (dist-dom, dist-egui, etc.)
+
+# Archive (old .bak files, legacy code)
+archive/
 
 # IDE / OS
 .idea/
@@ -16,21 +19,16 @@
 .DS_Store
 
 # Application data
-ratacat_history.db
-ratacat_history.db-shm
-ratacat_history.db-wal
+nearx_history.db
+nearx_history.db-shm
+nearx_history.db-wal
 
 # Results and artifacts
 /results/
 
 # Logs / runtime
 *.log
-ratacat_debug.log
-
-# Web build artifacts (Trunk)
-/dist/
-/dist-egui/
-**/dist/
+nearx_debug.log
 
 # Playwright E2E artifacts
 node_modules/

@@ -89,13 +89,6 @@ fn main() {
                 }
             }
 
-            // Auto-open DevTools in debug builds
-            #[cfg(debug_assertions)]
-            if let Some(win) = app.get_webview_window("main") {
-                win.open_devtools();
-                let _ = win.set_focus();
-            }
-
             // Flush any buffered deep links to the now-ready window
             if let Some(win) = app.get_webview_window("main") {
                 let mut q = pending.0.lock().unwrap();

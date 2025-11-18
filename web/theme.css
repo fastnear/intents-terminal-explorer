@@ -1,60 +1,55 @@
 /*
  * Ratacat Unified Theme - CSS Variables
  * csli-style consistency across all targets
+ *
+ * Color variables are injected at runtime from src/theme.rs via wasm_start()
+ * This ensures TUI and web/Tauri use the same color palette.
  */
 
 :root {
-  /* Unified palette (matches src/theme.rs) */
-  --bg: #0b0e14;                    /* backdrop */
-  --panel: #0f131a;                 /* unfocused pane bg */
-  --panel-alt: #121722;             /* focused pane bg */
-  --text: #e6edf3;                  /* primary text */
-  --text-dim: #a2adbd;              /* secondary text */
-  --border: #1e2430;                /* unfocused borders */
-  --accent: #66b3ff;                /* links/highlights */
-  --accent-strong: #3399ff;         /* focused borders */
-  --sel-bg: #1e2a3a;                /* selection background */
-  --success: #6bdc96;               /* success */
-  --warn: #ffcc66;                  /* warnings */
-  --error: #ff6b6b;                 /* errors */
+  /* Color variables (injected by theme.rs)
+   * --bg, --panel, --panel-alt, --fg, --fg-dim, --border,
+   * --accent, --accent-strong, --sel-bg, --success, --warn, --error,
+   * --json-bg, --json-key, --json-string, --json-number, --json-bool, --json-struct
+   */
 
-  /* Styling metrics (match egui theme) */
-  --radius: 4px;                    /* border radius */
-  --stroke: 1px;                    /* border width */
-  --spacing: 8px;                   /* item spacing */
+  /* Non-color styling metrics - DOS-ish flat design */
+  --radius: 0;                      /* square corners for TUI feel */
+  --stroke: 1px;                    /* thin borders like terminal */
+  --spacing: 2px;                   /* minimal gaps like TUI */
+
+  /* Computed hover states (fallback only - injected by theme.rs) */
+  --hover-border: #6d7379;          /* border + ~10% brightness */
+
+  /* Legacy fallback colors (if theme.rs injection fails) */
+  --bg:           #0b0e14;
+  --panel:        #0f131a;
+  --panel-alt:    #1a2030;
+  --border:       #5d636d;
+  --border-focus: #ffcc00;
+  --fg:           #e6edf3;
+  --fg-dim:       #a2adbd;
 }
 
 /* Apply theme to document */
 html,
 body {
+  margin: 0;
   background-color: var(--bg);
-  color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Mono", "Liberation Mono", Consolas, monospace;
+  color: var(--fg);
+  font-family: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;      /* DOS-like smaller font */
+  line-height: 1.4;
   -webkit-font-smoothing: antialiased;
   -webkit-text-size-adjust: 100%;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  line-height: 1.45;
-  cursor: default; /* Default cursor; set pointer from code when rows are hoverable */
+  cursor: default;
 }
 
-/* Global rendering clarity for canvas-based UIs (egui + ratatui texture) */
-canvas,
-img,
-video {
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-  image-rendering: -moz-crisp-edges;
-  image-rendering: -webkit-optimize-contrast;
-}
-
-/* Legacy canvas ID (kept for backwards compat) */
-#the_canvas_id {
-  /* Crisp pixel rendering for terminal texture */
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-  image-rendering: -moz-crisp-edges;
-  image-rendering: -webkit-optimize-contrast;
+/* Kill all modern web prettiness globally */
+* {
+  box-shadow: none !important;
 }
 
 /* Accessibility: ensure focus is always visible */
@@ -67,9 +62,36 @@ video {
 @media (prefers-contrast: high) {
   :root {
     --bg: #000000;
-    --text: #ffffff;
+    --fg: #ffffff;
     --border: #ffffff;
   }
+}
+
+/* App layout structure */
+.nx-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.nx-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 2.2fr 2.4fr 3.4fr; /* Blocks | Tx | Details ratio */
+  gap: 4px;
+  padding: 4px;
+}
+
+.nx-header,
+.nx-footer {
+  padding: 3px 8px;
+  font-size: 11px;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  background: #05070c;
+  border-bottom: 1px solid #202636;
 }
 
 /* Minimal scrollbar styling to match theme */
@@ -88,11 +110,228 @@ video {
   background: var(--panel);
 }
 
-/* Panel styling for DOM elements (toasts, overlays) */
-.nx-panel {
+/* Pane structure and styling */
+.nx-pane {
+  border: 1px solid var(--border);
   background: var(--panel);
-  color: var(--text);
-  border: var(--stroke) solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 4px;
+  min-height: 0;              /* allow flex/grid to size panes */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: border-color 150ms ease,
+              background-color 150ms ease,
+              box-shadow 150ms ease,
+              border-width 150ms ease;
+}
+
+.nx-pane--focused {
+  /* DOS aesthetic: yellow top border only (match TUI), gray sides/bottom */
+  border-top: 2px solid var(--accent-strong) !important;
+  border-left: 1px solid var(--border) !important;
+  border-right: 1px solid var(--border) !important;
+  border-bottom: 1px solid var(--border) !important;
+  background: var(--panel-alt) !important;
+  margin-top: -1px; /* Compensate for 2px top border to prevent layout shift */
+  box-shadow: none !important; /* No glow effects - clean DOS aesthetic */
+}
+
+.nx-pane-header {
+  padding: 3px 6px;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-dim);
+  border-bottom: 1px solid rgba(93, 99, 109, 0.4);
+}
+
+.nx-pane-body {
+  flex: 1;
+  overflow: auto;
+  scroll-behavior: smooth;
+  font-size: 18px;
+}
+
+.nx-pane-title {
+  font-size: 19px;
+  transition: color 150ms ease;
+}
+
+/* Selection slot (prominent current selection indicator) */
+.nx-selection-slot {
+  padding: 4px 8px;
+  font-size: 17px;  /* matches body font for prominence */
+  font-weight: bold;
+  color: var(--accent-strong, #ffcc00);
+  background: var(--panel-alt, #1a2030);
+  border-bottom: 1px solid var(--border, #5d636d);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* List and row styling */
+.nx-blocks-list,
+.nx-txs-list {
+  height: 100%;
+  overflow-y: auto;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+}
+
+.nx-row {
+  padding: 2px 8px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  cursor: default;
+  transition: background-color 120ms ease,
+              opacity 120ms ease;
+}
+
+.nx-row--selected {
+  background: var(--sel-bg); /* Use selection background, not panel-alt */
+  font-weight: bold; /* Match TUI Modifier::BOLD */
+}
+
+/* Chevron prefix for selected rows (match TUI highlight_symbol) */
+.nx-row--selected::before {
+  content: '› ';
+  color: var(--accent-strong, #ffcc00); /* Yellow for better contrast */
+  font-weight: bold;
+}
+
+.nx-row:hover {
+  background: var(--hover-bg, #151b23); /* Use theme token */
+}
+
+.nx-row--backfill-pending,
+.nx-row--backfill-loading {
+  opacity: 0.7;
+  font-style: italic;
+  color: var(--fg-dim);
+}
+
+/* Details pane specific styling */
+.nx-details-title {
+  padding: 3px 8px;
+  font-size: 15px;
+  color: var(--fg-dim);
+  border-bottom: 1px solid rgba(93, 99, 109, 0.4);
+}
+
+.nx-details-body {
+  margin: 0;
+  padding: 4px 8px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 18px;  /* slightly smaller than body (20px) for dense JSON */
+  line-height: 1.35;
+  white-space: pre;
+  overflow: auto;
+}
+
+/* === Fullscreen Modal === */
+.fullscreen-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background-color: var(--panel);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fullscreen-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   padding: var(--spacing);
+  background-color: var(--panel-alt);
+  border-bottom: var(--stroke) solid var(--border);
+}
+
+.fullscreen-header h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.fullscreen-mode-indicator {
+  display: inline-block;
+  padding: 4px 8px;
+  margin-left: 12px;
+  background-color: var(--accent);
+  color: var(--bg);
+  border-radius: calc(var(--radius) / 2);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.fullscreen-hint {
+  font-size: 18px;  /* slightly smaller than body (20px) */
+  color: var(--fg-dim);
+}
+
+.fullscreen-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--spacing);
+}
+
+.fullscreen-content pre {
+  margin: 0;
+  font-family: inherit;
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* === Pane Focus States === */
+/* (Now using .nx-pane--focused BEM modifier defined above at line 121) */
+
+/* === Copy Flash Animation === */
+@keyframes copy-flash {
+  0%, 100% { border-color: var(--border); }
+  50% { border-color: var(--success); }
+}
+
+.nx-pane.copy-flash {
+  animation: copy-flash 300ms ease;
+}
+
+/* === Loading State === */
+.loading-indicator {
+  display: inline-block;
+  color: var(--accent);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* === Two-List Architecture: Backfill Styling === */
+/* Dimmed, italic styling for archival backfill placeholders */
+.nx-row--backfill-pending {
+  opacity: 0.6;
+  font-style: italic;
+  color: var(--fg-dim);
+}
+
+.nx-row--backfill-loading {
+  opacity: 0.8;
+  font-style: italic;
+  color: var(--fg-dim);
+}
+
+/* Loading indicator within backfill row */
+.nx-loading {
+  color: var(--accent);
+  font-style: normal;
+  animation: pulse 1.5s ease-in-out infinite;
 }

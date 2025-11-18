@@ -28,7 +28,7 @@ pub mod app {
 
     /// Maximum number of blocks to cache for navigation context
     ///
-    /// This cache preserves ±12 blocks around the selected block when
+    /// This cache preserves ±50 blocks around the selected block when
     /// the block ages out of the main rolling buffer.
     pub const CACHE_SIZE_BLOCKS: usize = 50;
 
@@ -36,7 +36,15 @@ pub mod app {
     ///
     /// When a selected block ages out, we cache this many blocks before
     /// and after it to maintain navigation context.
-    pub const CACHE_CONTEXT_BLOCKS: usize = 12;
+    pub const CACHE_CONTEXT_BLOCKS: usize = 50;
+
+    /// Window size for archival backfill around selected block
+    ///
+    /// When entering fullscreen mode or navigating to a block, the app
+    /// proactively requests this many blocks ahead and behind the selection
+    /// from the archival RPC endpoint. This enables smooth navigation through
+    /// historical blocks without per-block fetch latency.
+    pub const ARCHIVAL_CONTEXT_BLOCKS: u64 = 50;
 }
 
 /// User-facing message strings

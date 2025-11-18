@@ -47,18 +47,6 @@ fn deeplink_frontend_ready() -> Vec<DeepLinkEvent> {
     queue().lock().unwrap().drain(..).collect()
 }
 
-#[tauri::command]
-fn open_devtools(_window: tauri::WebviewWindow) {
-    log::info!("Opening DevTools");
-    _window.open_devtools();
-}
-
-#[tauri::command]
-fn close_devtools(_window: tauri::WebviewWindow) {
-    log::info!("Closing DevTools");
-    _window.close_devtools();
-}
-
 fn normalize(raw: &str) -> Option<String> {
     log::info!("🔵 [NORMALIZE] ==================== START ====================");
     log::info!("🔵 [NORMALIZE] Input raw: {raw:?}");
@@ -137,7 +125,7 @@ fn parse_event(s: &str) -> Option<DeepLinkEvent> {
         return None;
     }
 
-    // host is your "resource" (tx/account/block/open/ratacat)
+    // host is your "resource" (tx/account/block/open/nearx)
     let host = url.host_str().unwrap_or_default().to_string();
     log::info!("🟣 [PARSE-EVENT] Extracted host: {host:?}");
 
@@ -235,9 +223,9 @@ fn spawn_sidecar_if_present(app: &tauri::AppHandle) {
     use std::process::Command;
 
     let name = if cfg!(target_os = "windows") {
-        "ratacat-native-host.exe"
+        "nearx-native-host.exe"
     } else {
-        "ratacat-native-host"
+        "nearx-native-host"
     };
 
     match app.path().resolve(name, BaseDirectory::Resource) {
@@ -275,8 +263,8 @@ fn handle_urls<R: Runtime>(app: &tauri::AppHandle<R>, raws: &[String]) {
                     ev.path,
                     ev.query
                 );
-                // Optional: special-case nearx://ratacat to open a secondary window
-                if ev.host == "ratacat" {
+                // Optional: special-case nearx://nearx to open a secondary window
+                if ev.host == "nearx" {
                     log::info!(
                         "[HANDLE-URLS] NEARx deep link - opening native TUI (not yet implemented)"
                     );
@@ -347,8 +335,6 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             deeplink_frontend_ready,
-            open_devtools,
-            close_devtools,
             copy_text
         ])
         .setup(|app| {

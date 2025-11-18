@@ -68,8 +68,8 @@ impl Default for Tokens {
                 widget_radius_px: 3,
                 row_height_px: 22.0, // monospace ~13–14pt at default dpi
                 // Web felt small; bump monospace a bit for retina.
-                code_font_px: 14.0,
-                ui_font_px: 14.0,
+                code_font_px: 16.0,
+                ui_font_px: 19.0,
                 filter_rows: 3,
                 filter_rows_collapsed: 1,
             },

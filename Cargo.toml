@@ -14,19 +14,19 @@ path = "src/bin/nearx.rs"
 required-features = ["native"]
 
 [[bin]]
-name = "ratacat-proxy"
-path = "src/bin/ratacat-proxy.rs"
+name = "nearx-proxy"
+path = "src/bin/nearx-proxy.rs"
 required-features = ["proxy"]
 
 [[bin]]
-name = "nearx-web"
-path = "src/bin/nearx-web.rs"
-required-features = ["egui-web"]
+name = "nearx-web-dom"
+path = "src/bin/nearx-web-dom.rs"
+required-features = ["dom-web"]
 
 [workspace]
 resolver = "2"
 members = [
-  ".",                       # ratacat root
+  ".",                       # nearx root
   "plugins/tx-analyzer",
   "plugins/validator-monitor"
 ]
@@ -81,12 +81,7 @@ proxy = [
     "tokio/rt-multi-thread",
 ]
 
-egui-web = [
-    "dep:egui",
-    "dep:eframe",
-    "dep:egui_extras",
-    "dep:egui_ratatui",
-    "dep:soft_ratatui",
+dom-web = [
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
     "dep:js-sys",
@@ -147,12 +142,7 @@ futures-util = { version = "0.3", optional = true }
 rand = { version = "0.8", optional = true }
 dotenvy = { version = "0.15", optional = true }
 
-# Web-only dependencies
-egui = { version = "0.32", optional = true }
-eframe = { version = "0.32", optional = true, default-features = false, features = ["glow", "default_fonts"] }
-egui_extras = { version = "0.32", optional = true }
-egui_ratatui = { path = "vendor/egui_ratatui", optional = true }
-soft_ratatui = { path = "vendor/soft_ratatui", optional = true, features = ["embedded-graphics", "unicodefonts"] }
+# Web-only dependencies (DOM frontend with wasm-bindgen)
 wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 js-sys = { version = "0.3", optional = true }

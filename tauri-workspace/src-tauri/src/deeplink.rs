@@ -3,7 +3,7 @@ use std::str::FromStr;
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeepLink {
-    Ratacat,
+    Nearx,
     Tx { hash: String },
     Account { id: String },
     Block { height: u64 },
@@ -33,8 +33,8 @@ impl FromStr for DeepLink {
         let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
         let path = url.path().trim_start_matches('/');
 
-        if host == "ratacat" || path.starts_with("ratacat") {
-            return Ok(DeepLink::Ratacat);
+        if host == "nearx" || path.starts_with("nearx") {
+            return Ok(DeepLink::Nearx);
         }
 
         if host == "tx" {
@@ -95,10 +95,10 @@ impl FromStr for DeepLink {
 mod tests {
     use super::*;
     #[test]
-    fn ok_ratacat() {
+    fn ok_nearx() {
         assert_eq!(
-            "near://ratacat".parse::<DeepLink>().unwrap(),
-            DeepLink::Ratacat
+            "near://nearx".parse::<DeepLink>().unwrap(),
+            DeepLink::Nearx
         );
     }
     #[test]

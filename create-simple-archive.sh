@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Simple archive script for non-git projects
-# Creates: ratacat-archive.zip
+# Creates: nearx-archive.zip
 
 set -e
 
-PROJECT_NAME="ratacat"
+PROJECT_NAME="nearx"
 ARCHIVE_NAME="${PROJECT_NAME}-archive.zip"
 
 echo "Creating archive of ${PROJECT_NAME}..."
@@ -16,8 +16,10 @@ echo "Creating archive of ${PROJECT_NAME}..."
 # Create archive excluding common build artifacts and temporary files
 zip -r "${ARCHIVE_NAME}" . \
     -x "target/*" \
+    -x "nearx_debug.log" \
     -x "*.zip" \
     -x ".DS_Store" \
+    -x ".idea/*" \
     -x "Cargo.lock" \
     -x ".claude/*" \
     -x "__pycache__/*" \
@@ -28,8 +30,11 @@ zip -r "${ARCHIVE_NAME}" . \
     -x "native-host/*" \
     -x "tauri-workspace/*" \
     -x "dist/*" \
+    -x "dist-dom/*" \
     -x "dist-egui/*" \
     -x "node_modules/*" \
+    -x "web/pkg/*" \
+    -x ".env" \
     -x "Trunk.toml" \
     -x "index.html" \
     -x "debug.log" \

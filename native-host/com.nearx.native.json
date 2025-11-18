@@ -1,0 +1,9 @@
+{
+  "name": "com.nearx.native",
+  "description": "NEARx native messaging host",
+  "path": "/REPLACE/WITH/ABSOLUTE/PATH/TO/nearx-native-host",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://REPLACE_WITH_EXTENSION_ID/"
+  ]
+}

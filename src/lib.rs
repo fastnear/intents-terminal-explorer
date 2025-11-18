@@ -7,7 +7,7 @@
 //!
 //! Ratacat is built to work in two modes:
 //! - **Native**: Terminal UI using crossterm and ratatui
-//! - **Web**: Browser UI using egui, eframe, and egui_ratatui
+//! - **Web**: DOM-based browser UI with WASM core
 //!
 //! ## Usage
 //!
@@ -18,13 +18,15 @@
 //!
 //! For web builds:
 //! ```bash
-//! trunk build --features web
+//! make web-release
 //! ```
 
 // Core modules (available on all platforms)
 pub mod config;
+pub mod constants;
 pub mod json_auto_parse;
 pub mod json_pretty;
+pub mod json_renderer;
 pub mod json_syntax;
 pub mod types;
 pub mod util_text;
@@ -56,6 +58,12 @@ pub mod flags;
 // Debug logging system (available on all platforms)
 pub mod debug;
 
+// UI snapshot types for DOM-based rendering (all platforms)
+pub mod ui_snapshot;
+
+// Pure TUI renderer (draws from UiSnapshot)
+pub mod ui_tui_snapshot;
+
 // History module (has native-only implementation internally)
 pub mod history;
 
@@ -63,7 +71,11 @@ pub mod history;
 #[cfg(feature = "native")]
 pub mod source_ws;
 
+#[cfg(feature = "native")]
 pub mod archival_fetch;
+#[cfg(target_arch = "wasm32")]
+pub mod archival_fetch_wasm;
+
 pub mod source_rpc;
 
 #[cfg(feature = "native")]
@@ -97,32 +109,16 @@ pub mod util;
 pub mod copy_api;
 pub mod copy_payload;
 
-// egui helpers (only available when egui is enabled)
-// Temporarily disabled - needs API updates for egui 0.32
-// #[cfg(feature = "egui-web")]
-// pub mod egui_extra;
-
-// Arbitrage engine modules - MOVED to ref-arb-scanner workspace
-// These modules are no longer part of the main crate since ref-arb-scanner
-// has been extracted to a separate workspace member.
-// See: ref-arb-scanner/ directory
-//
-// #[cfg(feature = "native")]
-// pub mod arb_engine;
-// #[cfg(feature = "native")]
-// pub mod ref_finance_client;
-// #[cfg(feature = "native")]
-// pub mod price_discovery;
-// #[cfg(feature = "native")]
-// pub mod arb_config;
-// #[cfg(feature = "native")]
-// pub mod slippage;
-// #[cfg(feature = "native")]
-// pub mod risk_manager;
-// #[cfg(feature = "native")]
-// pub mod execution_engine;
 
 // Re-export commonly used types
 pub use app::{App, BlockLite, InputMode};
 pub use config::{Config, Source};
 pub use types::{AppEvent, BlockRow, Mark, TxLite};
+
+// **Stable UI Contract** - All frontends (TUI, Web, Tauri) use these types
+// - UiSnapshot: Read-only view of app state (Rust → JS/TUI)
+// - UiAction: User input events (JS/TUI → Rust)
+// - apply_ui_action: Central dispatcher for all UI actions
+// - draw_from_snapshot: Pure TUI renderer (reference layout for DOM)
+pub use ui_snapshot::{apply_ui_action, UiAction, UiSnapshot};
+pub use ui_tui_snapshot::draw_from_snapshot;

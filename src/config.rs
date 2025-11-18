@@ -28,12 +28,12 @@ impl std::fmt::Display for Source {
     }
 }
 
-/// Ratacat - NEAR Blockchain Transaction Viewer
+/// NEARx - NEAR Blockchain Transaction Viewer
 ///
 /// High-performance terminal UI for monitoring NEAR Protocol transactions in real-time.
 /// Configuration priority: CLI args > Environment variables > Defaults
 #[derive(Parser, Debug)]
-#[command(name = "ratacat")]
+#[command(name = "nearx")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "NEAR Blockchain Transaction Viewer", long_about = None)]
 pub struct CliArgs {
@@ -311,7 +311,10 @@ pub fn load() -> Result<Config> {
         archival_rpc_url,
         rpc_timeout_ms,
         rpc_retries,
-        fastnear_auth_token: args.fastnear_auth_token.or_else(fastnear_token),
+        fastnear_auth_token: args.fastnear_auth_token.or_else(|| {
+            let token = fastnear_token();
+            if token.is_empty() { None } else { Some(token) }
+        }),
         default_filter,
         theme,
     })
@@ -339,33 +342,19 @@ fn validate_url(url: &str, name: &str) -> Result<()> {
 
 /// Cross-target FastNEAR token resolution.
 /// Avoids runtime env reads on WASM (which cause panics).
-pub fn fastnear_token() -> Option<String> {
-    // Highest priority: user auth (web/tauri) if present
-    #[cfg(feature = "egui-web")]
-    {
-        if let Some(t) = crate::auth::token_string() {
-            if !t.is_empty() {
-                return Some(t);
-            }
-        }
-    }
-
-    // Fallback: env var. On wasm, do not read at runtime!
+pub fn fastnear_token() -> String {
+    // Native & proxy: read at runtime.
     #[cfg(not(target_arch = "wasm32"))]
     {
-        std::env::var("FASTNEAR_AUTH_TOKEN")
-            .ok()
-            .filter(|s| !s.is_empty())
+        std::env::var("FASTNEAR_AUTH_TOKEN").unwrap_or_default()
     }
+
+    // Web/Tauri (wasm): bake token at compile time if available.
     #[cfg(target_arch = "wasm32")]
     {
-        // Compile-time embed; present if set when Cargo built the wasm.
-        if let Some(t) = option_env!("FASTNEAR_AUTH_TOKEN") {
-            if !t.is_empty() {
-                return Some(t.to_string());
-            }
-        }
-        None
+        option_env!("FASTNEAR_API_TOKEN_WEB")
+            .unwrap_or("")
+            .to_string()
     }
 }
 

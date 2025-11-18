@@ -4,7 +4,10 @@
   "version": "0.4.0",
   "identifier": "com.fastnear.nearx",
   "build": {
-    "frontendDist": "../../dist-egui"
+    "beforeDevCommand": "make -C .. dev",
+    "beforeBuildCommand": "make -C .. web",
+    "devUrl": "http://localhost:8000",
+    "frontendDist": "../../web"
   },
   "app": {
     "withGlobalTauri": true,
@@ -21,14 +24,12 @@
       }
     ],
     "security": {
-      "csp": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://accounts.google.com https://oauth2.googleapis.com https://rpc.mainnet.near.org https://rpc.testnet.near.org https://rpc.mainnet.fastnear.com https://rpc.testnet.fastnear.com https://archival-rpc.mainnet.fastnear.com https://archival-rpc.testnet.fastnear.com https://*.near.org http://localhost:* ws: wss:; font-src 'self'; base-uri 'none'; frame-ancestors 'none';",
+      "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://accounts.google.com https://oauth2.googleapis.com https://rpc.mainnet.near.org https://rpc.testnet.near.org https://rpc.mainnet.fastnear.com https://rpc.testnet.fastnear.com https://archival-rpc.mainnet.fastnear.com https://archival-rpc.testnet.fastnear.com https://*.near.org http://localhost:* ws: wss:; font-src 'self'; base-uri 'none'; frame-ancestors 'none';",
       "capabilities": ["main-capability"]
     }
   },
   "bundle": {
-    "resources": [
-      "../../native-host/target/release/ratacat-native-host"
-    ]
+    "resources": []
   },
   "plugins": {
     "deep-link": {

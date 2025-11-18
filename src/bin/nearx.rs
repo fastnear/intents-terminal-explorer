@@ -11,9 +11,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::{
-    collections::HashSet,
     io,
-    path::PathBuf,
     time::{Duration, Instant},
 };
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -23,12 +21,12 @@ use nearx::{
     app::{App, InputMode},
     archival_fetch,
     config::{load, Source},
-    credentials,
     marks::JumpMarks,
     platform::{BlockPersist, History, TxPersist},
     source_rpc, source_ws,
     types::AppEvent,
     ui,
+    ui_snapshot::{apply_ui_action, UiAction},
     util::dblclick::DblClick,
 };
 
@@ -45,24 +43,6 @@ async fn main() -> Result<()> {
     // Initialize SQLite history (non-blocking)
     let db_path = std::env::var("SQLITE_DB_PATH").unwrap_or_else(|_| "./nearx_history.db".into());
     let history = History::start(&db_path)?;
-
-    // Start credentials watcher
-    let (creds_tx, creds_rx) = unbounded_channel::<HashSet<String>>();
-    let creds_base = std::env::var("NEAR_CREDENTIALS_DIR")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".near-credentials"))
-        })
-        .unwrap_or_else(|| PathBuf::from(".near-credentials"));
-    let network = std::env::var("NEAR_NETWORK").unwrap_or_else(|_| "mainnet".into());
-
-    // Start watcher (don't fail if directory doesn't exist - it will be created)
-    tokio::spawn(async move {
-        let _ = credentials::start_credentials_watcher(creds_base, network, creds_tx).await;
-    });
 
     // terminal
     enable_raw_mode()?;
@@ -133,7 +113,7 @@ async fn main() -> Result<()> {
 
     // main loop
     let mouse_enabled =
-        run_loop(&mut app, &mut terminal, rx, history, jump_marks, creds_rx).await?;
+        run_loop(&mut app, &mut terminal, rx, history, jump_marks).await?;
 
     // cleanup
     source_task.abort();
@@ -154,7 +134,6 @@ async fn run_loop(
     mut rx: UnboundedReceiver<AppEvent>,
     history: History,
     mut jump_marks: JumpMarks,
-    mut creds_rx: UnboundedReceiver<HashSet<String>>,
 ) -> Result<bool> {
     let mut last_frame = Instant::now();
     let mut mouse_enabled = false;
@@ -222,10 +201,8 @@ async fn run_loop(
             app.on_event(ev);
         }
 
-        // Handle credential updates
-        while let Ok(accounts) = creds_rx.try_recv() {
-            app.set_owned_accounts(accounts);
-        }
+        // Periodic housekeeping (backfill chain, etc).
+        app.on_tick(Instant::now());
 
         if last_frame.elapsed() >= budget {
             let marks_list = jump_marks.list();
@@ -297,6 +274,36 @@ fn handle_mouse(
     Ok(())
 }
 
+/// Convert crossterm KeyEvent to UiAction::Key (generic keyboard input)
+/// Returns None for TUI-specific commands (quit, marks, search, filter modes, etc.)
+fn key_event_to_ui_action(k: KeyEvent) -> Option<UiAction> {
+    let code_str = match k.code {
+        KeyCode::Char(c) => c.to_string(),
+        KeyCode::Enter => "Enter".to_string(),
+        KeyCode::Backspace => "Backspace".to_string(),
+        KeyCode::Left => "ArrowLeft".to_string(),
+        KeyCode::Right => "ArrowRight".to_string(),
+        KeyCode::Up => "ArrowUp".to_string(),
+        KeyCode::Down => "ArrowDown".to_string(),
+        KeyCode::Home => "Home".to_string(),
+        KeyCode::End => "End".to_string(),
+        KeyCode::PageUp => "PageUp".to_string(),
+        KeyCode::PageDown => "PageDown".to_string(),
+        KeyCode::Tab => "Tab".to_string(),
+        KeyCode::BackTab => "Tab".to_string(), // Will be handled with shift modifier
+        KeyCode::Esc => "Escape".to_string(),
+        _ => return None, // Ignore other keys
+    };
+
+    Some(UiAction::Key {
+        code: code_str,
+        ctrl: k.modifiers.contains(KeyModifiers::CONTROL),
+        alt: k.modifiers.contains(KeyModifiers::ALT),
+        shift: k.modifiers.contains(KeyModifiers::SHIFT) || k.code == KeyCode::BackTab,
+        meta: false, // Meta key not commonly used in terminals
+    })
+}
+
 async fn handle_key(app: &mut App, k: KeyEvent, history: &History, jump_marks: &mut JumpMarks) {
     // Handle filter input mode separately
     if app.input_mode() == InputMode::Filter {
@@ -338,6 +345,17 @@ async fn handle_key(app: &mut App, k: KeyEvent, history: &History, jump_marks: &
         return;
     }
 
+    // Handle keyboard shortcuts overlay (if visible, only ?/Esc work)
+    if app.show_shortcuts() {
+        match k.code {
+            KeyCode::Char('?') | KeyCode::Esc => {
+                app.hide_shortcuts();
+            }
+            _ => {} // Swallow all other keys
+        }
+        return;
+    }
+
     // Handle marks overlay mode
     if app.input_mode() == InputMode::Marks {
         match k.code {
@@ -366,79 +384,34 @@ async fn handle_key(app: &mut App, k: KeyEvent, history: &History, jump_marks: &
         return;
     }
 
-    // Handle jump-pending mode (waiting for label character)
-    if app.input_mode() == InputMode::JumpPending {
-        if let KeyCode::Char(c) = k.code {
-            let label = c.to_string();
-            if let Some(mark) = jump_marks.get_by_label(&label) {
-                app.jump_to_mark(mark);
-            }
-        }
-        app.close_marks(); // Exit jump-pending mode
-        return;
-    }
-
     // Normal mode keys
-    // Focus pattern: Tab/Shift+Tab switch between panes (0=Blocks, 1=Txs, 2=Details)
-    // Arrow keys only affect the currently focused pane
+    // TUI-specific commands first (quit, marks, search, FPS, filter)
     match (k.code, k.modifiers) {
         (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
             app.on_event(AppEvent::Quit);
         }
 
-        // Pane focus switching (circular navigation)
-        (KeyCode::Tab, _) => {
-            app.log_debug(format!("KEY: Tab pressed, pane={}", app.pane()));
-            app.next_pane();
-        }
-        (KeyCode::BackTab, _) => {
-            app.log_debug(format!("KEY: BackTab pressed, pane={}", app.pane()));
-            app.prev_pane();
+        // FPS cycling (TUI-specific performance control)
+        (KeyCode::Char('o'), KeyModifiers::CONTROL) => {
+            app.cycle_fps();
         }
 
-        // Navigation within focused pane
-        (KeyCode::Up, _) => {
-            app.log_debug(format!("KEY: Up pressed, pane={}", app.pane()));
-            app.up();
+        // Search mode (TUI-specific, uses SQLite history)
+        (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
+            app.start_search();
         }
-        (KeyCode::Down, _) => {
-            app.log_debug(format!("KEY: Down pressed, pane={}", app.pane()));
-            app.down();
+
+        // Filter mode (TUI-specific)
+        (KeyCode::Char('/'), _) | (KeyCode::Char('f'), KeyModifiers::NONE) => {
+            app.start_filter();
         }
-        (KeyCode::Left, _) => app.left(), // Jump to top of current list
-        (KeyCode::Right, _) => app.right(), // Paginate down 12 items
-        (KeyCode::PageUp, _) => app.page_up(20),
-        (KeyCode::PageDown, _) => app.page_down(20),
-        (KeyCode::Home, _) => {
-            app.log_debug(format!("KEY: Home pressed, pane={}", app.pane()));
-            if app.pane() == 0 {
-                // Home in blocks pane: return to auto-follow
-                app.return_to_auto_follow();
-            } else {
-                app.home();
+
+        // Escape clears filter if non-empty
+        (KeyCode::Esc, _) => {
+            if !app.filter_query().is_empty() {
+                app.clear_filter();
             }
         }
-        (KeyCode::End, _) => app.end(),
-        (KeyCode::Enter, _) => app.select_tx(),
-        (KeyCode::Char(' '), _) => app.toggle_details_fullscreen(), // Spacebar to toggle fullscreen
-        (KeyCode::Char('o'), KeyModifiers::CONTROL) => app.cycle_fps(),
-        (KeyCode::Char('c'), _) => {
-            // Copy content using unified copy_api (pane-aware)
-            if nearx::copy_api::copy_current(app) {
-                let msg = match app.pane() {
-                    0 => "Copied block info".to_string(),
-                    1 => "Copied tx hash".to_string(),
-                    2 => "Copied details".to_string(),
-                    _ => "Copied".to_string(),
-                };
-                app.show_toast(msg);
-            } else {
-                app.show_toast("Copy failed".to_string());
-            }
-        }
-        (KeyCode::Char('f'), KeyModifiers::CONTROL) => app.start_search(),
-        (KeyCode::Char('/'), _) | (KeyCode::Char('f'), _) => app.start_filter(),
-        (KeyCode::Esc, _) => app.clear_filter(),
         // Jump marks
         (KeyCode::Char('m'), _) => {
             // Set mark with auto-label
@@ -465,13 +438,21 @@ async fn handle_key(app: &mut App, k: KeyEvent, history: &History, jump_marks: &
                 jump_marks.set_pinned(&label, true).await;
             }
         }
-        (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
-            // Toggle owned-only filter
-            app.toggle_owned_filter();
-        }
         (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
             // Toggle debug panel visibility
             app.toggle_debug_panel();
+        }
+        (KeyCode::Char('?'), KeyModifiers::NONE) => {
+            // Toggle keyboard shortcuts overlay (infrastructure for future TUI help)
+            // Note: TUI doesn't render help overlay yet (Web/Tauri only for now).
+            // For now, toggling shortcuts_visible is a no-op in TUI rendering.
+            // Users rely on CLAUDE.md documentation.
+            apply_ui_action(app, UiAction::ToggleShortcuts);
+        }
+        (KeyCode::Char('c'), KeyModifiers::NONE) => {
+            // Copy focused pane content via shared UiAction path
+            // (keeps TUI/Web/Tauri copy behavior and toasts in perfect lockstep)
+            apply_ui_action(app, UiAction::CopyFocusedJson);
         }
         (KeyCode::Char('M'), KeyModifiers::SHIFT) => {
             // Open marks overlay
@@ -479,8 +460,8 @@ async fn handle_key(app: &mut App, k: KeyEvent, history: &History, jump_marks: &
             app.open_marks(marks_list);
         }
         (KeyCode::Char('\''), _) => {
-            // Enter jump-pending mode (wait for label)
-            app.start_jump_pending();
+            // Quick jump feature (jump-pending mode) not yet implemented
+            // TODO: implement single-char jump navigation
         }
         (KeyCode::Char('['), _) => {
             // Jump to previous mark
@@ -494,6 +475,11 @@ async fn handle_key(app: &mut App, k: KeyEvent, history: &History, jump_marks: &
                 app.jump_to_mark(&mark);
             }
         }
-        _ => {}
+        _ => {
+            // All other keys: convert to generic UiAction::Key and apply
+            if let Some(action) = key_event_to_ui_action(k) {
+                apply_ui_action(app, action);
+            }
+        }
     }
 }

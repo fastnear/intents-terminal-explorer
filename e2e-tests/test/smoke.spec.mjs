@@ -6,7 +6,7 @@ import { Builder, By, Capabilities } from 'selenium-webdriver';
 import { expect } from 'chai';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '..', '..'); // e2e-tests -> ratacat root
+const repoRoot = path.resolve(__dirname, '..', '..'); // e2e-tests -> nearx root
 
 // Build a debug, non-bundled app with the e2e feature enabled
 const appDir = path.resolve(repoRoot, 'tauri-workspace');

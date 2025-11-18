@@ -25,7 +25,7 @@
 //! ```
 
 use crate::platform;
-use crate::{copy_payload, App};
+use crate::App;
 use serde_json::Value;
 
 /// Which pane are we copying from?
@@ -52,15 +52,14 @@ pub fn focused_pane(app: &App) -> CopyPane {
 pub fn payload_for(app: &App, pane: CopyPane) -> Option<Value> {
     match pane {
         CopyPane::Blocks => {
-            let block = app.current_block()?;
-            let (txs, _, _) = app.txs();
-            Some(copy_payload::block_summary_json(block, &txs))
+            // Use raw block JSON (same as fullscreen shows)
+            let raw_json = app.get_raw_block_json();
+            serde_json::from_str::<Value>(&raw_json).ok()
         }
         CopyPane::Txs => {
-            let block = app.current_block()?;
-            let (txs, _, _) = app.txs();
-            let tx = txs.get(app.sel_tx())?;
-            Some(copy_payload::tx_summary_json(block, tx))
+            // Use raw transaction JSON (same as fullscreen shows)
+            let raw_json = app.get_raw_tx_json();
+            serde_json::from_str::<Value>(&raw_json).ok()
         }
         CopyPane::Details => {
             // Try to parse the details string as JSON

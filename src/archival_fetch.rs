@@ -1,9 +1,14 @@
+// Native-only archival fetch task (uses tokio full runtime + blocking I/O)
+#[cfg(feature = "native")]
 use crate::{config::Config, rpc_utils::fetch_block_with_txs, types::AppEvent};
+#[cfg(feature = "native")]
 use anyhow::Result;
+#[cfg(feature = "native")]
 use tokio::sync::mpsc::UnboundedReceiver;
 
 /// Background task that fetches historical blocks from archival RPC endpoint
 /// Receives block height requests and fetches them on demand
+#[cfg(feature = "native")]
 pub async fn run_archival_fetch(
     cfg: Config,
     mut fetch_rx: UnboundedReceiver<u64>,
@@ -15,27 +20,27 @@ pub async fn run_archival_fetch(
         None => return Ok(()), // No archival URL, exit immediately
     };
 
-    eprintln!("[Archival] Starting archival fetch task with URL: {archival_url}");
+    log::debug!("[Archival] Starting archival fetch task with URL: {archival_url}");
 
     // Get effective auth token with priority: User token (from auth module) → Config token → None
     let get_token = || -> Option<String> {
         // Try user token first (from authenticated login via auth module)
         if let Some(token) = crate::auth::token_string() {
-            eprintln!("[Archival] Using user FastNEAR token (from auth)");
+            log::debug!("[Archival] Using user FastNEAR token (from auth)");
             return Some(token);
         }
         // Fall back to config token (from env or URL param)
         if let Some(ref token) = cfg.fastnear_auth_token {
-            eprintln!("[Archival] Using config FastNEAR token (env/URL)");
+            log::debug!("[Archival] Using config FastNEAR token (env/URL)");
             Some(token.clone())
         } else {
-            eprintln!("[Archival] ⚠️ No FastNEAR token (may hit rate limits on archival endpoint)");
+            log::warn!("[Archival] No FastNEAR token (may hit rate limits on archival endpoint)");
             None
         }
     };
 
     while let Some(height) = fetch_rx.recv().await {
-        eprintln!("[Archival] Received request to fetch block #{height}");
+        log::debug!("[Archival] Received request to fetch block #{height}");
 
         let token = get_token(); // Get current token (may have been updated)
 
@@ -49,24 +54,24 @@ pub async fn run_archival_fetch(
         .await
         {
             Ok(block) => {
-                eprintln!(
+                log::info!(
                     "[Archival] Successfully fetched block #{} ({} txs)",
                     height, block.tx_count
                 );
                 // Send block via existing event channel
                 if let Err(e) = block_tx.send(AppEvent::NewBlock(block)) {
-                    eprintln!("[Archival] Failed to send block: {e}");
+                    log::error!("[Archival] Failed to send block: {e}");
                     break;
                 }
             }
             Err(e) => {
-                eprintln!("[Archival] Failed to fetch block #{height}: {e}");
+                log::error!("[Archival] Failed to fetch block #{height}: {e}");
                 // TODO: Send error event to App so it can show toast notification
                 // For now, just log the error
             }
         }
     }
 
-    eprintln!("[Archival] Archival fetch task shutting down");
+    log::debug!("[Archival] Archival fetch task shutting down");
     Ok(())
 }

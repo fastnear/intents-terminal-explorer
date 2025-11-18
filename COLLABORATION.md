@@ -217,7 +217,7 @@ cargo tauri dev
 - After changing CFBundleURLTypes in Info.plist
 - When deep links open wrong app version
 
-**Script Location**: Project root (`/Users/mikepurvis/near/fn/ratacat/tauri-dev.sh`)
+**Script Location**: Project root (`./tauri-dev.sh`)
 
 ---
 

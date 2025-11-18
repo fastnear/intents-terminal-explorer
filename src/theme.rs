@@ -22,6 +22,7 @@ pub struct Theme {
     pub accent: Rgb,        // Links / highlights
     pub accent_strong: Rgb, // Focused borders / active states
     pub sel_bg: Rgb,        // Selection background
+    pub hover_bg: Rgb,      // Hover background (Web/Tauri rows)
     pub success: Rgb,       // Success states
     pub warn: Rgb,          // Warning states
     pub error: Rgb,         // Error states
@@ -41,13 +42,14 @@ impl Default for Theme {
         Theme {
             bg: Rgb(0x0b, 0x0e, 0x14),            // #0b0e14 - backdrop
             panel: Rgb(0x0f, 0x13, 0x1a),         // #0f131a - unfocused pane bg
-            panel_alt: Rgb(0x12, 0x17, 0x22),     // #121722 - focused pane bg
+            panel_alt: Rgb(0x1a, 0x20, 0x30),     // #1a2030 - focused pane bg
             text: Rgb(0xe6, 0xed, 0xf3),          // #e6edf3 - primary text
             text_dim: Rgb(0xa2, 0xad, 0xbd),      // #a2adbd - secondary text
-            border: Rgb(0x1e, 0x24, 0x30),        // #1e2430 - unfocused borders
+            border: Rgb(0x5d, 0x63, 0x6d),        // #5d636d - unfocused borders
             accent: Rgb(0x66, 0xb3, 0xff),        // #66b3ff - links/highlights
             accent_strong: Rgb(0xff, 0xcc, 0x00), // #ffcc00 - focused borders (yellow)
             sel_bg: Rgb(0x1e, 0x2a, 0x3a),        // #1e2a3a - selection background
+            hover_bg: Rgb(0x15, 0x1b, 0x23),      // #151b23 - hover background
             success: Rgb(0x6b, 0xdc, 0x96),       // #6bdc96 - success
             warn: Rgb(0xff, 0xcc, 0x66),          // #ffcc66 - warnings
             error: Rgb(0xff, 0x6b, 0x6b),         // #ff6b6b - errors
@@ -63,11 +65,49 @@ impl Default for Theme {
     }
 }
 
+impl Rgb {
+    /// Convert RGB to CSS hex color string
+    pub fn to_css_hex(&self) -> String {
+        format!("#{:02x}{:02x}{:02x}", self.0, self.1, self.2)
+    }
+}
+
+impl Theme {
+    /// Export theme as CSS custom properties for web/Tauri
+    ///
+    /// Returns (var_name, hex_value) pairs that should be set on document.documentElement.style
+    pub fn to_css_vars(&self) -> Vec<(&'static str, String)> {
+        vec![
+            // Core colors
+            ("--bg", self.bg.to_css_hex()),
+            ("--panel", self.panel.to_css_hex()),
+            ("--panel-alt", self.panel_alt.to_css_hex()),
+            ("--fg", self.text.to_css_hex()),
+            ("--fg-dim", self.text_dim.to_css_hex()),
+            ("--border", self.border.to_css_hex()),
+            ("--accent", self.accent.to_css_hex()),
+            ("--accent-strong", self.accent_strong.to_css_hex()),
+            ("--sel-bg", self.sel_bg.to_css_hex()),
+            ("--hover-bg", self.hover_bg.to_css_hex()),
+            ("--success", self.success.to_css_hex()),
+            ("--warn", self.warn.to_css_hex()),
+            ("--error", self.error.to_css_hex()),
+            // JSON syntax highlighting
+            ("--json-bg", self.json_bg.to_css_hex()),
+            ("--json-key", self.json_key.to_css_hex()),
+            ("--json-string", self.json_string.to_css_hex()),
+            ("--json-number", self.json_number.to_css_hex()),
+            ("--json-bool", self.json_bool.to_css_hex()),
+            ("--json-struct", self.json_struct.to_css_hex()),
+        ]
+    }
+}
+
 // ---------- Ratatui helpers (native TUI) ----------
 
 #[cfg(feature = "native")]
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-pub mod rat {
+pub mod ratatui_helpers {
     use super::{Rgb, Theme};
     use ratatui::style::{Color, Modifier, Style};
 
@@ -101,111 +141,6 @@ pub mod rat {
             text: Style::default().fg(c(t.text)),
             text_dim: Style::default().fg(c(t.text_dim)),
             selected: Style::default().bg(c(t.sel_bg)).fg(c(t.text)),
-        }
-    }
-}
-
-// ---------- egui helpers (Web and Tauri) ----------
-
-#[cfg(feature = "egui-web")]
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub mod eg {
-    use super::{Rgb, Theme};
-    use egui::{Color32, Stroke};
-
-    /// Convert theme RGB to egui Color32
-    #[inline]
-    pub fn c(Rgb(r, g, b): Rgb) -> Color32 {
-        Color32::from_rgb(r, g, b)
-    }
-
-    /// Apply theme to egui context (call once at startup)
-    /// Tuned to match TUI feel: low-chrome panels, strong focus/selection, AA contrast
-    pub fn apply(ctx: &egui::Context, t: &Theme) {
-        use crate::theme::tokens;
-        use egui::{CornerRadius, FontId, Shadow, TextStyle};
-
-        let mut v = egui::Visuals::dark();
-        let tok = tokens::tokens();
-
-        // Override text color for consistency
-        v.override_text_color = Some(c(t.text));
-
-        // Panels & backgrounds - flat and minimal like TUI
-        v.panel_fill = c(t.panel);
-        v.window_fill = c(t.panel); // Avoid window chrome
-        v.faint_bg_color = c(t.panel_alt); // Hovered backgrounds + striped tables
-                                           // IMPORTANT: eframe clears with extreme_bg_color. Use true bg, not panel.
-        v.extreme_bg_color = c(t.bg);
-
-        // Corner radius & shadows - subtle like TUI (from tokens)
-        let window_radius = CornerRadius::same(tok.visuals.window_radius_px);
-        let widget_radius = CornerRadius::same(tok.visuals.widget_radius_px);
-        v.window_corner_radius = window_radius;
-        v.menu_corner_radius = window_radius;
-        v.widgets.noninteractive.corner_radius = widget_radius;
-        v.widgets.inactive.corner_radius = widget_radius;
-        v.widgets.hovered.corner_radius = widget_radius;
-        v.widgets.active.corner_radius = widget_radius;
-        v.window_shadow = Shadow::NONE;
-
-        // Widget fills - keep frames light and text readable
-        v.widgets.noninteractive.bg_fill = c(t.panel);
-        v.widgets.inactive.bg_fill = c(t.panel_alt);
-        v.widgets.hovered.bg_fill = c(t.panel_alt);
-        v.widgets.active.bg_fill = c(t.panel_alt);
-        v.widgets.open.bg_fill = c(t.panel_alt);
-
-        // Widget strokes (borders) - token-driven widths, match TUI border tone
-        let unfocus_stroke = Stroke::new(tok.visuals.unfocus_stroke_px, c(t.border));
-        let focus_stroke = Stroke::new(tok.visuals.focus_stroke_px, c(t.accent_strong));
-        v.widgets.noninteractive.bg_stroke = unfocus_stroke;
-        v.widgets.inactive.bg_stroke = unfocus_stroke;
-        v.widgets.hovered.bg_stroke = Stroke::new(tok.visuals.unfocus_stroke_px, c(t.accent));
-        v.widgets.active.bg_stroke = focus_stroke;
-
-        // Selection highlight - match TUI row highlight (panel_alt bg + strong stroke)
-        v.selection.bg_fill = c(t.panel_alt);
-        v.selection.stroke = Stroke::new(1.0, c(t.accent_strong));
-
-        // Links & state colors aligned to theme
-        v.hyperlink_color = c(t.accent);
-        v.warn_fg_color = c(t.warn);
-        v.error_fg_color = c(t.error);
-
-        // Apply visuals and spacing
-        let mut style = (*ctx.style()).clone();
-        style.visuals = v;
-
-        // Reduce chrome and match TUI density
-        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-        style.spacing.button_padding = egui::vec2(8.0, 4.0);
-        style.spacing.indent = 8.0;
-        style.interaction.tooltip_delay = 0.05; // Snappy tooltips
-
-        // Font sizes: ensure readable monospace + body (from tokens)
-        style.text_styles.insert(
-            TextStyle::Body,
-            FontId::proportional(tok.visuals.ui_font_px),
-        );
-        style.text_styles.insert(
-            TextStyle::Monospace,
-            FontId::monospace(tok.visuals.code_font_px),
-        );
-
-        ctx.set_style(style);
-
-        // Font customization only on native - WASM uses embedded fonts
-        // Calling set_fonts() in WASM can cause panics in FontImplCache
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let mut fonts = egui::FontDefinitions::default();
-            if let Some(fam) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
-                // Put system monospace ahead for crispness
-                fam.insert(0, "ui-monospace".into());
-                fam.insert(0, "monospace".into());
-            }
-            ctx.set_fonts(fonts);
         }
     }
 }
@@ -284,6 +219,16 @@ mod tests {
         assert!(
             ratio >= 4.5,
             "Selected text should meet WCAG AA (got {ratio:.2}:1, need >=4.5:1)"
+        );
+    }
+
+    #[test]
+    fn wcag_unfocused_border_visible() {
+        let t = Theme::default();
+        let ratio = contrast_ratio(t.border, t.panel);
+        assert!(
+            ratio >= 3.0,
+            "Unfocused border should be visible (got {ratio:.2}:1, need >=3.0:1)"
         );
     }
 
