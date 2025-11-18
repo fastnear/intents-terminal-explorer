@@ -54,12 +54,26 @@ pub fn payload_for(app: &App, pane: CopyPane) -> Option<Value> {
         CopyPane::Blocks => {
             // Use raw block JSON (same as fullscreen shows)
             let raw_json = app.get_raw_block_json();
-            serde_json::from_str::<Value>(&raw_json).ok()
+            match serde_json::from_str::<Value>(&raw_json) {
+                Ok(v) => Some(v),
+                Err(_) => {
+                    // Not valid JSON (e.g., "Waiting for blocks to load...")
+                    // Wrap it as text so copy still works
+                    Some(serde_json::json!({ "message": raw_json }))
+                }
+            }
         }
         CopyPane::Txs => {
             // Use raw transaction JSON (same as fullscreen shows)
             let raw_json = app.get_raw_tx_json();
-            serde_json::from_str::<Value>(&raw_json).ok()
+            match serde_json::from_str::<Value>(&raw_json) {
+                Ok(v) => Some(v),
+                Err(_) => {
+                    // Not valid JSON (e.g., "No transaction selected")
+                    // Wrap it as text so copy still works
+                    Some(serde_json::json!({ "message": raw_json }))
+                }
+            }
         }
         CopyPane::Details => {
             // Try to parse the details string as JSON

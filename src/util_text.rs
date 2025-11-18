@@ -93,3 +93,30 @@ pub fn format_near_compact(yoctonear: u128) -> String {
         format!("{yoctonear}y")
     }
 }
+
+/// Serialize u64 as string to avoid JavaScript number overflow
+pub fn serialize_u64_as_string<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&value.to_string())
+}
+
+/// Serialize Option<u64> as string to avoid JavaScript number overflow
+pub fn serialize_option_u64_as_string<S>(value: &Option<u64>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match value {
+        Some(v) => serializer.serialize_str(&v.to_string()),
+        None => serializer.serialize_none(),
+    }
+}
+
+/// Serialize u128 as string to avoid JavaScript number overflow
+pub fn serialize_u128_as_string<S>(value: &u128, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&value.to_string())
+}

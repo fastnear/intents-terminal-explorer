@@ -650,9 +650,19 @@ fn render_txs_pane(f: &mut Frame, area: Rect, app: &App) {
 // Helper function to render details pane
 fn render_details_pane(f: &mut Frame, area: Rect, app: &mut App) {
     // Update viewport height for windowed rendering
-    // Subtract 1 for top border/title (no bottom border)
-    let inner_height = area.height.saturating_sub(1) as usize;
+    // Ratatui block structure:
+    // - area.height = total available height
+    // - Borders::TOP takes 1 row from the area
+    // - Padding top:1 takes 1 row from INSIDE the border
+    // So content area = area.height - 1 (border) - 1 (padding) = area.height - 2
+    let inner_height = area.height.saturating_sub(2) as usize;
     app.set_details_viewport_lines(inner_height.max(1));
+
+    // Debug: log the heights
+    app.log_debug(format!(
+        "Details pane: area.height={}, inner_height={}, fullscreen={}",
+        area.height, inner_height, app.details_fullscreen()
+    ));
 
     let details_focused = app.pane() == 2;
 
@@ -666,10 +676,8 @@ fn render_details_pane(f: &mut Frame, area: Rect, app: &mut App) {
     // IMPORTANT: Buffer content is already set when entering fullscreen mode
     // No need to recompute on every frame - content is cached in details buffer
 
-    // Get windowed view (always use windowing to prevent UI freezes on huge JSON)
-    let details_text = app.details_window();
-
-    let theme = app.theme();
+    // Get pre-colorized windowed view (no re-colorization needed!)
+    let mut colored_lines = app.details_window_lines();
 
     // Get scroll info for title/status
     let (scroll_line, total_lines) = app.details_scroll_info();
@@ -716,21 +724,11 @@ fn render_details_pane(f: &mut Frame, area: Rect, app: &mut App) {
         get_border()
     };
 
-    // Check if the content looks like JSON before trying to colorize
-    let trimmed = details_text.trim();
-    let is_json = trimmed.starts_with('{') || trimmed.starts_with('[');
-
-
-    let mut colored_lines = if is_json {
-        // Use character-based colorizer with ANSI colors
-        crate::json_syntax::colorize_json(&details_text, theme)
-    } else {
-        // Not JSON (e.g., "No transaction selected"), just split into lines
-        details_text
-            .lines()
-            .map(|line| Line::from(line.to_string()))
-            .collect()
-    };
+    // Debug: log line counts
+    app.log_debug(format!(
+        "Details content: colored_lines={} (cached)",
+        colored_lines.len()
+    ));
 
     // Add truncation message if content was cut off
     if app.details_truncated() {
@@ -738,7 +736,7 @@ fn render_details_pane(f: &mut Frame, area: Rect, app: &mut App) {
         colored_lines.push(Line::from(""));
         colored_lines.push(Line::from(vec![
             Span::styled(
-                "… large output truncated at 5000 lines; press 'c' to copy full JSON",
+                "(truncated, 'c' to copy raw JSON)",
                 Style::default().fg(get_accent()).add_modifier(Modifier::DIM)
             )
         ]));
