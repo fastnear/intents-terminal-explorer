@@ -58,8 +58,8 @@ impl WasmApp {
         let (archival_tx, archival_rx) = unbounded_channel::<u64>();
         let archival_fetch_tx = Some(archival_tx);
 
-        // Initialize tx_details_fetch channel (WASM version)
-        let (tx_details_tx, tx_details_rx) = unbounded_channel::<String>();
+        // Initialize tx_details_fetch channel (WASM version) - (tx_hash, signer_id) tuples
+        let (tx_details_tx, tx_details_rx) = unbounded_channel::<(String, String)>();
 
         // Build config for the RPC poller.
         let cfg_default_filter = default_filter.clone();
@@ -121,9 +121,10 @@ impl WasmApp {
                 log::info!("[WasmApp] Archival fetch task spawned");
             }
 
-            // Spawn WASM tx_details_fetch task if auth token configured
+            // Spawn WASM tx_details_fetch task (requires Bearer token for FastNEAR RPC)
             if config.fastnear_auth_token.is_some() {
-                let api_url = config.fastnear_api_url.clone();
+                let rpc_url = config.near_node_url.clone();
+                let archival_url = config.archival_rpc_url.clone();
                 let auth_token = config.fastnear_auth_token.clone();
                 let tx_details_event_tx = event_tx.clone();
 
@@ -131,16 +132,19 @@ impl WasmApp {
                     nearx::tx_details_fetch_wasm::run_tx_details_fetch_wasm(
                         tx_details_rx,
                         tx_details_event_tx,
-                        api_url,
+                        rpc_url,
+                        archival_url,
                         auth_token,
                     ).await;
                 });
 
                 log::info!(
-                    "[WasmApp] Tx details fetch task spawned - API: {}, Auth: {}",
-                    config.fastnear_api_url,
-                    if config.fastnear_auth_token.is_some() { "present" } else { "missing" }
+                    "[WasmApp] Tx details fetch task spawned - RPC: {}, Archival: {}, Auth: present",
+                    config.near_node_url,
+                    config.archival_rpc_url.as_deref().unwrap_or("none")
                 );
+            } else {
+                log::warn!("[WasmApp] Tx details fetch task NOT spawned - auth token missing");
             }
 
             if let Err(e) = nearx::source_rpc::run_rpc(&config, event_tx).await {

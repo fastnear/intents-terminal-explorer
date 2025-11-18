@@ -67,22 +67,24 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Transaction details fetch channel (for FastNEAR API)
-    let (tx_details_tx, tx_details_rx) = unbounded_channel::<String>();
+    // Transaction details fetch channel (for NEAR RPC) - (tx_hash, signer_id) tuples
+    let (tx_details_tx, tx_details_rx) = unbounded_channel::<(String, String)>();
     let tx_details_task: Option<JoinHandle<()>> = if cfg.fastnear_auth_token.is_some() {
-        let api_url = cfg.fastnear_api_url.clone();
+        let rpc_url = cfg.near_node_url.clone();
+        let archival_rpc_url = cfg.archival_rpc_url.clone();
         let auth_token = cfg.fastnear_auth_token.clone();
         let tx_events = tx.clone();
         let timeout_ms = cfg.rpc_timeout_ms;
 
         log::info!(
-            "[main] Spawning tx_details_fetch task - API URL: {}, Auth: {}",
-            &api_url,
+            "[main] Spawning tx_details_fetch task - RPC: {}, Archival: {}, Auth: {}",
+            &rpc_url,
+            archival_rpc_url.as_deref().unwrap_or("none"),
             if auth_token.is_some() { "present" } else { "missing" }
         );
 
         Some(tokio::spawn(async move {
-            run_tx_details_fetch(api_url, auth_token, timeout_ms, tx_details_rx, tx_events).await;
+            run_tx_details_fetch(rpc_url, archival_rpc_url, auth_token, timeout_ms, tx_details_rx, tx_events).await;
         }))
     } else {
         log::info!("[main] No FastNEAR auth token, skipping tx_details_fetch task");
@@ -517,35 +519,41 @@ async fn handle_key(app: &mut App, k: KeyEvent, history: &History, jump_marks: &
 }
 
 
-/// Background task to fetch transaction details from FastNEAR API
+/// Background task to fetch transaction details from NEAR RPC
 async fn run_tx_details_fetch(
-    api_url: String,
+    rpc_url: String,
+    archival_rpc_url: Option<String>,
     auth_token: Option<String>,
     timeout_ms: u64,
-    mut rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<(String, String)>,
     tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
 ) {
-    log::info!("[tx_details_fetch] Starting FastNEAR API transaction details fetcher");
+    log::info!("[tx_details_fetch] Starting NEAR RPC transaction details fetcher");
 
-    while let Some(tx_hash) = rx.recv().await {
-        log::info!("[tx_details_fetch] Fetching details for tx: {}", tx_hash);
+    while let Some((tx_hash, signer_id)) = rx.recv().await {
+        log::info!("[tx_details_fetch] Fetching details for tx: {} (signer: {})", tx_hash, signer_id);
 
         match nearx::fastnear_api::fetch_transaction_details(
-            &api_url,
+            &rpc_url,
+            archival_rpc_url.as_deref(),
             &tx_hash,
+            &signer_id,
             timeout_ms,
             auth_token.as_deref(),
         ).await {
             Ok(tx_data) => {
+                // Auto-parse nested JSON (including EVENT_JSON: logs)
+                let parsed_data = nearx::json_auto_parse::auto_parse_nested_json(tx_data, 5, 0);
+
                 // Convert to pretty JSON string
-                let json_str = nearx::json_pretty::pretty_safe(&tx_data, 2, 100 * 1024);
-                
+                let json_str = nearx::json_pretty::pretty_safe(&parsed_data, 2, 100 * 1024);
+
                 // Send back to the app
                 let _ = tx.send(AppEvent::FetchedTxDetails {
                     tx_hash,
                     json_data: json_str,
                 });
-                
+
                 log::info!("[tx_details_fetch] Successfully fetched transaction details");
             }
             Err(e) => {

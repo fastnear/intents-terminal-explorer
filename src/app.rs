@@ -1,5 +1,5 @@
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
@@ -48,6 +48,10 @@ enum BlockChangeReason {
 }
 
 const BACK_WINDOW: usize = 50;
+
+// Maximum number of full transaction details to cache (bounded LRU)
+// At ~100KB per transaction, 256 entries = ~25MB worst case
+const MAX_FULL_TX_CACHE: usize = 256;
 const FRONT_WINDOW: u64 = 50;
 
 /// Backwards-fill slot for the block list (ancestors of the anchor block).
@@ -287,10 +291,15 @@ pub struct App {
     // FastNEAR API configuration
     fastnear_api_url: String,
     fastnear_auth_token: Option<String>,
-    tx_details_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>, // Channel to request tx details fetches
+    tx_details_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<(String, String)>>, // Channel to request tx details fetches (tx_hash, signer_id)
 
-    // Full transaction details cache (from FastNEAR API)
+    // Full transaction details cache (from FastNEAR API) - bounded LRU
     full_tx_cache: HashMap<String, String>, // tx_hash -> full JSON
+    full_tx_order: Vec<String>, // LRU tracking: oldest first, newest last
+
+    // In-flight request tracking for deduplication
+    tx_details_in_flight: HashSet<String>, // tx_hash currently being fetched
+    archival_in_flight: HashSet<u64>, // block heights currently being fetched
 
     // Filtered blocks cache to avoid recomputation
     filtered_blocks_cache: std::cell::RefCell<Option<(Vec<usize>, Option<usize>, usize)>>, // (indices, selected_idx, total)
@@ -347,7 +356,7 @@ impl App {
         archival_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<u64>>,
         fastnear_api_url: String,
         fastnear_auth_token: Option<String>,
-        tx_details_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+        tx_details_fetch_tx: Option<tokio::sync::mpsc::UnboundedSender<(String, String)>>,
     ) -> Self {
         let filter_compiled = if default_filter.is_empty() {
             CompiledFilter::default()
@@ -396,6 +405,9 @@ impl App {
             fastnear_auth_token,
             tx_details_fetch_tx,
             full_tx_cache: HashMap::new(),
+            full_tx_order: Vec::new(),
+            tx_details_in_flight: HashSet::new(),
+            archival_in_flight: HashSet::new(),
             filtered_blocks_cache: std::cell::RefCell::new(None),
             filter_cache_valid: std::cell::Cell::new(false),
             nav_list_cache: std::cell::RefCell::new(None),
@@ -858,18 +870,48 @@ impl App {
         None
     }
 
-    /// Request background fetch of full transaction details from FastNEAR API
-    pub fn request_tx_details_fetch(&mut self, tx_hash: String) {
+    /// Request background fetch of full transaction details via NEAR RPC
+    /// Uses deduplication to prevent redundant requests for the same transaction
+    pub fn request_tx_details_fetch(&mut self, tx_hash: String, signer_id: String) {
+        // Skip if already in flight (deduplication)
+        if self.tx_details_in_flight.contains(&tx_hash) {
+            self.log_debug(format!("Skipping tx details fetch for {} - already in flight", tx_hash));
+            return;
+        }
+
         if let Some(tx) = &self.tx_details_fetch_tx {
-            let _ = tx.send(tx_hash.clone());
-            self.log_debug(format!("Sent request to fetch full transaction details for: {}", tx_hash));
+            let _ = tx.send((tx_hash.clone(), signer_id.clone()));
+            self.tx_details_in_flight.insert(tx_hash.clone());
+            self.log_debug(format!("Sent request to fetch full transaction details for: {} (signer: {})", tx_hash, signer_id));
         } else {
             self.log_debug(format!("No tx details fetch channel available for: {}", tx_hash));
         }
     }
 
-    /// Store fetched transaction details in cache
+    /// Insert transaction details into bounded LRU cache with eviction
+    fn insert_full_tx(&mut self, tx_hash: String, json: String) {
+        // Remove from order if already exists (update LRU position)
+        self.full_tx_order.retain(|k| k != &tx_hash);
+
+        // Insert into cache and add to end of order (most recently used)
+        self.full_tx_cache.insert(tx_hash.clone(), json);
+        self.full_tx_order.push(tx_hash.clone());
+
+        // Evict oldest entries if over limit
+        while self.full_tx_order.len() > MAX_FULL_TX_CACHE {
+            if let Some(old_hash) = self.full_tx_order.first().cloned() {
+                self.full_tx_order.remove(0);
+                self.full_tx_cache.remove(&old_hash);
+                self.log_debug(format!("[LRU] Evicted old tx from cache: {}", old_hash));
+            }
+        }
+    }
+
+    /// Store fetched transaction details in bounded LRU cache
     pub fn store_tx_details(&mut self, tx_hash: String, full_json: String) {
+        // Remove from in-flight tracking
+        self.tx_details_in_flight.remove(&tx_hash);
+
         // Log cache state before insertion
         let json_preview = if full_json.len() > 100 {
             format!("{}...", &full_json[..100])
@@ -882,12 +924,13 @@ impl App {
             tx_hash, self.full_tx_cache.len(), json_preview
         ));
 
-        self.full_tx_cache.insert(tx_hash.clone(), full_json.clone());
+        // Insert with LRU eviction
+        self.insert_full_tx(tx_hash.clone(), full_json.clone());
 
         self.log_debug(format!(
-            "[store_tx_details] Cache size after: {}. Keys: {:?}",
+            "[store_tx_details] Cache size after: {}. Max: {}",
             self.full_tx_cache.len(),
-            self.full_tx_cache.keys().collect::<Vec<_>>()
+            MAX_FULL_TX_CACHE
         ));
 
         // If we're currently viewing this transaction in fullscreen, update display
@@ -1820,19 +1863,22 @@ impl App {
     }
 
     /// Request archival fetch for a block that's not in buffer or cache
+    /// Uses deduplication to prevent redundant requests for the same block height
     fn request_archival_block(&mut self, height: u64) {
+        // Skip if already in flight (deduplication)
+        if self.archival_in_flight.contains(&height) {
+            return;
+        }
+
         // Only request if we have archival fetch channel
         // Clone the sender to avoid borrow conflicts
         let tx = self.archival_fetch_tx.clone();
         if let Some(tx) = tx {
-            // Only request if not already loading this block
-            if self.loading_block != Some(height) {
-                self.loading_block = Some(height);
-                self.log_debug(format!("Requesting archival fetch for block #{height}"));
-                if let Err(e) = tx.send(height) {
-                    self.log_debug(format!("Failed to send archival fetch request: {e}"));
-                    self.loading_block = None;
-                }
+            self.archival_in_flight.insert(height);
+            self.log_debug(format!("Requesting archival fetch for block #{height}"));
+            if let Err(e) = tx.send(height) {
+                self.log_debug(format!("Failed to send archival fetch request: {e}"));
+                self.archival_in_flight.remove(&height);
             }
         }
     }
@@ -1876,9 +1922,11 @@ impl App {
                     self.set_details_json(raw);
                 }
 
-                // Pre-fetch full transaction details if not already cached
+                // Pre-fetch full transaction details if not already cached (requires auth token)
                 if self.fastnear_auth_token.is_some() && !self.full_tx_cache.contains_key(&tx.hash) {
-                    self.request_tx_details_fetch(tx.hash.clone());
+                    // Get signer_id from TxLite (may be None for old transactions)
+                    let signer_id = tx.signer_id.clone().unwrap_or_else(|| "unknown".to_string());
+                    self.request_tx_details_fetch(tx.hash.clone(), signer_id);
                     self.log_debug(format!("Pre-fetching transaction details for: {}", tx.hash));
                 }
             }
@@ -2051,6 +2099,9 @@ impl App {
 
                 // Commented out to reduce console spam
                 // log::info!("[on_event] Received NewBlock event for block #{}", height);
+
+                // Remove from in-flight tracking (archival deduplication)
+                self.archival_in_flight.remove(&height);
 
                 if self.loading_block == Some(height) {
                     self.loading_block = None;
