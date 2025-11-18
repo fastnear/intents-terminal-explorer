@@ -28,10 +28,13 @@ pub struct TxAction {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BlockRow {
+    #[serde(serialize_with = "crate::util_text::serialize_u64_as_string")]
     pub height: u64,
     pub hash: String,
+    #[serde(serialize_with = "crate::util_text::serialize_option_u64_as_string")]
     pub prev_height: Option<u64>,
     pub prev_hash: Option<String>,
+    #[serde(serialize_with = "crate::util_text::serialize_u64_as_string")]
     pub timestamp: u64,
     pub tx_count: usize,
     pub when: String,
@@ -45,6 +48,7 @@ pub struct TxLite {
     pub signer_id: Option<String>,
     pub receiver_id: Option<String>,
     pub actions: Option<Vec<ActionSummary>>,
+    #[serde(serialize_with = "crate::util_text::serialize_option_u64_as_string")]
     pub nonce: Option<u64>,
 }
 
@@ -73,13 +77,17 @@ pub enum ActionSummary {
         method_name: String,
         _args_base64: String,
         args_decoded: crate::near_args::DecodedArgs,
+        #[serde(serialize_with = "crate::util_text::serialize_u64_as_string")]
         gas: u64,
+        #[serde(serialize_with = "crate::util_text::serialize_u128_as_string")]
         deposit: u128,
     },
     Transfer {
+        #[serde(serialize_with = "crate::util_text::serialize_u128_as_string")]
         deposit: u128,
     },
     Stake {
+        #[serde(serialize_with = "crate::util_text::serialize_u128_as_string")]
         stake: u128,
         public_key: String,
     },

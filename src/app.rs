@@ -72,6 +72,10 @@ pub enum BackSlotState {
 pub struct DetailsBuffer {
     /// Full pretty-printed JSON (or other text)
     text: String,
+    /// Pre-colorized lines (cached to avoid re-colorizing on every frame)
+    colored_lines: Vec<ratatui::text::Line<'static>>,
+    /// Whether the content is JSON (determines if we colorize)
+    is_json: bool,
     /// Starting byte index of each line in `text`
     line_offsets: Vec<usize>,
     /// Current top visible line
@@ -93,6 +97,8 @@ impl DetailsBuffer {
     pub fn new() -> Self {
         Self {
             text: String::new(),
+            colored_lines: Vec::new(),
+            is_json: false,
             line_offsets: vec![0],
             scroll_line: 0,
             truncated: false,
@@ -100,26 +106,44 @@ impl DetailsBuffer {
     }
 
     /// Replace buffer contents and rebuild line index
-    pub fn set_text(&mut self, text: String) {
+    pub fn set_text(&mut self, text: String, theme: &crate::theme::Theme) {
         self.text = text;
+
+        // Check if the content looks like JSON
+        let trimmed = self.text.trim();
+        self.is_json = trimmed.starts_with('{') || trimmed.starts_with('[');
+
+        // Colorize the text once and cache the result
+        if self.is_json {
+            self.colored_lines = crate::json_syntax::colorize_json(&self.text, theme);
+        } else {
+            // Not JSON, just split into plain lines
+            self.colored_lines = self.text
+                .lines()
+                .map(|line| ratatui::text::Line::from(line.to_string()))
+                .collect();
+        }
+
+        // Check if we hit the line limit
+        if self.colored_lines.len() > Self::MAX_LINES {
+            self.colored_lines.truncate(Self::MAX_LINES);
+            self.truncated = true;
+        } else {
+            self.truncated = false;
+        }
+
+        // Build line offsets (not needed for windowing colored lines, but kept for compatibility)
         self.line_offsets.clear();
         self.line_offsets.push(0);
-
         let mut line_count = 1;
         for (i, b) in self.text.bytes().enumerate() {
             if b == b'\n' {
                 self.line_offsets.push(i + 1);
                 line_count += 1;
                 if line_count >= Self::MAX_LINES {
-                    self.truncated = true;
                     break;
                 }
             }
-        }
-
-        // If we didn't reach MAX_LINES, we're not truncated
-        if line_count < Self::MAX_LINES {
-            self.truncated = false;
         }
 
         self.scroll_line = 0;
@@ -130,7 +154,7 @@ impl DetailsBuffer {
     }
 
     pub fn total_lines(&self) -> usize {
-        self.line_offsets.len()
+        self.colored_lines.len()
     }
 
     pub fn current_scroll_line(&self) -> usize {
@@ -152,7 +176,7 @@ impl DetailsBuffer {
         if self.text.is_empty() || max_lines == 0 {
             return String::new();
         }
-        let total_lines = self.line_offsets.len();
+        let total_lines = self.colored_lines.len();
         let start_line = self.scroll_line.min(total_lines.saturating_sub(1));
         let end_line = (start_line + max_lines).min(total_lines);
 
@@ -165,12 +189,26 @@ impl DetailsBuffer {
         self.text[start_idx..end_idx].to_string()
     }
 
+    /// Return a window of pre-colorized lines (no re-colorization needed)
+    pub fn window_lines(&self, max_lines: usize) -> Vec<ratatui::text::Line<'static>> {
+        if self.colored_lines.is_empty() || max_lines == 0 {
+            return Vec::new();
+        }
+
+        let total_lines = self.colored_lines.len();
+        let start_line = self.scroll_line.min(total_lines.saturating_sub(1));
+        let end_line = (start_line + max_lines).min(total_lines);
+
+        // Clone the slice of lines we need (they're already colorized)
+        self.colored_lines[start_line..end_line].to_vec()
+    }
+
     /// Scroll by delta lines (positive = down, negative = up)
     pub fn scroll_lines(&mut self, delta: isize, viewport_lines: usize) {
-        if self.text.is_empty() {
+        if self.colored_lines.is_empty() {
             return;
         }
-        let total_lines = self.line_offsets.len();
+        let total_lines = self.colored_lines.len();
         let cur = self.scroll_line as isize;
 
         // Calculate the maximum scroll position based on viewport
@@ -190,7 +228,7 @@ impl DetailsBuffer {
     }
 
     pub fn scroll_to_bottom(&mut self, viewport_lines: usize) {
-        let total = self.line_offsets.len();
+        let total = self.colored_lines.len();
         if total > viewport_lines {
             self.scroll_line = total - viewport_lines;
         } else {
@@ -297,7 +335,7 @@ impl App {
             sel_tx: 0, // Start in auto-follow mode
             details_buf: {
                 let mut buf = DetailsBuffer::new();
-                buf.set_text("(No blocks yet)".into());
+                buf.set_text("(No blocks yet)".into(), &crate::theme::Theme::default());
                 buf
             },
             details_viewport_lines: 32, // Sensible default, updated by renderer
@@ -679,11 +717,24 @@ impl App {
         if let Some(block) = self.current_block() {
             if let Some(tx) = block.transactions.get(self.sel_tx) {
                 // Serialize with 100KB truncation to prevent UI freezing on massive transactions
-                let val = serde_json::to_value(tx).unwrap_or(serde_json::Value::Null);
-                return crate::json_pretty::pretty_safe(&val, 2, 100 * 1024);
+                match serde_json::to_value(tx) {
+                    Ok(val) => {
+                        if val.is_null() {
+                            "Error: Transaction serialized to null".to_string()
+                        } else {
+                            crate::json_pretty::pretty_safe(&val, 2, 100 * 1024)
+                        }
+                    }
+                    Err(e) => {
+                        format!("Error: Failed to serialize transaction - {}", e)
+                    }
+                }
+            } else {
+                format!("Transaction {} not found in block", self.sel_tx)
             }
+        } else {
+            "No block selected".to_string()
         }
-        "No transaction selected".to_string()
     }
 
     /// Set the active theme (for runtime theme switching)
@@ -693,6 +744,11 @@ impl App {
             #[cfg(feature = "native")]
             {
                 self.rat_styles_cache = None; // Invalidate cached styles
+            }
+            // Recolorize the details buffer with the new theme
+            if !self.details_buf.is_empty() {
+                let text = self.details_buf.full_text().to_string();
+                self.details_buf.set_text(text, &self.theme);
             }
         }
     }
@@ -959,6 +1015,10 @@ impl App {
             self.details_fullscreen = false;
             self.fullscreen_content_type = FullscreenContentType::ParsedDetails;
             self.fullscreen_mode = FullscreenMode::Scroll;
+
+            // Restore the parsed transaction details
+            self.select_tx();
+
             self.log_debug("Exited fullscreen, back to parsed details".to_string());
         } else {
             // Enter fullscreen - content depends on which pane is focused, start in Scroll mode
@@ -2082,7 +2142,7 @@ impl App {
 
     /// Set Details pane content (replaces full buffer)
     pub fn set_details_json(&mut self, json: String) {
-        self.details_buf.set_text(json);
+        self.details_buf.set_text(json, &self.theme);
     }
 
     /// Set viewport size (called by renderer based on pane height)
@@ -2098,6 +2158,11 @@ impl App {
     /// Get windowed view of Details (for rendering)
     pub fn details_window(&self) -> String {
         self.details_buf.window(self.details_viewport_lines)
+    }
+
+    /// Get windowed view of pre-colorized lines (for efficient rendering)
+    pub fn details_window_lines(&self) -> Vec<ratatui::text::Line<'static>> {
+        self.details_buf.window_lines(self.details_viewport_lines)
     }
 
     /// Check if details content was truncated

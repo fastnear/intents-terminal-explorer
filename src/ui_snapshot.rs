@@ -284,35 +284,55 @@ pub fn apply_ui_action(app: &mut App, action: UiAction) {
 }
 
 fn handle_key(app: &mut App, code: &str, _ctrl: bool, shift: bool) {
-    // Special handling when Details is fullscreen: arrows scroll the buffer
+    // Special handling when Details is fullscreen
     if app.details_fullscreen() {
+        // Check if we're in Scroll mode (arrows scroll JSON) or Navigate mode (arrows navigate lists)
+        if app.fullscreen_mode() == crate::app::FullscreenMode::Scroll {
+            // Scroll mode: arrows scroll the JSON content
+            match code {
+                "ArrowUp" | "k" | "K" => {
+                    app.scroll_details_lines(-1);
+                    return;
+                }
+                "ArrowDown" | "j" | "J" => {
+                    app.scroll_details_lines(1);
+                    return;
+                }
+                "ArrowRight" | "l" | "L" => {
+                    // Batch scroll down by 10 lines
+                    app.scroll_details_lines(10);
+                    return;
+                }
+                "ArrowLeft" | "h" | "H" => {
+                    // Batch scroll up by 10 lines
+                    app.scroll_details_lines(-10);
+                    return;
+                }
+                "PageUp" => {
+                    let n = app.details_viewport_lines() as isize;
+                    app.scroll_details_lines(-n);
+                    return;
+                }
+                "PageDown" => {
+                    let n = app.details_viewport_lines() as isize;
+                    app.scroll_details_lines(n);
+                    return;
+                }
+                "Home" => {
+                    app.details_home();
+                    return;
+                }
+                "End" => {
+                    app.details_end();
+                    return;
+                }
+                _ => {}
+            }
+        }
+        // In Navigate mode, let arrow keys fall through to normal handling below
+
+        // Common fullscreen keys (work in both modes)
         match code {
-            "ArrowUp" | "k" | "K" => {
-                app.scroll_details_lines(-1);
-                return;
-            }
-            "ArrowDown" | "j" | "J" => {
-                app.scroll_details_lines(1);
-                return;
-            }
-            "PageUp" => {
-                let n = app.details_viewport_lines() as isize;
-                app.scroll_details_lines(-n);
-                return;
-            }
-            "PageDown" => {
-                let n = app.details_viewport_lines() as isize;
-                app.scroll_details_lines(n);
-                return;
-            }
-            "Home" => {
-                app.details_home();
-                return;
-            }
-            "End" => {
-                app.details_end();
-                return;
-            }
             " " => {
                 // Space exits fullscreen
                 app.toggle_details_fullscreen();
@@ -323,7 +343,25 @@ fn handle_key(app: &mut App, code: &str, _ctrl: bool, shift: bool) {
                 app.toggle_details_fullscreen();
                 return;
             }
-            _ => return, // Swallow all other keys in fullscreen
+            "Tab" => {
+                // Tab toggles between Scroll and Navigate modes in fullscreen
+                app.toggle_fullscreen_mode();
+                return;
+            }
+            _ => {
+                // In Navigate mode, let arrow keys fall through to normal handling
+                if app.fullscreen_mode() == crate::app::FullscreenMode::Navigate {
+                    match code {
+                        "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" |
+                        "j" | "k" | "h" | "l" | "J" | "K" | "H" | "L" => {
+                            // Don't return - let these fall through
+                        }
+                        _ => return, // Other keys are still swallowed
+                    }
+                } else {
+                    return; // In Scroll mode, swallow all other keys
+                }
+            }
         }
     }
 
