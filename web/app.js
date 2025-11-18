@@ -76,14 +76,15 @@ function apply(action) {
   render(lastSnapshot);
 }
 
-// Simple render loop - let DOM handle diffing
+// Event-driven render with throttled polling
+// Poll at 10 Hz (100ms) instead of 60 FPS to avoid wasteful serialization
 function startRenderLoop() {
-  function loop() {
+  function pollAndRender() {
     const snap = snapshot();  // Drains events from RPC poller
-    render(snap);            // DOM will optimize if nothing changed
-    requestAnimationFrame(loop);
+    render(snap);             // Update DOM with latest state
+    setTimeout(pollAndRender, 100);  // 10 Hz polling
   }
-  requestAnimationFrame(loop);
+  pollAndRender();
 }
 
 /* ---------- JSON syntax highlight ---------- */
