@@ -47,9 +47,6 @@ enum BlockChangeReason {
     FilterChange, // Filter was applied/cleared (try to preserve tx)
 }
 
-const BACK_WINDOW: usize = 50;
-const FRONT_WINDOW: u64 = 50;
-
 /// Backwards-fill slot for the block list (ancestors of the anchor block).
 #[derive(Debug, Clone)]
 pub struct BackSlot {
@@ -321,7 +318,7 @@ impl App {
             back_slots: Vec::new(),
             back_anchor_height: None,
             back_next_request_at: None,
-            back_slots_target: BACK_WINDOW,
+            back_slots_target: crate::constants::app::BACK_WINDOW,
             debug_log: Vec::new(),
             debug_visible: false, // Hidden by default
             shortcuts_visible: false, // Hidden by default (Web/Tauri only for now)
@@ -755,7 +752,7 @@ impl App {
     }
 
     pub fn log_debug(&mut self, msg: String) {
-        const MAX_LOG_ENTRIES: usize = 50;
+        use crate::constants::app::MAX_DEBUG_LOG_LINES;
 
         // Write to file for debugging (native only - WASM doesn't have filesystem)
         #[cfg(not(target_arch = "wasm32"))]
@@ -774,7 +771,7 @@ impl App {
 
         // Also keep in memory for debug panel
         self.debug_log.push(msg);
-        if self.debug_log.len() > MAX_LOG_ENTRIES {
+        if self.debug_log.len() > MAX_DEBUG_LOG_LINES {
             self.debug_log.remove(0);
         }
     }
@@ -782,8 +779,7 @@ impl App {
     // ----- block cache methods -----
     /// Cache selected block and ±50 blocks around it for context navigation
     fn cache_block_with_context(&mut self, center_height: u64) {
-        use crate::constants::app::CACHE_CONTEXT_BLOCKS;
-        const MAX_TOTAL_CACHED: usize = 300; // Safety limit (3× context window)
+        use crate::constants::app::{CACHE_CONTEXT_BLOCKS, MAX_TOTAL_CACHED};
 
         // Find the center block's index
         let center_idx = match self.find_block_index(Some(center_height)) {
@@ -791,7 +787,7 @@ impl App {
             None => return, // Center block not in buffer, can't cache context
         };
 
-        // Cache blocks in range [center - 12, center + 12]
+        // Cache blocks in range [center - 50, center + 50] (±CACHE_CONTEXT_BLOCKS)
         let start_idx = center_idx.saturating_sub(CACHE_CONTEXT_BLOCKS);
         let end_idx = (center_idx + CACHE_CONTEXT_BLOCKS + 1).min(self.blocks.len());
 
@@ -836,38 +832,6 @@ impl App {
     /// Check if a block is available for viewing (in main buffer or cache)
     pub fn is_block_available(&self, height: u64) -> bool {
         self.find_block_index(Some(height)).is_some() || self.cached_blocks.contains_key(&height)
-    }
-
-    /// Eagerly fill ±50 block window around selected height via archival RPC
-    ///
-    /// For each height in [center-50, center+50]:
-    /// - If block is available (in buffer or cache): skip
-    /// - If block is missing: request from archival RPC
-    ///
-    /// This enables smooth navigation through historical blocks without gaps.
-    pub fn ensure_block_window(&mut self, center_height: u64) {
-        use crate::constants::app::ARCHIVAL_CONTEXT_BLOCKS;
-
-        let start = center_height.saturating_sub(ARCHIVAL_CONTEXT_BLOCKS);
-        let end = center_height + ARCHIVAL_CONTEXT_BLOCKS;
-
-        let mut requested_count = 0;
-        for h in start..=end {
-            if !self.is_block_available(h) {
-                self.request_archival_block(h);
-                requested_count += 1;
-            }
-        }
-
-        // Always cache what we already have
-        self.cache_block_with_context(center_height);
-
-        if requested_count > 0 {
-            self.log_debug(format!(
-                "Requested {} missing blocks in window [{}..={}] around #{}",
-                requested_count, start, end, center_height
-            ));
-        }
     }
 
     /// Eagerly fill ±50 block window using canonical chain-walking on every selection change.
@@ -989,9 +953,9 @@ impl App {
                     let raw = self.get_raw_block_json();
                     self.set_details_json(raw);
 
-                    // Eagerly fill ±50 block window
+                    // Eagerly fill ±50 block window (chain-walk backfill)
                     if let Some(block) = self.current_block() {
-                        self.ensure_block_window(block.height);
+                        self.ensure_block_window_by_chain(block.height);
                     }
                 }
                 FullscreenContentType::TransactionRawJson => {
@@ -1236,8 +1200,7 @@ impl App {
                         if self.is_block_available(new_height) {
                             self.sel_block_height = Some(new_height);
                             self.follow_blocks_latest = false; // User navigation disables auto-follow
-                            self.cache_block_with_context(new_height);
-                            self.ensure_block_window_by_chain(new_height); // Chain-walk backfill
+                            self.ensure_block_window_by_chain(new_height); // Chain-walk backfill (also caches)
                             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                             self.log_debug(format!("Blocks UP -> #{new_height}"));
                         } else {
@@ -1251,7 +1214,7 @@ impl App {
                     let new_height = nav_list[0];
                     self.sel_block_height = Some(new_height);
                     self.follow_blocks_latest = false; // User navigation disables auto-follow
-                    self.cache_block_with_context(new_height);
+                    self.ensure_block_window_by_chain(new_height); // Chain-walk backfill (also caches)
                     self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                     self.log_debug(format!(
                         "Blocks UP -> not in list, jump to newest #{new_height}"
@@ -1353,8 +1316,7 @@ impl App {
                         if self.is_block_available(new_height) {
                             self.sel_block_height = Some(new_height);
                             self.follow_blocks_latest = false; // User navigation disables auto-follow
-                            self.cache_block_with_context(new_height);
-                            self.ensure_block_window_by_chain(new_height); // Chain-walk backfill
+                            self.ensure_block_window_by_chain(new_height); // Chain-walk backfill (also caches)
                             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                             self.log_debug(format!("Blocks DOWN -> #{new_height}"));
                         } else {
@@ -1368,7 +1330,7 @@ impl App {
                     let new_height = nav_list[0];
                     self.sel_block_height = Some(new_height);
                     self.follow_blocks_latest = false; // User navigation disables auto-follow
-                    self.cache_block_with_context(new_height);
+                    self.ensure_block_window_by_chain(new_height); // Chain-walk backfill (also caches)
                     self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
                     self.log_debug(format!(
                         "Blocks DOWN -> not in list, jump to newest #{new_height}"
@@ -1398,8 +1360,7 @@ impl App {
         if let Some(&height) = nav_list.get(idx) {
             self.sel_block_height = Some(height);
             self.follow_blocks_latest = false; // User interaction disables auto-follow
-            self.cache_block_with_context(height);
-            self.ensure_block_window_by_chain(height); // Chain-walk backfill
+            self.ensure_block_window_by_chain(height); // Chain-walk backfill (also caches)
             self.validate_and_refresh_tx(BlockChangeReason::ManualNav);
             self.log_debug(format!("Mouse select block #{height} (idx {idx})"));
         }
@@ -1535,6 +1496,11 @@ impl App {
 
     /// Generic line scrolling based on current focused pane (for wheel events).
     /// Positive delta = down/next, negative delta = up/prev.
+    ///
+    /// Implementation note: This calls up()/down() in a loop to reuse existing
+    /// navigation logic (block selection, tx refresh, caching, etc.). Works well
+    /// for typical wheel deltas (±1 to ±3), but could be optimized for large
+    /// deltas (e.g., touchpad flings) if scroll performance becomes an issue.
     pub fn scroll_lines(&mut self, delta: i32) {
         if delta == 0 {
             return;
@@ -1746,7 +1712,7 @@ impl App {
                     let anchor_height = self.current_block().map(|b| b.height);
                     if let Some(anchor_h) = anchor_height {
                         let ahead = height.saturating_sub(anchor_h);
-                        if ahead > FRONT_WINDOW {
+                        if ahead > crate::constants::app::FRONT_WINDOW {
                             self.live_updates_paused = true;
                             self.log_debug(format!(
                                 "[live-paused] pausing at block #{} ({} ahead of anchor #{}) – press ← in Blocks to resume",
@@ -1852,10 +1818,6 @@ impl App {
                     self.validate_and_refresh_tx(BlockChangeReason::AutoFollow);
                 }
             }
-        }
-
-        // Keep archival window filled when pinned to a specific block
-        if !self.follow_blocks_latest {
         }
     }
 
